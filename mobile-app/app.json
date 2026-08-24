@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "NexPOS",
+    "slug": "nexpos-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.nexpos.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#1565C0"
+      }
+    },
+    "extra": {
+      "apiBaseUrl": ""
+    },
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      "expo-asset",
+      "expo-sqlite"
+    ]
+  }
+}

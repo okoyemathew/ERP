@@ -1,0 +1,88 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# Prisma/local secrets
+*.pem
+*.key
+
+# Builds
+dist/
+build/
+**/dist/
+**/build/
+coverage/
+
+# Expo
+.expo/
+**/.expo/
+.expo-shared/
+**/.expo-shared/
+web-build/
+
+# React Native generated files
+android/.gradle/
+android/app/build/
+android/build/
+ios/build/
+**/android/.gradle/
+**/android/app/build/
+**/android/build/
+**/ios/build/
+.nyc_output/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+.agents/
+.claude/
+.windsurf/
+**/.agents/
+**/.claude/
+**/.windsurf/
+
+# Temporary files
+*.tmp
+*.temp
+.temp/
+.tmp/
+tmp/
+pids/
+*.pid
+*.seed
+*.pid.lock
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Local databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Certificates / signing files
+*.keystore
+*.jks
+
+# Generated Prisma client/output, if configured locally
+generated/prisma/
+backend/generated/prisma/
