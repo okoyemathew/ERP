@@ -7,7 +7,9 @@ import { ConfigService } from '@nestjs/config';
 import {
   AuditAction,
   EmployeeStatus,
+  PaymentMethod,
   Prisma,
+  SaleStatus,
   SessionStatus,
   UserStatus,
 } from '@prisma/client';
@@ -588,43 +590,23 @@ export class EmployeeService {
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy === 'totalAmount' ? 'totalAmount' : 'saleDate';
     const sortOrder = query.sortOrder ?? 'desc';
-    const where: Prisma.SaleWhereInput = {
-      businessId,
-      userId: employee.userId,
-      deletedAt: null,
-      ...(query.startDate || query.endDate
-        ? { saleDate: this.dateRange(query) }
-        : {}),
-      ...(query.search
-        ? {
-            OR: [
-              {
-                saleNumber: {
-                  contains: query.search.trim(),
-                  mode: Prisma.QueryMode.insensitive,
-                },
-              },
-              {
-                remarks: {
-                  contains: query.search.trim(),
-                  mode: Prisma.QueryMode.insensitive,
-                },
-              },
-            ],
-          }
-        : {}),
-    };
+    const where = this.buildEmployeeSalesWhere(businessId, employee.userId, query);
+    const completedWhere = {
+      ...where,
+      status: SaleStatus.COMPLETED,
+    } satisfies Prisma.SaleWhereInput;
 
-    const [total, aggregate, items] = await Promise.all([
+    const [total, completedSalesCount, aggregate, items] = await Promise.all([
       this.prisma.sale.count({ where }),
+      this.prisma.sale.count({ where: completedWhere }),
       this.prisma.sale.aggregate({
-        where,
+        where: completedWhere,
         _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
         _avg: { totalAmount: true },
       }),
       this.prisma.sale.findMany({
         where,
-        include: { customer: true, payments: true, items: true },
+        include: this.employeeSaleInclude(),
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
         take: limit,
@@ -635,13 +617,116 @@ export class EmployeeService {
       employee: this.basicEmployee(employee),
       summary: {
         transactions: total,
-        totalSalesValue: aggregate._sum.totalAmount ?? 0,
-        totalCollected: aggregate._sum.amountPaid ?? 0,
-        totalBalanceDue: aggregate._sum.balanceDue ?? 0,
-        averageSaleValue: aggregate._avg.totalAmount ?? 0,
+        completedSalesCount,
+        totalSalesValue: aggregate._sum.totalAmount ?? new Prisma.Decimal(0),
+        totalCollected: aggregate._sum.amountPaid ?? new Prisma.Decimal(0),
+        totalBalanceDue: aggregate._sum.balanceDue ?? new Prisma.Decimal(0),
+        averageSaleValue: aggregate._avg.totalAmount ?? new Prisma.Decimal(0),
       },
-      data: items,
+      data: items.map((sale) => this.formatEmployeeSale(sale)),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async printSalesRecord(
+    businessId: string,
+    id: string,
+    query: EmployeeActivityQueryDto = {},
+  ) {
+    const employee = await this.getEmployeeContext(businessId, id);
+    const where = this.buildEmployeeSalesWhere(businessId, employee.userId, {
+      ...query,
+      status: SaleStatus.COMPLETED,
+      limit: 200,
+    });
+
+    const [business, aggregate, sales] = await Promise.all([
+      this.prisma.business.findUnique({
+        where: { id: businessId },
+        select: {
+          name: true,
+          address: true,
+          phone: true,
+          currency: true,
+        },
+      }),
+      this.prisma.sale.aggregate({
+        where,
+        _count: { id: true },
+        _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
+      }),
+      this.prisma.sale.findMany({
+        where,
+        include: this.employeeSaleInclude(),
+        orderBy: { saleDate: query.sortOrder ?? 'desc' },
+        take: 200,
+      }),
+    ]);
+
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    const formattedSales = sales.map((sale) => this.formatEmployeeSale(sale));
+    const employeeName =
+      `${employee.firstName} ${employee.lastName}`.trim() ||
+      employee.user.username;
+    const period =
+      query.startDate || query.endDate
+        ? `${query.startDate ? query.startDate.toISOString().slice(0, 10) : 'Beginning'} to ${query.endDate ? query.endDate.toISOString().slice(0, 10) : 'Now'}`
+        : 'All dates';
+    const total = aggregate._sum.totalAmount ?? new Prisma.Decimal(0);
+    const lines = [
+      business.name,
+      business.address ?? null,
+      business.phone ? `Phone: ${business.phone}` : null,
+      '',
+      'Employee Sales Record',
+      `Employee: ${employeeName}`,
+      `Employee Code: ${employee.employeeCode}`,
+      `Period: ${period}`,
+      `Sales Count: ${aggregate._count.id}`,
+      `Total Sales: ${this.money(total, business.currency)}`,
+      `Total Collected: ${this.money(aggregate._sum.amountPaid ?? 0, business.currency)}`,
+      `Total Balance: ${this.money(aggregate._sum.balanceDue ?? 0, business.currency)}`,
+      '',
+      'Sales',
+      ...formattedSales.map((sale) => {
+        const primaryPayment = sale.payments[0]?.paymentMethod ?? 'UNPAID';
+        const customer =
+          sale.customer?.companyName ||
+          [sale.customer?.firstName, sale.customer?.lastName]
+            .filter(Boolean)
+            .join(' ') ||
+          'Walk-in Customer';
+
+        return [
+          sale.saleNumber,
+          new Date(sale.saleDate).toISOString().slice(0, 10),
+          customer,
+          primaryPayment,
+          this.money(sale.totalAmount, business.currency),
+        ].join(' | ');
+      }),
+    ]
+      .filter((line): line is string => line !== null)
+      .join('\n');
+
+    return {
+      format: 'employee-sales-record-v1',
+      text: lines,
+      data: {
+        business,
+        employee: this.basicEmployee(employee),
+        period,
+        summary: {
+          salesCount: aggregate._count.id,
+          totalSalesValue: total,
+          totalCollected: aggregate._sum.amountPaid ?? new Prisma.Decimal(0),
+          totalBalanceDue: aggregate._sum.balanceDue ?? new Prisma.Decimal(0),
+        },
+        sales: formattedSales,
+      },
     };
   }
 
@@ -936,6 +1021,174 @@ export class EmployeeService {
       ...(query.startDate ? { gte: query.startDate } : {}),
       ...(query.endDate ? { lte: query.endDate } : {}),
     };
+  }
+
+  private buildEmployeeSalesWhere(
+    businessId: string,
+    userId: string,
+    query: EmployeeActivityQueryDto,
+  ): Prisma.SaleWhereInput {
+    const search = query.search?.trim();
+    const numericSearch = search && !Number.isNaN(Number(search)) ? search : null;
+    const paymentSearch =
+      search
+        ?.trim()
+        .toUpperCase()
+        .replace(/[\s-]+/g, '_') ?? '';
+    const paymentMethodSearch = (
+      Object.values(PaymentMethod) as PaymentMethod[]
+    ).find((method) => method === paymentSearch);
+
+    return {
+      businessId,
+      userId,
+      deletedAt: null,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.paymentMethod
+        ? { payments: { some: { paymentMethod: query.paymentMethod } } }
+        : {}),
+      ...(query.startDate || query.endDate
+        ? { saleDate: this.dateRange(query) }
+        : {}),
+      ...(search
+        ? {
+            OR: [
+              {
+                saleNumber: {
+                  contains: search,
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                remarks: {
+                  contains: search,
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                customer: {
+                  firstName: {
+                    contains: search,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+              },
+              {
+                customer: {
+                  lastName: {
+                    contains: search,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+              },
+              {
+                customer: {
+                  companyName: {
+                    contains: search,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+              },
+              {
+                customer: {
+                  phone: {
+                    contains: search,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+              },
+              {
+                payments: {
+                  some: {
+                    referenceNumber: {
+                      contains: search,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                },
+              },
+              ...(paymentMethodSearch
+                ? [
+                    {
+                      payments: {
+                        some: { paymentMethod: paymentMethodSearch },
+                      },
+                    },
+                  ]
+                : []),
+              ...(numericSearch
+                ? [
+                    {
+                      totalAmount: new Prisma.Decimal(numericSearch),
+                    },
+                  ]
+                : []),
+            ],
+          }
+        : {}),
+    };
+  }
+
+  private employeeSaleInclude() {
+    return {
+      customer: true,
+      user: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          username: true,
+        },
+      },
+      payments: { orderBy: { paymentDate: 'asc' } },
+      items: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          product: {
+            select: { id: true, name: true, sku: true, barcode: true },
+          },
+        },
+      },
+      receipt: { select: { id: true, receiptNumber: true } },
+    } satisfies Prisma.SaleInclude;
+  }
+
+  private formatEmployeeSale(
+    sale: Prisma.SaleGetPayload<{
+      include: ReturnType<EmployeeService['employeeSaleInclude']>;
+    }>,
+  ) {
+    return {
+      id: sale.id,
+      saleNumber: sale.saleNumber,
+      customerId: sale.customerId,
+      userId: sale.userId,
+      subtotal: sale.subtotal,
+      discountAmount: sale.discountAmount,
+      taxAmount: sale.taxAmount,
+      totalAmount: sale.totalAmount,
+      amountPaid: sale.amountPaid,
+      balanceDue: sale.balanceDue,
+      paymentStatus: sale.paymentStatus,
+      status: sale.status,
+      remarks: sale.remarks,
+      saleDate: sale.saleDate,
+      createdAt: sale.createdAt,
+      updatedAt: sale.updatedAt,
+      customer: sale.customer,
+      user: sale.user,
+      items: sale.items,
+      payments: sale.payments,
+      receipt: sale.receipt,
+    };
+  }
+
+  private money(value: Prisma.Decimal | number | string, currency = 'USD') {
+    const amount = Number(value);
+    return `${currency} ${amount.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
   }
 
   private basicEmployee(employee: {

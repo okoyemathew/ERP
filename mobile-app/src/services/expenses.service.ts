@@ -1,6 +1,6 @@
 import { endpoints } from "@/api/endpoints";
 import { api } from "./api";
-import type { CreateExpensePayload, ExpenseCategory, ExpenseListResponse } from "@/types/expense";
+import type { ApiExpense, CreateExpensePayload, ExpenseCategory, ExpenseListResponse, ExpenseSummary, UpdateExpensePayload } from "@/types/expense";
 
 export const expensesService = {
   async list(params?: Record<string, string | number | boolean | undefined>): Promise<ExpenseListResponse> {
@@ -14,7 +14,22 @@ export const expensesService = {
   },
 
   async create(payload: CreateExpensePayload) {
-    const { data } = await api.post(endpoints.expenses.create, payload);
+    const { data } = await api.post<ApiExpense>(endpoints.expenses.create, payload);
+    return data;
+  },
+
+  async detail(id: string): Promise<ApiExpense> {
+    const { data } = await api.get<ApiExpense>(endpoints.expenses.detail(id));
+    return data;
+  },
+
+  async update(id: string, payload: UpdateExpensePayload): Promise<ApiExpense> {
+    const { data } = await api.patch<ApiExpense>(endpoints.expenses.update(id), payload);
+    return data;
+  },
+
+  async remove(id: string): Promise<{ id: string; deleted: true }> {
+    const { data } = await api.delete<{ id: string; deleted: true }>(endpoints.expenses.delete(id));
     return data;
   },
 
@@ -23,8 +38,8 @@ export const expensesService = {
     return data;
   },
 
-  async summary(params?: Record<string, string | number | boolean | undefined>) {
-    const { data } = await api.get(endpoints.expenses.summary, { params });
+  async summary(params?: Record<string, string | number | boolean | undefined>): Promise<ExpenseSummary> {
+    const { data } = await api.get<ExpenseSummary>(endpoints.expenses.summary, { params });
     return data;
   }
 };

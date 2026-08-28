@@ -1,6 +1,7 @@
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
 import { normalizeApiError } from "@/api/errors";
+import { markOnboardingCompleted } from "@/api/authFlowStorage";
 import { clearAuthStorage, getAuthSession, getRefreshToken, saveAccessToken, saveAuthSession, saveRefreshToken } from "@/api/tokenStorage";
 import { deviceService } from "@/services/device.service";
 import type {
@@ -74,6 +75,7 @@ export const authService = {
       const profile = await this.profile();
       const session = buildStoredSession(data, profile);
       await saveAuthSession(session);
+      await markOnboardingCompleted();
 
       return session;
     } catch (error) {

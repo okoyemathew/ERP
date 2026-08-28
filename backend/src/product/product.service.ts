@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AuditAction, Prisma } from '@prisma/client';
+import { AuditAction, InventoryTransactionType, Prisma } from '@prisma/client';
+import { SYSTEM_ROLES } from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -35,8 +37,12 @@ export class ProductService {
     if (dto.barcode) {
       await this.validateUniqueBarcode(businessId, dto.barcode, undefined);
     }
+    this.assertCanSetBaseSellingPrice(dto, user);
 
-    return this.prisma.$transaction(async (tx) => {
+    const initialStock = dto.initialStock ?? 0;
+    const baseSellingPrice = dto.baseSellingPrice ?? dto.sellingPrice;
+
+    const createdProduct = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
         data: {
           businessId,
@@ -50,6 +56,7 @@ export class ProductService {
           description: dto.description?.trim() || null,
           purchasePrice: dto.purchasePrice,
           sellingPrice: dto.sellingPrice,
+          baseSellingPrice,
           wholesalePrice: dto.wholesalePrice ?? null,
           minimumStock: dto.minimumStock ?? 0,
           maximumStock: dto.maximumStock ?? null,
@@ -62,9 +69,9 @@ export class ProductService {
         data: {
           businessId,
           productId: product.id,
-          quantityOnHand: 0,
+          quantityOnHand: initialStock,
           quantityReserved: 0,
-          quantityAvailable: 0,
+          quantityAvailable: initialStock,
           reorderLevel: dto.minimumStock ?? 0,
           reorderQuantity: dto.minimumStock ?? 0,
           averageCost: dto.purchasePrice,
@@ -73,6 +80,30 @@ export class ProductService {
           syncVersion: 1,
         },
       });
+
+      if (initialStock > 0) {
+        const inventory = await tx.inventory.findUniqueOrThrow({
+          where: { productId: product.id },
+        });
+
+        await tx.inventoryTransaction.create({
+          data: {
+            businessId,
+            inventoryId: inventory.id,
+            productId: product.id,
+            transactionType: InventoryTransactionType.STOCK_IN,
+            quantity: initialStock,
+            quantityBefore: 0,
+            quantityAfter: initialStock,
+            unitCost: dto.purchasePrice,
+            referenceNumber: `INITIAL_STOCK:${product.id}`,
+            remarks: 'Initial stock on product creation',
+            transactionDate: new Date(),
+            isSynced: true,
+            syncVersion: 1,
+          },
+        });
+      }
 
       if (user) {
         await tx.auditLog.create({
@@ -100,9 +131,21 @@ export class ProductService {
         },
       });
     });
+
+    const [createdProductWithMetadata] = await this.attachCreationMetadata(
+      businessId,
+      createdProduct ? [createdProduct] : [],
+      user,
+    );
+
+    return createdProductWithMetadata ?? createdProduct;
   }
 
-  async findAll(businessId: string, query: ProductQueryDto = {}) {
+  async findAll(
+    businessId: string,
+    query: ProductQueryDto = {},
+    viewer?: AuthenticatedUser,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'createdAt';
@@ -117,9 +160,17 @@ export class ProductService {
             OR: [
               { name: { contains: search, mode: 'insensitive' } },
               { sku: { contains: search, mode: 'insensitive' } },
+              { barcode: { contains: search, mode: 'insensitive' } },
+              { barcodes: { some: { barcode: { contains: search } } } },
               { category: { name: { contains: search, mode: 'insensitive' } } },
               { brand: { name: { contains: search, mode: 'insensitive' } } },
+              {
+                supplier: {
+                  companyName: { contains: search, mode: 'insensitive' },
+                },
+              },
               { unit: { name: { contains: search, mode: 'insensitive' } } },
+              { unit: { symbol: { contains: search, mode: 'insensitive' } } },
             ],
           }
         : {}),
@@ -195,8 +246,10 @@ export class ProductService {
       }),
     ]);
 
+    const data = await this.attachCreationMetadata(businessId, items, viewer);
+
     return {
-      data: items,
+      data,
       meta: {
         page,
         limit,
@@ -206,7 +259,11 @@ export class ProductService {
     };
   }
 
-  async findOne(businessId: string, id: string) {
+  async findOne(
+    businessId: string,
+    id: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const product = await this.prisma.product.findFirst({
       where: { id, businessId },
       include: {
@@ -224,7 +281,11 @@ export class ProductService {
       throw new NotFoundException('Product not found');
     }
 
-    return product;
+    const [productWithMetadata] = await this.attachCreationMetadata(businessId, [
+      product,
+    ], viewer);
+
+    return productWithMetadata;
   }
 
   async update(
@@ -233,7 +294,8 @@ export class ProductService {
     dto: UpdateProductDto,
     user?: AuthenticatedUser,
   ) {
-    const current = await this.findOne(businessId, id);
+    const current = await this.findProductOrThrow(businessId, id);
+    this.assertCanSetBaseSellingPrice(dto, user);
 
     if (dto.categoryId) {
       await this.ensureCategoryExists(businessId, dto.categoryId);
@@ -250,6 +312,10 @@ export class ProductService {
     this.validatePricesAndStock({
       purchasePrice: dto.purchasePrice ?? Number(current.purchasePrice),
       sellingPrice: dto.sellingPrice ?? Number(current.sellingPrice),
+      baseSellingPrice:
+        dto.baseSellingPrice !== undefined
+          ? dto.baseSellingPrice
+          : Number(current.baseSellingPrice),
       wholesalePrice:
         dto.wholesalePrice !== undefined
           ? dto.wholesalePrice
@@ -269,7 +335,7 @@ export class ProductService {
       await this.validateUniqueBarcode(businessId, dto.barcode, id);
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const updatedProduct = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.update({
         where: { id },
         data: {
@@ -288,6 +354,7 @@ export class ProductService {
               : undefined,
           purchasePrice: dto.purchasePrice,
           sellingPrice: dto.sellingPrice,
+          baseSellingPrice: dto.baseSellingPrice,
           wholesalePrice:
             dto.wholesalePrice !== undefined
               ? (dto.wholesalePrice ?? null)
@@ -326,6 +393,14 @@ export class ProductService {
 
       return product;
     });
+
+    const [updatedProductWithMetadata] = await this.attachCreationMetadata(
+      businessId,
+      [updatedProduct],
+      user,
+    );
+
+    return updatedProductWithMetadata;
   }
 
   async remove(businessId: string, id: string, user?: AuthenticatedUser) {
@@ -436,14 +511,18 @@ export class ProductService {
     });
   }
 
-  async searchByBarcode(businessId: string, barcode: string) {
+  async searchByBarcode(
+    businessId: string,
+    barcode: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const normalized = barcode.trim();
 
     if (!normalized) {
       throw new BadRequestException('Barcode is required');
     }
 
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where: {
         businessId,
         isActive: true,
@@ -460,16 +539,22 @@ export class ProductService {
         inventory: true,
       },
     });
+
+    return this.attachCreationMetadata(businessId, products, viewer);
   }
 
-  async searchBySku(businessId: string, sku: string) {
+  async searchBySku(
+    businessId: string,
+    sku: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const normalized = sku.trim();
 
     if (!normalized) {
       throw new BadRequestException('SKU is required');
     }
 
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where: {
         businessId,
         isActive: true,
@@ -484,16 +569,22 @@ export class ProductService {
       },
       orderBy: { sku: 'asc' },
     });
+
+    return this.attachCreationMetadata(businessId, products, viewer);
   }
 
-  async searchByCategory(businessId: string, categoryName: string) {
+  async searchByCategory(
+    businessId: string,
+    categoryName: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const normalized = categoryName.trim();
 
     if (!normalized) {
       throw new BadRequestException('Category search value is required');
     }
 
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where: {
         businessId,
         isActive: true,
@@ -507,16 +598,22 @@ export class ProductService {
         inventory: true,
       },
     });
+
+    return this.attachCreationMetadata(businessId, products, viewer);
   }
 
-  async searchByBrand(businessId: string, brandName: string) {
+  async searchByBrand(
+    businessId: string,
+    brandName: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const normalized = brandName.trim();
 
     if (!normalized) {
       throw new BadRequestException('Brand search value is required');
     }
 
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where: {
         businessId,
         isActive: true,
@@ -530,16 +627,22 @@ export class ProductService {
         inventory: true,
       },
     });
+
+    return this.attachCreationMetadata(businessId, products, viewer);
   }
 
-  async searchByUnit(businessId: string, unitName: string) {
+  async searchByUnit(
+    businessId: string,
+    unitName: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const normalized = unitName.trim();
 
     if (!normalized) {
       throw new BadRequestException('Unit search value is required');
     }
 
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where: {
         businessId,
         isActive: true,
@@ -558,9 +661,14 @@ export class ProductService {
         inventory: true,
       },
     });
+
+    return this.attachCreationMetadata(businessId, products, viewer);
   }
 
-  async findLowStockProducts(businessId: string) {
+  async findLowStockProducts(
+    businessId: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const products = await this.prisma.product.findMany({
       where: { businessId, isActive: true },
       include: {
@@ -572,7 +680,7 @@ export class ProductService {
       },
     });
 
-    return products.filter((product) => {
+    const lowStockProducts = products.filter((product) => {
       const inventory = product.inventory;
       if (!inventory) {
         return false;
@@ -580,9 +688,14 @@ export class ProductService {
 
       return inventory.quantityAvailable <= inventory.reorderLevel;
     });
+
+    return this.attachCreationMetadata(businessId, lowStockProducts, viewer);
   }
 
-  async findAvailableProducts(businessId: string) {
+  async findAvailableProducts(
+    businessId: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const products = await this.prisma.product.findMany({
       where: { businessId, isActive: true },
       include: {
@@ -593,10 +706,137 @@ export class ProductService {
       },
     });
 
-    return products.filter((product) => {
+    const availableProducts = products.filter((product) => {
       const inventory = product.inventory;
       return inventory ? inventory.quantityAvailable > 0 : false;
     });
+
+    return this.attachCreationMetadata(businessId, availableProducts, viewer);
+  }
+
+  private async attachCreationMetadata<T extends { id: string; createdAt: Date }>(
+    businessId: string,
+    products: T[],
+    viewer?: AuthenticatedUser,
+  ) {
+    if (products.length === 0) {
+      return [];
+    }
+
+    const productIds = products.map((product) => product.id);
+    const canViewAddedBy = this.canViewProductCreator(viewer);
+    const [creationLogs, initialStockTransactions] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where: {
+          businessId,
+          action: AuditAction.PRODUCT_CREATED,
+          entity: 'Product',
+          entityId: { in: productIds },
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              username: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.inventoryTransaction.findMany({
+        where: {
+          businessId,
+          productId: { in: productIds },
+          transactionType: InventoryTransactionType.STOCK_IN,
+          referenceNumber: { startsWith: 'INITIAL_STOCK:' },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    const creationLogByProductId = new Map(
+      creationLogs.map((log) => [log.entityId, log]),
+    );
+    const initialStockByProductId = new Map(
+      initialStockTransactions.map((transaction) => [
+        transaction.productId,
+        transaction.quantity,
+      ]),
+    );
+
+    return products.map((product) => {
+      const creationLog = creationLogByProductId.get(product.id);
+
+      return this.serializeProduct(
+        {
+          ...product,
+          addedAt: creationLog?.createdAt ?? product.createdAt,
+          addedBy: canViewAddedBy ? (creationLog?.user ?? null) : null,
+          initialStockQuantity: initialStockByProductId.get(product.id) ?? 0,
+        },
+        viewer,
+      );
+    });
+  }
+
+  private canViewProductCreator(viewer?: AuthenticatedUser): boolean {
+    return (
+      viewer?.roleName === SYSTEM_ROLES.OWNER ||
+      viewer?.roleName === SYSTEM_ROLES.ADMIN
+    );
+  }
+
+  private canViewBaseSellingPrice(viewer?: AuthenticatedUser): boolean {
+    return viewer?.roleName === SYSTEM_ROLES.OWNER;
+  }
+
+  private serializeProduct<T extends Record<string, unknown>>(
+    product: T,
+    viewer?: AuthenticatedUser,
+  ) {
+    if (this.canViewBaseSellingPrice(viewer)) {
+      return product;
+    }
+
+    const { baseSellingPrice: _baseSellingPrice, ...safeProduct } = product;
+    return safeProduct;
+  }
+
+  private assertCanSetBaseSellingPrice(
+    dto: { baseSellingPrice?: number },
+    user?: AuthenticatedUser,
+  ) {
+    if (
+      dto.baseSellingPrice !== undefined &&
+      user?.roleName !== SYSTEM_ROLES.OWNER
+    ) {
+      throw new ForbiddenException(
+        'Only the owner can manage base selling price',
+      );
+    }
+  }
+
+  private async findProductOrThrow(businessId: string, id: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id, businessId },
+      include: {
+        category: true,
+        brand: true,
+        supplier: true,
+        unit: true,
+        images: true,
+        barcodes: true,
+        inventory: true,
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    return product;
   }
 
   private async ensureCategoryExists(businessId: string, categoryId: string) {
@@ -642,10 +882,21 @@ export class ProductService {
   private validatePricesAndStock(dto: {
     purchasePrice?: number;
     sellingPrice?: number;
+    baseSellingPrice?: number;
     wholesalePrice?: number | null;
     minimumStock?: number;
     maximumStock?: number | null;
   }) {
+    if (
+      dto.baseSellingPrice !== undefined &&
+      dto.sellingPrice !== undefined &&
+      dto.sellingPrice < dto.baseSellingPrice
+    ) {
+      throw new BadRequestException(
+        'Selling price cannot be lower than base selling price',
+      );
+    }
+
     if (
       dto.wholesalePrice !== undefined &&
       dto.wholesalePrice !== null &&

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -71,6 +72,15 @@ export class CreateProductDto {
   @Min(0)
   sellingPrice!: number;
 
+  @ApiPropertyOptional({
+    description: 'Owner-controlled minimum selling price',
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  baseSellingPrice?: number;
+
   @ApiPropertyOptional({ description: 'Wholesale price', minimum: 0 })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -88,6 +98,15 @@ export class CreateProductDto {
   @IsNumber()
   @Min(0)
   maximumStock?: number;
+
+  @ApiPropertyOptional({
+    description: 'Initial stock quantity added when creating the product',
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  initialStock?: number;
 
   @ApiPropertyOptional({ description: 'Image URL' })
   @IsOptional()

@@ -418,9 +418,10 @@ model Product {
 
   description String?
 
-  purchasePrice  Decimal  @db.Decimal(12, 2)
-  sellingPrice   Decimal  @db.Decimal(12, 2)
-  wholesalePrice Decimal? @db.Decimal(12, 2)
+  purchasePrice    Decimal  @db.Decimal(12, 2)
+  sellingPrice     Decimal  @db.Decimal(12, 2)
+  baseSellingPrice Decimal @db.Decimal(12, 2)
+  wholesalePrice   Decimal? @db.Decimal(12, 2)
 
   minimumStock Int  @default(0)
   maximumStock Int?

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, Image, StyleSheet, View } from "react-native";
+import { Alert, Image, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Package } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Card, ErrorState, LoadingState, ScreenHeader } from "@/components/common";
 import { productsService } from "@/services/products.service";
 import { useAuthStore } from "@/store/authStore";
@@ -9,9 +10,17 @@ import { colors, typography } from "@/theme";
 import type { ApiProduct } from "@/types/product";
 import { formatCurrency } from "@/utils/format";
 
+function addedByName(product: ApiProduct) {
+  if (!product.addedBy) return "Unknown";
+  return [product.addedBy.firstName, product.addedBy.lastName].filter(Boolean).join(" ") || product.addedBy.username;
+}
+
 export function ProductDetailScreen({ route, navigation }: { route: any; navigation: any }) {
   const productId = route.params?.productId as string;
+  const insets = useSafeAreaInsets();
+  const user = useAuthStore((state) => state.user);
   const canManage = useAuthStore((state) => state.can("products.manage"));
+  const isOwner = user?.role === "owner" || user?.roleName === "Owner";
   const [product, setProduct] = useState<ApiProduct | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -48,11 +57,12 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
 
   const primaryImage = product.imageUrl ?? product.images?.find((image) => image.isPrimary)?.imageUrl;
   const stock = product.inventory?.quantityAvailable ?? 0;
+  const addedAt = product.addedAt ?? product.createdAt;
 
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Product Details" onBack={() => navigation.goBack()} />
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 24 }]} showsVerticalScrollIndicator={false}>
         <Card style={styles.hero}>
           {primaryImage ? <Image source={{ uri: primaryImage }} style={styles.image} /> : <View style={styles.icon}><Package size={34} color={colors.primary} /></View>}
           <Text style={styles.name}>{product.name}</Text>
@@ -68,10 +78,16 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
           <Info label="Unit" value={`${product.unit.name} (${product.unit.symbol})`} />
           <Info label="Supplier" value={product.supplier?.companyName ?? "Not set"} />
           <Info label="Purchase Price" value={formatCurrency(Number(product.purchasePrice))} />
+          {isOwner && product.baseSellingPrice !== undefined ? <Info label="Base Selling Price" value={formatCurrency(Number(product.baseSellingPrice))} /> : null}
           <Info label="Wholesale Price" value={product.wholesalePrice ? formatCurrency(Number(product.wholesalePrice)) : "Not set"} />
           <Info label="Minimum Stock" value={String(product.minimumStock)} />
           <Info label="Maximum Stock" value={product.maximumStock === null || product.maximumStock === undefined ? "Not set" : String(product.maximumStock)} />
           <Info label="Status" value={product.isActive ? "Active" : "Inactive"} />
+        </Card>
+        <Card style={styles.info}>
+          <Info label="Added" value={addedAt ? new Date(addedAt).toLocaleDateString() : "Not recorded"} />
+          <Info label="Added By" value={addedByName(product)} />
+          <Info label="Initial Stock" value={String(product.initialStockQuantity ?? 0)} />
         </Card>
         {canManage ? (
           <View style={styles.actions}>
@@ -79,7 +95,7 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
             <Button label="Deactivate Product" variant="danger" onPress={deactivate} />
           </View>
         ) : null}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -108,5 +124,5 @@ const styles = StyleSheet.create({
   info: { gap: 12 },
   infoRow: { gap: 3 },
   item: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
-  actions: { gap: 10, paddingBottom: 24 }
+  actions: { gap: 10 }
 });

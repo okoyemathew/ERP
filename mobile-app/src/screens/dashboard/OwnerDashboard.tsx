@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Bell, DollarSign, Package, ShoppingBag, ShoppingCart, TrendingUp, Users } from "lucide-react-native";
-import { Card, StatCard } from "@/components/common";
+import { Card, EmptyState, StatCard } from "@/components/common";
 import { ErrorState, LoadingState } from "@/components/common/StateViews";
 import { AreaChart } from "@/components/charts";
 import { reportsService } from "@/services/reports.service";
@@ -56,6 +56,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
       })),
     [statistics]
   );
+  const recentSales = summary?.recentSales ?? [];
 
   if (loading) {
     return (
@@ -96,42 +97,49 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
           <Bell size={18} color={colors.textTertiary} />
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.grid}>
-          <StatCard label="Today's Sales" value={formatCurrency(summary?.totalRevenueToday ?? 0)} icon={<DollarSign size={17} color={colors.primary} />} color={colors.primary} background={colors.secondaryBg} />
-          <StatCard label="Orders" value={String(summary?.totalSalesToday ?? 0)} icon={<ShoppingCart size={17} color={colors.success} />} color={colors.success} background={colors.successBg} />
-          <StatCard label="Profit" value={formatCurrency(summary?.todayProfit ?? 0)} icon={<TrendingUp size={17} color={colors.warning} />} color={colors.warning} background={colors.warningBg} />
-          <StatCard label="Customers" value={String(summary?.activeCustomersCount ?? 0)} icon={<Users size={17} color={colors.purple} />} color={colors.purple} background={colors.purpleBg} />
-        </View>
-        <Text style={styles.section}>Quick Actions</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actions}>
-          {quickActions.map((action) => {
-            const Icon = action.icon;
-            return (
-            <Pressable key={action.label} onPress={() => navigation.navigate(action.route)} style={styles.action} accessibilityLabel={action.label}>
-              <Icon size={21} color={action.color} />
-              <Text style={styles.actionText}>{action.label}</Text>
-            </Pressable>
-          );})}
-        </ScrollView>
-        <Card>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>Weekly Revenue</Text>
-            <Text style={styles.delta}>+18.4%</Text>
+      <FlatList
+        data={recentSales}
+        keyExtractor={(item) => item.id}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <View style={styles.headerContent}>
+            <View style={styles.grid}>
+              <StatCard label="Today's Sales" value={formatCurrency(summary?.totalRevenueToday ?? 0)} icon={<DollarSign size={17} color={colors.primary} />} color={colors.primary} background={colors.secondaryBg} />
+              <StatCard label="Orders" value={String(summary?.totalSalesToday ?? 0)} icon={<ShoppingCart size={17} color={colors.success} />} color={colors.success} background={colors.successBg} />
+              <StatCard label="Profit" value={formatCurrency(summary?.todayProfit ?? 0)} icon={<TrendingUp size={17} color={colors.warning} />} color={colors.warning} background={colors.warningBg} />
+              <StatCard label="Customers" value={String(summary?.activeCustomersCount ?? 0)} icon={<Users size={17} color={colors.purple} />} color={colors.purple} background={colors.purpleBg} />
+            </View>
+            <Text style={styles.section}>Quick Actions</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actions}>
+              {quickActions.map((action) => {
+                const Icon = action.icon;
+                return (
+                <Pressable key={action.label} onPress={() => navigation.navigate(action.route)} style={styles.action} accessibilityLabel={action.label}>
+                  <Icon size={21} color={action.color} />
+                  <Text style={styles.actionText}>{action.label}</Text>
+                </Pressable>
+              );})}
+            </ScrollView>
+            <Card>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>Weekly Revenue</Text>
+                <Text style={styles.delta}>+18.4%</Text>
+              </View>
+              <AreaChart data={chartData.length ? chartData : [{ label: "Today", revenue: 0 }]} />
+            </Card>
+            <Card style={styles.lowStock}>
+              <Package size={18} color={colors.orange} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.lowTitle}>Low Stock Alert</Text>
+                <Text style={styles.lowText}>{summary?.lowStockProductsCount ?? 0} products need immediate restocking</Text>
+              </View>
+              <Text style={styles.view}>View</Text>
+            </Card>
+            <Text style={styles.section}>Recent Sales</Text>
           </View>
-          <AreaChart data={chartData.length ? chartData : [{ label: "Today", revenue: 0 }]} />
-        </Card>
-        <Card style={styles.lowStock}>
-          <Package size={18} color={colors.orange} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.lowTitle}>Low Stock Alert</Text>
-            <Text style={styles.lowText}>{summary?.lowStockProductsCount ?? 0} products need immediate restocking</Text>
-          </View>
-          <Text style={styles.view}>View</Text>
-        </Card>
-        <Text style={styles.section}>Recent Sales</Text>
-        {(summary?.recentSales ?? []).map((item) => (
-          <Card key={item.id} style={styles.sale}>
+        }
+        renderItem={({ item }) => (
+          <Card style={styles.sale}>
             <View style={styles.saleIcon}><ShoppingBag size={15} color={colors.primary} /></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.saleCustomer}>{item.customerName}</Text>
@@ -139,8 +147,10 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
             </View>
             <Text style={styles.saleAmount}>{formatCurrency(item.totalAmount)}</Text>
           </Card>
-        ))}
-      </ScrollView>
+        )}
+        ListEmptyComponent={<EmptyState icon={<ShoppingBag size={28} color={colors.textPlaceholder} />} title="No recent sales" />}
+        contentContainerStyle={styles.content}
+      />
     </View>
   );
 }
@@ -152,6 +162,7 @@ const styles = StyleSheet.create({
   name: { color: colors.foreground, fontSize: 20, fontWeight: "800", marginTop: 2 },
   bell: { width: 44, height: 44, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: "center", justifyContent: "center" },
   content: { padding: spacing.screenHorizontal, paddingBottom: 110, gap: 12 },
+  headerContent: { gap: 12 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   section: { color: colors.textTertiary, fontSize: 13, fontWeight: "800", marginTop: 6 },
   actions: { gap: 14, paddingVertical: 2 },

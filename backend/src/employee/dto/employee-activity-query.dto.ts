@@ -1,7 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { PaymentMethod, SaleStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsDate,
+  IsEnum,
   IsIn,
   IsInt,
   IsOptional,
@@ -51,6 +53,19 @@ export class EmployeeActivityQueryDto {
   @IsOptional()
   @IsString()
   entity?: string;
+
+  @ApiPropertyOptional({ description: 'Sale status filter', enum: SaleStatus })
+  @IsOptional()
+  @IsEnum(SaleStatus)
+  status?: SaleStatus;
+
+  @ApiPropertyOptional({
+    description: 'Payment method filter',
+    enum: PaymentMethod,
+  })
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
 
   @ApiPropertyOptional({
     description: 'Sort field',

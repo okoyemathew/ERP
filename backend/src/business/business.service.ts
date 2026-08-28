@@ -254,7 +254,7 @@ export class BusinessService {
           },
         },
         orderBy: { saleDate: 'desc' },
-        take: 5,
+        take: 20,
       }),
       this.prisma.sale.groupBy({
         by: ['userId'],

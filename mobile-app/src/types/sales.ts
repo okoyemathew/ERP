@@ -6,6 +6,7 @@ export type PosPaymentMethod = "cash" | "card" | "mobile" | "bank" | "credit";
 export interface CreateSaleItemPayload {
   productId: string;
   quantity: number;
+  unitPrice?: number;
   discountAmount?: number;
   taxAmount?: number;
 }

@@ -84,6 +84,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [prices, setPrices] = useState<Record<string, string>>({});
+  const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
   const [paymentMethod, setPaymentMethod] = useState<PosPaymentMethod>("cash");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | undefined>();
   const [selectedCollectInvoice, setSelectedCollectInvoice] = useState<CreditInvoiceView | null>(null);
@@ -169,7 +170,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         name: product.name,
         sku: product.sku,
         category: product.category,
-        price: product.price,
+        price: Number(prices[product.id] ?? product.price),
         stock: product.stock,
         iconColor: product.iconColor,
         floorPrice: product.floorPrice,
@@ -190,7 +191,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         name: product.name,
         sku: product.sku,
         category: product.category,
-        price: Number(prices[product.id] ?? 0),
+        price: Number(prices[product.id] ?? product.price),
         stock: product.stock,
         iconColor: product.iconColor,
         floorPrice: product.floorPrice,
@@ -226,6 +227,15 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     ? ownerCart.items.find((item) => item.product.id === productId)?.qty ?? 0
     : employeeCart.items.find((item) => item.stockItem.productId === productId)?.qty ?? 0;
 
+  const productPriceInput = (product: ProductTile) => prices[product.id] ?? String(product.price || "");
+
+  const parsePositiveMoney = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed || !/^\d+(\.\d{0,2})?$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  };
+
   const openReceipt = (receipt: ReceiptDocument) => {
     setActiveReceipt(receipt);
     requestAnimationFrame(() => receiptRef.current?.expand());
@@ -243,22 +253,20 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return;
     }
 
-    if (role === "owner") {
-      ownerCart.addItem(product.source as Product);
-      return;
-    }
-
-    const sellingPrice = Number(prices[product.id]);
-    if (!sellingPrice || Number.isNaN(sellingPrice)) {
+    const sellingPrice = parsePositiveMoney(productPriceInput(product));
+    if (!sellingPrice) {
       Alert.alert("Selling price", "Enter the selling price before adding this product.");
       return;
     }
-    if (product.floorPrice && sellingPrice < product.floorPrice) {
-      Alert.alert("Price not allowed", "This selling price is not allowed.");
+
+    if (role === "owner") {
+      ownerCart.addItem(product.source as Product, sellingPrice);
+      setQuantityInputs((current) => ({ ...current, [product.id]: String(currentQty + 1) }));
       return;
     }
 
     employeeCart.addItem(product.source as EmployeeStockItem, sellingPrice);
+    setQuantityInputs((current) => ({ ...current, [product.id]: String(currentQty + 1) }));
   };
 
   const handleBarcodeLookup = async () => {
@@ -282,7 +290,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         name: matchedProduct.name,
         sku: matchedProduct.sku,
         category: matchedProduct.category,
-        price: role === "owner" ? matchedProduct.price : Number(prices[matchedProduct.id] ?? 0),
+        price: Number(prices[matchedProduct.id] ?? matchedProduct.price),
         stock: matchedProduct.stock,
         iconColor: matchedProduct.iconColor,
         floorPrice: matchedProduct.floorPrice,
@@ -305,6 +313,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     if (nextQty <= 0) {
       if (role === "owner") ownerCart.removeItem(product.id);
       else employeeCart.removeItem(product.id);
+      setQuantityInputs((current) => ({ ...current, [product.id]: "0" }));
       return;
     }
     if (nextQty > product.stock) {
@@ -313,6 +322,34 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     }
     if (role === "owner") ownerCart.updateQty(product.id, nextQty);
     else employeeCart.updateQty(product.id, nextQty);
+    setQuantityInputs((current) => ({ ...current, [product.id]: String(nextQty) }));
+  };
+
+  const updateProductPrice = (product: ProductTile, value: string) => {
+    setPrices((prev) => ({ ...prev, [product.id]: value }));
+    const sellingPrice = parsePositiveMoney(value);
+    if (!sellingPrice) return;
+    if (role === "owner") ownerCart.updateSellingPrice(product.id, sellingPrice);
+    else employeeCart.updateSellingPrice(product.id, sellingPrice);
+  };
+
+  const submitQuantityInput = (product: ProductTile, value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed && cartQty(product.id) === 0) {
+      return;
+    }
+    if (!/^\d+$/.test(trimmed)) {
+      Alert.alert("Quantity", "Enter a valid quantity.");
+      setQuantityInputs((current) => ({ ...current, [product.id]: String(cartQty(product.id)) }));
+      return;
+    }
+    const nextQty = Number(trimmed);
+    if (!Number.isSafeInteger(nextQty) || nextQty <= 0) {
+      Alert.alert("Quantity", "Enter a valid quantity.");
+      setQuantityInputs((current) => ({ ...current, [product.id]: String(cartQty(product.id)) }));
+      return;
+    }
+    updateProductQty(product, nextQty);
   };
 
   const handleCheckout = async () => {
@@ -342,6 +379,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         return {
           productId: item.productId,
           quantity: item.qty,
+          unitPrice: item.price,
           discountAmount: distributeAmount(discountAmount, lineSubtotal),
           taxAmount: distributeAmount(taxAmount, lineSubtotal)
         };
@@ -408,6 +446,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
             return {
               productId: item.productId,
               quantity: item.qty,
+              unitPrice: item.price,
               discountAmount: distributeAmount(discountAmount, lineSubtotal),
               taxAmount: distributeAmount(taxAmount, lineSubtotal)
             };
@@ -597,9 +636,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         renderItem={({ item }) => {
           const qty = cartQty(item.id);
           const status = stockStatus(item.stock);
-          const isEmployee = role === "employee";
-          const employeePrice = prices[item.id] ?? "";
-          const belowMinimum = isEmployee && Boolean(employeePrice) && item.floorPrice !== undefined && Number(employeePrice) < item.floorPrice;
+          const priceInput = productPriceInput(item);
+          const invalidPrice = Boolean(priceInput) && !parsePositiveMoney(priceInput);
+          const quantityValue = quantityInputs[item.id] ?? (qty > 0 ? String(qty) : "");
 
           return (
             <View style={[styles.productCard, !grid && styles.productListCard]}>
@@ -610,27 +649,40 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
               <Text style={styles.sku}>{item.sku}</Text>
               <View style={styles.priceRow}>
-                {isEmployee ? (
-                  <TextInput
-                    value={employeePrice}
-                    onChangeText={(value) => setPrices((prev) => ({ ...prev, [item.id]: value }))}
-                    keyboardType="numeric"
-                    placeholder="Set price"
-                    placeholderTextColor={colors.textPlaceholder}
-                    style={[styles.employeePrice, belowMinimum && styles.invalidPrice]}
-                    accessibilityLabel={`Selling price for ${item.name}`}
-                  />
-                ) : (
-                  <Text style={styles.price}>{formatCurrency(item.price)}</Text>
-                )}
+                <TextInput
+                  value={priceInput}
+                  onChangeText={(value) => updateProductPrice(item, value)}
+                  keyboardType="decimal-pad"
+                  placeholder="Sale price"
+                  placeholderTextColor={colors.textPlaceholder}
+                  style={[styles.employeePrice, invalidPrice && styles.invalidPrice]}
+                  accessibilityLabel={`Selling price for ${item.name}`}
+                />
                 <Text style={[styles.statusText, { color: status.color, backgroundColor: status.bg }]}>{status.label}</Text>
               </View>
-              {belowMinimum ? <Text style={styles.error}>Price is not allowed</Text> : null}
+              {invalidPrice ? <Text style={styles.error}>Enter a valid price</Text> : null}
               <View style={styles.stepper}>
                 <Pressable onPress={() => updateProductQty(item, qty - 1)} accessibilityRole="button" accessibilityLabel={`Decrease ${item.name}`} style={styles.stepperButton}>
                   <Minus size={13} color={colors.textMuted} />
                 </Pressable>
-                <Text style={styles.stepperQty}>{qty}</Text>
+                <TextInput
+                  value={quantityValue}
+                  onChangeText={(value) => {
+                    if (value && !/^\d+$/.test(value)) {
+                      Alert.alert("Quantity", "Enter a valid quantity.");
+                      return;
+                    }
+                    setQuantityInputs((current) => ({ ...current, [item.id]: value }));
+                  }}
+                  onBlur={() => submitQuantityInput(item, quantityValue)}
+                  onSubmitEditing={() => submitQuantityInput(item, quantityValue)}
+                  keyboardType="number-pad"
+                  placeholder="0"
+                  placeholderTextColor={colors.textPlaceholder}
+                  selectTextOnFocus
+                  style={styles.stepperQtyInput}
+                  accessibilityLabel={`Quantity for ${item.name}`}
+                />
                 <Pressable onPress={() => addProduct(item)} accessibilityRole="button" accessibilityLabel={`Increase ${item.name}`} style={styles.stepperButton}>
                   <Plus size={13} color={colors.primary} />
                 </Pressable>
@@ -886,7 +938,7 @@ const styles = StyleSheet.create({
     marginTop: 2
   },
   stepperButton: { width: 28, height: 24, alignItems: "center", justifyContent: "center" },
-  stepperQty: { color: colors.textMuted, fontSize: 10, fontWeight: "900" },
+  stepperQtyInput: { width: 48, color: colors.textMuted, fontSize: 10, fontWeight: "900", textAlign: "center", paddingVertical: 0 },
   cartFab: { position: "absolute", left: 16, right: 16, bottom: spacing.cartFABBottom, borderRadius: 18, overflow: "hidden", ...shadows.cartFAB },
   cartFabGradient: { height: 56, borderRadius: 18, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, gap: 10 },
   cartText: { color: colors.surface, fontSize: 14, fontWeight: "800", flex: 1 },

@@ -627,7 +627,17 @@ export class SalesService {
       throw new BadRequestException('Insufficient inventory for product');
     }
 
-    const unitPrice = new Prisma.Decimal(product.sellingPrice);
+    const unitPrice = new Prisma.Decimal(
+      dto.unitPrice ?? product.sellingPrice,
+    );
+    const baseSellingPrice = new Prisma.Decimal(product.baseSellingPrice);
+
+    if (unitPrice.lt(baseSellingPrice)) {
+      throw new BadRequestException(
+        'Sale price is below the allowed selling price.',
+      );
+    }
+
     const discountAmount = new Prisma.Decimal(dto.discountAmount ?? 0);
     const taxAmount = new Prisma.Decimal(dto.taxAmount ?? 0);
     const gross = unitPrice.mul(dto.quantity);
@@ -887,6 +897,7 @@ export class SalesService {
         sku: true,
         barcode: true,
         sellingPrice: true,
+        baseSellingPrice: true,
         inventory: true,
       },
     });
@@ -920,7 +931,12 @@ export class SalesService {
 
       const product = await tx.product.findFirst({
         where: { id: item.productId, businessId, isActive: true },
-        select: { id: true, sellingPrice: true, inventory: true },
+        select: {
+          id: true,
+          sellingPrice: true,
+          baseSellingPrice: true,
+          inventory: true,
+        },
       });
 
       if (!product) {

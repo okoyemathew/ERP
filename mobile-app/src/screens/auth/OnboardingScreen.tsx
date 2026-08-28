@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Package, Shield, TrendingUp, Users } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { markOnboardingCompleted } from "@/api/authFlowStorage";
 import { Button } from "@/components/common";
 import { colors } from "@/theme";
 
@@ -17,10 +18,14 @@ export function OnboardingScreen({ navigation }: { navigation: any }) {
   const [page, setPage] = useState(0);
   const slide = slides[page];
   const Icon = slide.icon;
-  const next = () => (page < slides.length - 1 ? setPage(page + 1) : navigation.navigate("Login"));
+  const goToLogin = async () => {
+    await markOnboardingCompleted();
+    navigation.replace("Login");
+  };
+  const next = () => (page < slides.length - 1 ? setPage(page + 1) : void goToLogin());
   return (
     <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.screen}>
-      <Pressable onPress={() => navigation.navigate("Login")} style={styles.skip} accessibilityLabel="Skip onboarding">
+      <Pressable onPress={() => void goToLogin()} style={styles.skip} accessibilityLabel="Skip onboarding">
         <Text style={styles.skipText}>Skip</Text>
       </Pressable>
       <View style={styles.center}>

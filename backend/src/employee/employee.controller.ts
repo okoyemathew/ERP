@@ -99,6 +99,17 @@ export class EmployeeController {
     return this.employeeService.getSales(user.businessId, id, query);
   }
 
+  @Get(':id/sales/print')
+  @Roles(SYSTEM_ROLES.OWNER, SYSTEM_ROLES.ADMIN, SYSTEM_ROLES.MANAGER)
+  @ApiOperation({ summary: 'Print employee sales record' })
+  printSales(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: EmployeeActivityQueryDto,
+  ) {
+    return this.employeeService.printSalesRecord(user.businessId, id, query);
+  }
+
   @Get(':id/activity')
   @Roles(SYSTEM_ROLES.OWNER, SYSTEM_ROLES.ADMIN, SYSTEM_ROLES.MANAGER)
   @ApiOperation({ summary: 'View employee activity' })

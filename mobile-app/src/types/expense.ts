@@ -42,6 +42,15 @@ export interface ExpenseSummary {
     expenseCount: number;
     totalAmount: string | number;
   }>;
+  expensesByEmployee: Array<{
+    userId: string;
+    employeeId?: string | null;
+    employeeCode?: string | null;
+    employeeName: string;
+    username?: string | null;
+    expenseCount: number;
+    totalAmount: string | number;
+  }>;
   expensesByPaymentMethod: Array<{
     paymentMethod: ApiPaymentMethod;
     expenseCount: number;
@@ -70,3 +79,5 @@ export interface CreateExpensePayload {
   vendor?: string;
   paymentMethod: ApiPaymentMethod;
 }
+
+export type UpdateExpensePayload = Partial<CreateExpensePayload>;

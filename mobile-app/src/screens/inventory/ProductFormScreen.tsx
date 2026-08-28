@@ -4,15 +4,18 @@ import { Text } from "@/i18n";
 import { Button, Card, ErrorState, Input, LoadingState } from "@/components/common";
 import { ScrollScreen, SectionTitle, SimpleRow } from "@/screens/shared/ScreenKit";
 import { productsService } from "@/services/products.service";
+import { useAuthStore } from "@/store/authStore";
 import { colors, typography } from "@/theme";
 import type { ProductBrand, ProductCategory, ProductSupplier, ProductUnit, UpsertProductPayload } from "@/types/product";
 
-type FormState = Omit<UpsertProductPayload, "purchasePrice" | "sellingPrice" | "wholesalePrice" | "minimumStock" | "maximumStock"> & {
+type FormState = Omit<UpsertProductPayload, "purchasePrice" | "sellingPrice" | "baseSellingPrice" | "wholesalePrice" | "minimumStock" | "maximumStock" | "initialStock"> & {
   purchasePrice: string;
   sellingPrice: string;
+  baseSellingPrice: string;
   wholesalePrice: string;
   minimumStock: string;
   maximumStock: string;
+  initialStock: string;
 };
 
 const defaults: FormState = {
@@ -26,15 +29,19 @@ const defaults: FormState = {
   description: "",
   purchasePrice: "",
   sellingPrice: "",
+  baseSellingPrice: "",
   wholesalePrice: "",
   minimumStock: "0",
   maximumStock: "",
+  initialStock: "0",
   imageUrl: "",
   isActive: true
 };
 
 export function ProductFormScreen({ route, navigation }: { route: any; navigation: any }) {
   const productId = route.params?.productId as string | undefined;
+  const user = useAuthStore((state) => state.user);
+  const isOwner = user?.role === "owner" || user?.roleName === "Owner";
   const [form, setForm] = useState<FormState>(defaults);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [brands, setBrands] = useState<ProductBrand[]>([]);
@@ -78,9 +85,11 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
           description: product.description ?? "",
           purchasePrice: String(product.purchasePrice),
           sellingPrice: String(product.sellingPrice),
+          baseSellingPrice: product.baseSellingPrice === undefined ? "" : String(product.baseSellingPrice),
           wholesalePrice: product.wholesalePrice ? String(product.wholesalePrice) : "",
           minimumStock: String(product.minimumStock),
           maximumStock: product.maximumStock === null || product.maximumStock === undefined ? "" : String(product.maximumStock),
+          initialStock: String(product.initialStockQuantity ?? 0),
           imageUrl: product.imageUrl ?? "",
           isActive: product.isActive
         });
@@ -110,9 +119,11 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
   const save = async () => {
     const purchasePrice = Number(form.purchasePrice);
     const sellingPrice = Number(form.sellingPrice);
+    const baseSellingPrice = form.baseSellingPrice ? Number(form.baseSellingPrice) : undefined;
     const wholesalePrice = form.wholesalePrice ? Number(form.wholesalePrice) : undefined;
     const minimumStock = Number(form.minimumStock || 0);
     const maximumStock = form.maximumStock ? Number(form.maximumStock) : undefined;
+    const initialStock = form.initialStock ? Number(form.initialStock) : 0;
 
     if (!form.name || !form.sku || !form.categoryId || !form.unitId) {
       Alert.alert("Missing details", "Product name, SKU, category, and unit are required.");
@@ -122,12 +133,24 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
       Alert.alert("Invalid prices", "Purchase and selling prices must be valid numbers.");
       return;
     }
+    if (isOwner && (baseSellingPrice === undefined || Number.isNaN(baseSellingPrice) || baseSellingPrice < 0)) {
+      Alert.alert("Invalid base price", "Base selling price must be a valid number.");
+      return;
+    }
+    if (isOwner && baseSellingPrice !== undefined && sellingPrice < baseSellingPrice) {
+      Alert.alert("Invalid base price", "Selling price cannot be lower than base selling price.");
+      return;
+    }
     if (wholesalePrice !== undefined && (Number.isNaN(wholesalePrice) || wholesalePrice < 0 || wholesalePrice > sellingPrice)) {
       Alert.alert("Invalid wholesale price", "Wholesale price must be valid and cannot exceed selling price.");
       return;
     }
     if (maximumStock !== undefined && maximumStock < minimumStock) {
       Alert.alert("Invalid stock limits", "Maximum stock cannot be lower than minimum stock.");
+      return;
+    }
+    if (!productId && (!Number.isInteger(initialStock) || initialStock < 0)) {
+      Alert.alert("Invalid stock", "Initial stock must be a whole number greater than or equal to zero.");
       return;
     }
 
@@ -144,9 +167,11 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         description: form.description || undefined,
         purchasePrice,
         sellingPrice,
+        baseSellingPrice: isOwner ? baseSellingPrice : undefined,
         wholesalePrice,
         minimumStock,
         maximumStock,
+        initialStock: productId ? undefined : initialStock,
         imageUrl: form.imageUrl || undefined,
         isActive: form.isActive
       };
@@ -180,9 +205,11 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
       <Card style={styles.form}>
         <Input label="Purchase Price" value={form.purchasePrice} onChangeText={(value) => setField("purchasePrice", value)} keyboardType="decimal-pad" />
         <Input label="Selling Price" value={form.sellingPrice} onChangeText={(value) => setField("sellingPrice", value)} keyboardType="decimal-pad" />
+        {isOwner ? <Input label="Base Selling Price" value={form.baseSellingPrice} onChangeText={(value) => setField("baseSellingPrice", value)} keyboardType="decimal-pad" /> : null}
         <Input label="Wholesale Price" value={form.wholesalePrice} onChangeText={(value) => setField("wholesalePrice", value)} keyboardType="decimal-pad" />
         <Input label="Minimum Stock" value={form.minimumStock} onChangeText={(value) => setField("minimumStock", value)} keyboardType="number-pad" />
         <Input label="Maximum Stock" value={form.maximumStock} onChangeText={(value) => setField("maximumStock", value)} keyboardType="number-pad" />
+        {!productId ? <Input label="Initial Stock" value={form.initialStock} onChangeText={(value) => setField("initialStock", value)} keyboardType="number-pad" /> : null}
       </Card>
 
       <OptionSection title="Category" selected={selectedCategory?.name} options={categories.map((item) => ({ id: item.id, title: item.name }))} onSelect={(id) => setField("categoryId", id)} onManage={() => navigation.navigate("ProductOptionManager", { kind: "category" })} />

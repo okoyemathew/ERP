@@ -63,6 +63,42 @@ export interface EmployeeProfileResponse {
   }>;
 }
 
+export interface EmployeeSalesSummary {
+  transactions: number;
+  completedSalesCount: number;
+  totalSalesValue: string | number;
+  totalCollected: string | number;
+  totalBalanceDue: string | number;
+  averageSaleValue: string | number;
+}
+
+export interface EmployeeSalesResponse {
+  employee: Pick<ApiEmployee, "id" | "userId" | "employeeCode" | "firstName" | "lastName" | "status"> & {
+    role: string | null;
+    branch: string | null;
+  };
+  summary: EmployeeSalesSummary;
+  data: import("./sales").ApiSale[];
+  meta: { page: number; limit: number; total: number; totalPages: number };
+}
+
+export interface EmployeeSalesPrintResponse {
+  format: "employee-sales-record-v1";
+  text: string;
+  data: {
+    business: { name: string; address: string | null; phone: string | null; currency: string };
+    employee: EmployeeSalesResponse["employee"];
+    period: string;
+    summary: {
+      salesCount: number;
+      totalSalesValue: string | number;
+      totalCollected: string | number;
+      totalBalanceDue: string | number;
+    };
+    sales: import("./sales").ApiSale[];
+  };
+}
+
 export interface UpsertEmployeePayload {
   employeeCode: string;
   firstName: string;

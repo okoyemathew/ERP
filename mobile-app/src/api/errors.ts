@@ -48,7 +48,7 @@ export function normalizeApiError(error: unknown): AppApiError {
     }
 
     if (!axiosError.response) {
-      return new AppApiError("Cannot reach the server. Check that your phone and backend are on the same network.", "NETWORK");
+      return new AppApiError("Cannot reach the server. Check your internet connection and try again.", "NETWORK");
     }
 
     const status = axiosError.response.status;

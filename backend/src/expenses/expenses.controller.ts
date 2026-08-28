@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -38,6 +39,9 @@ const EXPENSE_ROLES = [
   SYSTEM_ROLES.MANAGER,
   SYSTEM_ROLES.ACCOUNTANT,
   SYSTEM_ROLES.CASHIER,
+  SYSTEM_ROLES.SALESPERSON,
+  SYSTEM_ROLES.INVENTORY_OFFICER,
+  SYSTEM_ROLES.SUPERVISOR,
 ] as const;
 
 const EXPENSE_MODIFY_ROLES = [
@@ -47,11 +51,8 @@ const EXPENSE_MODIFY_ROLES = [
   SYSTEM_ROLES.ACCOUNTANT,
 ] as const;
 
-const EXPENSE_REPORT_ROLES = EXPENSE_MODIFY_ROLES;
-
 @ApiTags('Expenses')
 @ApiBearerAuth()
-@Permissions('expenses.manage')
 @Roles(...EXPENSE_ROLES)
 @Controller('expenses')
 export class ExpensesController {
@@ -59,6 +60,7 @@ export class ExpensesController {
 
   @Post('categories')
   @Roles(...EXPENSE_MODIFY_ROLES)
+  @Permissions('expenses.manage')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create expense category' })
   @ApiCreatedResponse({ description: 'Expense category created' })
@@ -81,6 +83,7 @@ export class ExpensesController {
 
   @Patch('categories/:id')
   @Roles(...EXPENSE_MODIFY_ROLES)
+  @Permissions('expenses.manage')
   @ApiOperation({ summary: 'Update expense category' })
   updateCategory(
     @CurrentUser() user: AuthenticatedUser,
@@ -92,6 +95,7 @@ export class ExpensesController {
 
   @Patch('categories/:id/activate')
   @Roles(...EXPENSE_MODIFY_ROLES)
+  @Permissions('expenses.manage')
   @ApiOperation({ summary: 'Activate expense category' })
   activateCategory(
     @CurrentUser() user: AuthenticatedUser,
@@ -102,6 +106,7 @@ export class ExpensesController {
 
   @Patch('categories/:id/deactivate')
   @Roles(...EXPENSE_MODIFY_ROLES)
+  @Permissions('expenses.manage')
   @ApiOperation({ summary: 'Deactivate expense category' })
   deactivateCategory(
     @CurrentUser() user: AuthenticatedUser,
@@ -125,7 +130,6 @@ export class ExpensesController {
   }
 
   @Get()
-  @Roles(...EXPENSE_REPORT_ROLES)
   @ApiOperation({ summary: 'List expenses' })
   @ApiOkResponse({
     description:
@@ -135,22 +139,20 @@ export class ExpensesController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ExpenseQueryDto,
   ) {
-    return this.expensesService.findAll(user.businessId, query);
+    return this.expensesService.findAll(user.businessId, query, user);
   }
 
   @Get('search')
-  @Roles(...EXPENSE_REPORT_ROLES)
   @ApiOperation({ summary: 'Search expenses' })
   search(
     @CurrentUser() user: AuthenticatedUser,
     @Query('q') q: string,
     @Query() query: ExpenseQueryDto,
   ) {
-    return this.expensesService.search(user.businessId, q ?? '', query);
+    return this.expensesService.search(user.businessId, q ?? '', query, user);
   }
 
   @Get('summary')
-  @Roles(...EXPENSE_REPORT_ROLES)
   @ApiOperation({ summary: 'View expense summary report' })
   @ApiOkResponse({
     description:
@@ -160,61 +162,55 @@ export class ExpensesController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ExpenseQueryDto,
   ) {
-    return this.expensesService.getSummary(user.businessId, query);
+    return this.expensesService.getSummary(user.businessId, query, user);
   }
 
   @Get('daily')
-  @Roles(...EXPENSE_REPORT_ROLES)
   @ApiOperation({ summary: 'View daily expense report' })
   daily(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ExpenseQueryDto,
   ) {
-    return this.expensesService.getDailyReport(user.businessId, query);
+    return this.expensesService.getDailyReport(user.businessId, query, user);
   }
 
   @Get('weekly')
-  @Roles(...EXPENSE_REPORT_ROLES)
   @ApiOperation({ summary: 'View weekly expense report' })
   weekly(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ExpenseQueryDto,
   ) {
-    return this.expensesService.getWeeklyReport(user.businessId, query);
+    return this.expensesService.getWeeklyReport(user.businessId, query, user);
   }
 
   @Get('monthly')
-  @Roles(...EXPENSE_REPORT_ROLES)
   @ApiOperation({ summary: 'View monthly expense report' })
   monthly(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ExpenseQueryDto,
   ) {
-    return this.expensesService.getMonthlyReport(user.businessId, query);
+    return this.expensesService.getMonthlyReport(user.businessId, query, user);
   }
 
   @Get('yearly')
-  @Roles(...EXPENSE_REPORT_ROLES)
   @ApiOperation({ summary: 'View yearly expense report' })
   yearly(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ExpenseQueryDto,
   ) {
-    return this.expensesService.getYearlyReport(user.businessId, query);
+    return this.expensesService.getYearlyReport(user.businessId, query, user);
   }
 
   @Get(':id')
-  @Roles(...EXPENSE_REPORT_ROLES)
   @ApiOperation({ summary: 'View expense details' })
   findOne(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.expensesService.findOne(user.businessId, id);
+    return this.expensesService.findOne(user.businessId, id, user);
   }
 
   @Patch(':id')
-  @Roles(...EXPENSE_MODIFY_ROLES)
   @ApiOperation({ summary: 'Update expense' })
   updateExpense(
     @CurrentUser() user: AuthenticatedUser,
@@ -222,5 +218,14 @@ export class ExpensesController {
     @Body() dto: UpdateExpenseDto,
   ) {
     return this.expensesService.updateExpense(user.businessId, id, dto, user);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete expense' })
+  removeExpense(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.expensesService.removeExpense(user.businessId, id, user);
   }
 }

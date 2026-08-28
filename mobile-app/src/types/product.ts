@@ -62,6 +62,13 @@ export interface ProductBarcode {
   isPrimary: boolean;
 }
 
+export interface ProductAddedBy {
+  id: string;
+  firstName: string;
+  lastName: string;
+  username: string;
+}
+
 export interface ApiProduct {
   id: string;
   businessId: string;
@@ -75,11 +82,17 @@ export interface ApiProduct {
   description?: string | null;
   purchasePrice: string | number;
   sellingPrice: string | number;
+  baseSellingPrice?: string | number;
   wholesalePrice?: string | number | null;
   minimumStock: number;
   maximumStock?: number | null;
   imageUrl?: string | null;
   isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  addedAt?: string;
+  addedBy?: ProductAddedBy | null;
+  initialStockQuantity?: number;
   category: ProductCategory;
   brand?: ProductBrand | null;
   supplier?: ProductSupplier | null;
@@ -119,9 +132,11 @@ export interface UpsertProductPayload {
   description?: string;
   purchasePrice: number;
   sellingPrice: number;
+  baseSellingPrice?: number;
   wholesalePrice?: number;
   minimumStock?: number;
   maximumStock?: number;
+  initialStock?: number;
   imageUrl?: string;
   isActive?: boolean;
 }

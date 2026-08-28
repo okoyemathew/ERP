@@ -12,6 +12,7 @@ export function RootNavigator() {
   const user = useAuthStore((state) => state.user);
   const isLoading = useAuthStore((state) => state.isLoading);
   const hasRestored = useAuthStore((state) => state.hasRestored);
+  const authEntryRoute = useAuthStore((state) => state.authEntryRoute);
   const restore = useAuthStore((state) => state.restore);
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export function RootNavigator() {
   return (
     <NavigationContainer>
       <StatusBar style={user ? "dark" : "light"} />
-      {user ? <AppNavigator /> : <AuthStack />}
+      {user ? <AppNavigator /> : <AuthStack key={authEntryRoute} initialRouteName={authEntryRoute} />}
     </NavigationContainer>
   );
 }

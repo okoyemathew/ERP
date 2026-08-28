@@ -63,7 +63,7 @@ export class ProductController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.productService.findAll(businessId, query);
+    return this.productService.findAll(businessId, query, user);
   }
 
   @Get('search')
@@ -77,22 +77,26 @@ export class ProductController {
   ) {
     this.assertBusinessAccess(businessId, user);
     if (query.barcode) {
-      return this.productService.searchByBarcode(businessId, query.barcode);
+      return this.productService.searchByBarcode(businessId, query.barcode, user);
     }
     if (query.sku) {
-      return this.productService.searchBySku(businessId, query.sku);
+      return this.productService.searchBySku(businessId, query.sku, user);
     }
     if (query.category) {
-      return this.productService.searchByCategory(businessId, query.category);
+      return this.productService.searchByCategory(
+        businessId,
+        query.category,
+        user,
+      );
     }
     if (query.brand) {
-      return this.productService.searchByBrand(businessId, query.brand);
+      return this.productService.searchByBrand(businessId, query.brand, user);
     }
     if (query.unit) {
-      return this.productService.searchByUnit(businessId, query.unit);
+      return this.productService.searchByUnit(businessId, query.unit, user);
     }
 
-    return this.productService.findAll(businessId);
+    return this.productService.findAll(businessId, undefined, user);
   }
 
   @Get('low-stock')
@@ -102,7 +106,7 @@ export class ProductController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.productService.findLowStockProducts(businessId);
+    return this.productService.findLowStockProducts(businessId, user);
   }
 
   @Get('available')
@@ -112,7 +116,7 @@ export class ProductController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.productService.findAvailableProducts(businessId);
+    return this.productService.findAvailableProducts(businessId, user);
   }
 
   @Get('barcode/generate')
@@ -148,7 +152,7 @@ export class ProductController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.productService.findOne(businessId, id);
+    return this.productService.findOne(businessId, id, user);
   }
 
   @Patch(':id')

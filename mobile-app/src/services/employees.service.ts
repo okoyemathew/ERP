@@ -1,6 +1,14 @@
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
-import type { ApiEmployee, EmployeeListResponse, EmployeeProfileResponse, EmployeeStatus, UpsertEmployeePayload } from "@/types/employee";
+import type {
+  ApiEmployee,
+  EmployeeListResponse,
+  EmployeeProfileResponse,
+  EmployeeSalesPrintResponse,
+  EmployeeSalesResponse,
+  EmployeeStatus,
+  UpsertEmployeePayload
+} from "@/types/employee";
 
 interface EmployeeListParams {
   page?: number;
@@ -11,6 +19,18 @@ interface EmployeeListParams {
   designation?: string;
   canLogin?: boolean;
   sortBy?: "createdAt" | "updatedAt" | "employeeCode" | "firstName" | "lastName" | "department" | "designation" | "hireDate" | "salary" | "status";
+  sortOrder?: "asc" | "desc";
+}
+
+interface EmployeeSalesParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  startDate?: string;
+  endDate?: string;
+  status?: "PENDING" | "COMPLETED" | "CANCELLED" | "REFUNDED";
+  paymentMethod?: "CASH" | "CREDIT" | "BANK_TRANSFER" | "MOBILE_MONEY" | "CARD";
+  sortBy?: "createdAt" | "saleDate" | "paymentDate" | "totalAmount";
   sortOrder?: "asc" | "desc";
 }
 
@@ -30,8 +50,13 @@ export const employeesService = {
     return data;
   },
 
-  async sales(id: string) {
-    const { data } = await api.get(endpoints.employees.sales(id));
+  async sales(id: string, params: EmployeeSalesParams = {}): Promise<EmployeeSalesResponse> {
+    const { data } = await api.get<EmployeeSalesResponse>(endpoints.employees.sales(id), { params });
+    return data;
+  },
+
+  async printSales(id: string, params: EmployeeSalesParams = {}): Promise<EmployeeSalesPrintResponse> {
+    const { data } = await api.get<EmployeeSalesPrintResponse>(endpoints.employees.salesPrint(id), { params });
     return data;
   },
 

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { hasCompletedOnboarding } from "@/api/authFlowStorage";
 import { setUnauthorizedHandler } from "@/api/client";
 import { authService } from "@/services/auth.service";
 import type { AuthBranch, AuthBusiness, AuthRole, AuthSessionDevice, ChangePasswordRequest, LoginRequest, StoredAuthSession } from "@/types/auth";
@@ -18,6 +19,7 @@ interface AuthStore {
   isLoading: boolean;
   isSessionLoading: boolean;
   hasRestored: boolean;
+  authEntryRoute: "Splash" | "Login";
   error: string | null;
   restore: () => Promise<void>;
   login: (credentials: LoginRequest) => Promise<void>;
@@ -46,11 +48,12 @@ function toStoreSession(session: StoredAuthSession) {
     isAuthenticated: true,
     isLoading: false,
     hasRestored: true,
+    authEntryRoute: "Login" as const,
     error: null
   };
 }
 
-function emptyAuthState() {
+function emptyAuthState(authEntryRoute: "Splash" | "Login" = "Login") {
   return {
     user: null,
     business: null,
@@ -65,6 +68,7 @@ function emptyAuthState() {
     isLoading: false,
     isSessionLoading: false,
     hasRestored: true,
+    authEntryRoute,
     error: null
   };
 }
@@ -83,6 +87,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   isLoading: true,
   isSessionLoading: false,
   hasRestored: false,
+  authEntryRoute: "Splash",
   error: null,
 
   restore: async () => {
@@ -90,7 +95,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     const session = await authService.restoreSession();
 
     if (!session) {
-      set(emptyAuthState());
+      set(emptyAuthState((await hasCompletedOnboarding()) ? "Login" : "Splash"));
       return;
     }
 
@@ -105,7 +110,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     } catch (error) {
       const message = error instanceof Error ? error.message : "Login failed. Please try again.";
       set({
-        ...emptyAuthState(),
+        ...emptyAuthState("Login"),
         error: message
       });
       throw error;
@@ -166,7 +171,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     try {
       const result = await authService.revokeSession(sessionId);
       if (result.revokedCurrentSession) {
-        set(emptyAuthState());
+        set(emptyAuthState("Login"));
         return;
       }
       const sessions = await authService.sessions();
@@ -181,18 +186,18 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   logout: async () => {
     set({ isLoading: true, error: null });
     await authService.logout();
-    set(emptyAuthState());
+    set(emptyAuthState("Login"));
   },
 
   logoutAll: async () => {
     set({ isLoading: true, error: null });
     await authService.logoutAll();
-    set(emptyAuthState());
+    set(emptyAuthState("Login"));
   },
 
   clearAuth: async () => {
     await authService.clearLocalSession();
-    set(emptyAuthState());
+    set(emptyAuthState("Login"));
   },
 
   can: (permission) => get().permissions.includes(permission),

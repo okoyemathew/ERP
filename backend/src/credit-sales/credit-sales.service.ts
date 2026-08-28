@@ -766,7 +766,17 @@ export class CreditSalesService {
     const builtItems = [];
     for (const item of items) {
       const product = await this.findSellableProduct(businessId, item, tx);
-      const unitPrice = new Prisma.Decimal(product.sellingPrice);
+      const unitPrice = new Prisma.Decimal(
+        item.unitPrice ?? product.sellingPrice,
+      );
+      const baseSellingPrice = new Prisma.Decimal(product.baseSellingPrice);
+
+      if (unitPrice.lt(baseSellingPrice)) {
+        throw new BadRequestException(
+          'Sale price is below the allowed selling price.',
+        );
+      }
+
       const discountAmount = new Prisma.Decimal(item.discountAmount ?? 0);
       const taxAmount = new Prisma.Decimal(item.taxAmount ?? 0);
       const gross = unitPrice.mul(item.quantity);
@@ -817,6 +827,7 @@ export class CreditSalesService {
       select: {
         id: true,
         sellingPrice: true,
+        baseSellingPrice: true,
         inventory: true,
       },
     });

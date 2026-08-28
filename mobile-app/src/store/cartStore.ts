@@ -9,9 +9,10 @@ interface CartItem {
 interface CartStore {
   items: CartItem[];
   total: number;
-  addItem: (product: Product) => void;
+  addItem: (product: Product, sellingPrice?: number) => void;
   removeItem: (productId: string) => void;
   updateQty: (productId: string, qty: number) => void;
+  updateSellingPrice: (productId: string, sellingPrice: number) => void;
   clearCart: () => void;
 }
 
@@ -20,12 +21,13 @@ const computeTotal = (items: CartItem[]) => items.reduce((sum, item) => sum + it
 export const useCartStore = create<CartStore>((set) => ({
   items: [],
   total: 0,
-  addItem: (product) =>
+  addItem: (product, sellingPrice) =>
     set((state) => {
+      const pricedProduct = { ...product, price: sellingPrice ?? product.price };
       const exists = state.items.find((item) => item.product.id === product.id);
       const items = exists
-        ? state.items.map((item) => (item.product.id === product.id ? { ...item, qty: item.qty + 1 } : item))
-        : [...state.items, { product, qty: 1 }];
+        ? state.items.map((item) => (item.product.id === product.id ? { ...item, product: pricedProduct, qty: item.qty + 1 } : item))
+        : [...state.items, { product: pricedProduct, qty: 1 }];
       return { items, total: computeTotal(items) };
     }),
   removeItem: (productId) =>
@@ -36,6 +38,11 @@ export const useCartStore = create<CartStore>((set) => ({
   updateQty: (productId, qty) =>
     set((state) => {
       const items = state.items.map((item) => (item.product.id === productId ? { ...item, qty: Math.max(0, qty) } : item)).filter((item) => item.qty > 0);
+      return { items, total: computeTotal(items) };
+    }),
+  updateSellingPrice: (productId, sellingPrice) =>
+    set((state) => {
+      const items = state.items.map((item) => (item.product.id === productId ? { ...item, product: { ...item.product, price: sellingPrice } } : item));
       return { items, total: computeTotal(items) };
     }),
   clearCart: () => set({ items: [], total: 0 })

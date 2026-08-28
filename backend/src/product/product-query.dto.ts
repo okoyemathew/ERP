@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ProductQueryDto {
@@ -29,14 +29,16 @@ export class ProductQueryDto {
   })
   @IsOptional()
   @IsString()
+  @IsIn(['name', 'sku', 'createdAt', 'sellingPrice', 'quantityAvailable'])
   sortBy?: 'name' | 'sku' | 'createdAt' | 'sellingPrice' | 'quantityAvailable';
 
   @ApiPropertyOptional({ description: 'Sort direction', enum: ['asc', 'desc'] })
   @IsOptional()
   @IsString()
+  @IsIn(['asc', 'desc'])
   sortOrder?: 'asc' | 'desc';
 
-  @ApiPropertyOptional({ description: 'Product name filter' })
+  @ApiPropertyOptional({ description: 'Search product name, SKU, barcode, category, brand, supplier, or unit' })
   @IsOptional()
   @IsString()
   search?: string;
