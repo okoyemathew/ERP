@@ -35,6 +35,7 @@ export const endpoints = {
     sales: (employeeId: string) => `/employees/${employeeId}/sales`,
     salesPrint: (employeeId: string) => `/employees/${employeeId}/sales/print`,
     update: (employeeId: string) => `/employees/${employeeId}`,
+    delete: (employeeId: string) => `/employees/${employeeId}`,
     setLoginAccess: (employeeId: string) => `/employees/${employeeId}/login-access`,
     assignRole: (employeeId: string) => `/employees/${employeeId}/role`,
     activate: (employeeId: string) => `/employees/${employeeId}/activate`,

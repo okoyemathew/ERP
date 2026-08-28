@@ -70,6 +70,11 @@ export const employeesService = {
     return data;
   },
 
+  async remove(id: string): Promise<{ id: string; deleted: true }> {
+    const { data } = await api.delete<{ id: string; deleted: true }>(endpoints.employees.delete(id));
+    return data;
+  },
+
   async setLoginAccess(id: string, canLogin: boolean, reason?: string): Promise<ApiEmployee> {
     const { data } = await api.patch<ApiEmployee>(endpoints.employees.setLoginAccess(id), { canLogin, reason });
     return data;

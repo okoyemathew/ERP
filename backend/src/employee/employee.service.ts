@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -371,6 +372,58 @@ export class EmployeeService {
       dto,
       actor,
     );
+  }
+
+  async remove(businessId: string, id: string, actor: AuthenticatedUser) {
+    const current = await this.prisma.employee.findFirst({
+      where: { id, businessId, deletedAt: null },
+      include: { user: { include: { role: true } } },
+    });
+
+    if (!current) {
+      throw new NotFoundException('Employee not found');
+    }
+
+    if (current.id === actor.employeeId || current.userId === actor.id) {
+      throw new ForbiddenException('You cannot delete your own employee profile');
+    }
+
+    if (current.user.role?.name === SYSTEM_ROLES.OWNER) {
+      throw new ForbiddenException('Owner employee profile cannot be deleted');
+    }
+
+    const deletedAt = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: current.userId },
+        data: { status: UserStatus.INACTIVE },
+      });
+
+      await this.revokeSessions(tx, current.userId);
+
+      await tx.employee.update({
+        where: { id },
+        data: {
+          status: EmployeeStatus.TERMINATED,
+          canLogin: false,
+          deletedAt,
+          isSynced: true,
+          syncVersion: { increment: 1 },
+        },
+      });
+
+      await this.createAuditLog(tx, {
+        businessId,
+        userId: actor.id,
+        action: AuditAction.USER_DELETED,
+        entity: 'Employee',
+        entityId: id,
+        description: `Deleted employee ${current.employeeCode}`,
+      });
+    });
+
+    return { id, deleted: true };
   }
 
   async assignRole(

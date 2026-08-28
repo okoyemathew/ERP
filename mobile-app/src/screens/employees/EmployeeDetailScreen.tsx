@@ -4,7 +4,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CreditCard, Printer, Search, ShoppingBag } from "lucide-react-native";
+import { Printer, Search, ShoppingBag, Trash2 } from "lucide-react-native";
 import { AppBottomSheet, Avatar, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
 import { employeesService } from "@/services/employees.service";
 import { printingService } from "@/services/printing.service";
@@ -32,6 +32,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const saleSheetRef = useRef<GorhomBottomSheet>(null);
   const canManage = useAuthStore((state) => state.can("employees.manage"));
   const canManageRoles = useAuthStore((state) => state.can("roles.manage"));
+  const currentUser = useAuthStore((state) => state.user);
   const [profile, setProfile] = useState<EmployeeProfileResponse | null>(null);
   const [sales, setSales] = useState<EmployeeSalesResponse | null>(null);
   const [salesQuery, setSalesQuery] = useState("");
@@ -41,6 +42,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [selectedSale, setSelectedSale] = useState<ApiSale | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -145,12 +147,43 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     }
   };
 
+  const deleteEmployee = (employee: ApiEmployee, employeeName: string) => {
+    if (deleting) return;
+
+    Alert.alert(
+      "Delete employee",
+      `${employeeName} will be removed from the employee list and their login access will be revoked.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await employeesService.remove(employee.id);
+              navigation.goBack();
+            } catch (deleteError) {
+              const message = deleteError instanceof Error ? deleteError.message : "Unable to delete employee.";
+              Alert.alert("Unable to delete", message);
+            } finally {
+              setDeleting(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
   if (loading) return <LoadingState label="Loading employee" />;
   if (error || !profile) return <ErrorState onRetry={load} />;
 
   const employee = profile.employee;
   const name = `${employee.firstName} ${employee.lastName}`.trim() || employee.user.username;
   const latestSession = profile.recentSessions[0];
+  const isOwnerProfile = employee.user.role?.name === "Owner";
+  const isCurrentUserProfile = employee.userId === currentUser?.id || employee.id === currentUser?.employeeId;
+  const canDeleteEmployee = canManage && currentUser?.roleName === "Owner" && !isOwnerProfile && !isCurrentUserProfile;
 
   return (
     <View style={styles.screen}>
@@ -230,6 +263,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               <Button label={employee.canLogin ? "Disable Login" : "Enable Login"} variant="ghost" onPress={() => void toggleLogin(employee)} />
               <Button label={employee.status === "ACTIVE" ? "Deactivate" : "Activate"} variant={employee.status === "ACTIVE" ? "danger" : "success"} onPress={() => void updateStatus(employee.status === "ACTIVE" ? "deactivate" : "activate")} />
               {canManageRoles ? <Button label="Suspend" variant="ghost" onPress={() => void updateStatus("suspend")} /> : null}
+              {canDeleteEmployee ? <Button label="Delete Employee" variant="danger" loading={deleting} icon={<Trash2 size={16} color={colors.error} />} onPress={() => deleteEmployee(employee, name)} /> : null}
             </View>
           ) : null}
         </View>

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -152,6 +153,16 @@ export class EmployeeController {
     @Body() dto: UpdateEmployeeDto,
   ) {
     return this.employeeService.update(user.businessId, id, dto, user);
+  }
+
+  @Delete(':id')
+  @Roles(SYSTEM_ROLES.OWNER)
+  @ApiOperation({ summary: 'Delete employee' })
+  remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.employeeService.remove(user.businessId, id, user);
   }
 
   @Patch(':id/role')
