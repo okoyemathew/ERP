@@ -26,6 +26,7 @@ import { Avatar } from "./Avatar";
 import { Overlay } from "./Overlay";
 import { Badge } from "./Badge";
 import { colors, typography } from "@/theme";
+import { canAccess } from "@/utils/permissions";
 
 type RouteName = keyof AppStackParamList;
 
@@ -63,7 +64,7 @@ export function DrawerMenu({
   const insets = useSafeAreaInsets();
   const translateX = useRef(new Animated.Value(-286)).current;
   const name = role === "owner" ? "James Becker" : "Sarah Johnson";
-  const items = role === "owner" ? [...ownerOnly, ...shared] : shared.filter((item) => item.route !== "CreditSales");
+  const items = role === "owner" ? [...ownerOnly, ...shared] : shared.filter((item) => canAccess(role, item.route));
 
   useEffect(() => {
     Animated.spring(translateX, {

@@ -32,43 +32,57 @@ import { TaxSettingsScreen } from "@/screens/settings/TaxSettingsScreen";
 import { LanguageSettingsScreen } from "@/screens/settings/LanguageSettingsScreen";
 import { ThemeSettingsScreen } from "@/screens/settings/ThemeSettingsScreen";
 import { EmployeeFormScreen } from "@/screens/employees/EmployeeFormScreen";
+import { useAuthStore } from "@/store/authStore";
+import { canAccess } from "@/utils/permissions";
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
+const appScreens: Array<{
+  name: keyof AppStackParamList;
+  component: React.ComponentType<any>;
+}> = [
+  { name: "CustomerDetail", component: CustomerDetailScreen },
+  { name: "CustomerForm", component: CustomerFormScreen },
+  { name: "CreditSales", component: CreditSalesScreen },
+  { name: "Employees", component: EmployeesScreen },
+  { name: "EmployeeDetail", component: EmployeeDetailScreen },
+  { name: "EmployeeForm", component: EmployeeFormScreen },
+  { name: "Inventory", component: InventoryScreen },
+  { name: "ProductDetail", component: ProductDetailScreen },
+  { name: "ProductForm", component: ProductFormScreen },
+  { name: "ProductOptionManager", component: ProductOptionManagerScreen },
+  { name: "Expenses", component: ExpensesScreen },
+  { name: "Supplied", component: SuppliedScreen },
+  { name: "SupplierDetail", component: SupplierDetailScreen },
+  { name: "SupplierForm", component: SupplierFormScreen },
+  { name: "Disbursed", component: DisbursedScreen },
+  { name: "PendingPayments", component: PendingPaymentsScreen },
+  { name: "Reports", component: ReportsScreen },
+  { name: "CashRegister", component: CashRegisterScreen },
+  { name: "Settings", component: SettingsScreen },
+  { name: "BusinessProfile", component: BusinessProfileScreen },
+  { name: "ReceiptSettings", component: ReceiptSettingsScreen },
+  { name: "TaxSettings", component: TaxSettingsScreen },
+  { name: "LanguageSettings", component: LanguageSettingsScreen },
+  { name: "PrinterSettings", component: PrinterSettingsScreen },
+  { name: "ThemeSettings", component: ThemeSettingsScreen },
+  { name: "HelpSupport", component: HelpSupportScreen },
+  { name: "AboutBusiness", component: AboutBusinessScreen },
+  { name: "NotificationSettings", component: NotificationSettingsScreen },
+  { name: "Notifications", component: NotificationsScreen },
+  { name: "Profile", component: ProfileScreen }
+];
+
 export function AppNavigator() {
+  const role = useAuthStore((state) => state.user?.role ?? "owner");
+  const screens = appScreens.filter((screen) => canAccess(role, screen.name));
+
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Tabs" component={BottomTabNavigator} />
-      <Stack.Screen name="CustomerDetail" component={CustomerDetailScreen} />
-      <Stack.Screen name="CustomerForm" component={CustomerFormScreen} />
-      <Stack.Screen name="CreditSales" component={CreditSalesScreen} />
-      <Stack.Screen name="Employees" component={EmployeesScreen} />
-      <Stack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} />
-      <Stack.Screen name="EmployeeForm" component={EmployeeFormScreen} />
-      <Stack.Screen name="Inventory" component={InventoryScreen} />
-      <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
-      <Stack.Screen name="ProductForm" component={ProductFormScreen} />
-      <Stack.Screen name="ProductOptionManager" component={ProductOptionManagerScreen} />
-      <Stack.Screen name="Expenses" component={ExpensesScreen} />
-      <Stack.Screen name="Supplied" component={SuppliedScreen} />
-      <Stack.Screen name="SupplierDetail" component={SupplierDetailScreen} />
-      <Stack.Screen name="SupplierForm" component={SupplierFormScreen} />
-      <Stack.Screen name="Disbursed" component={DisbursedScreen} />
-      <Stack.Screen name="PendingPayments" component={PendingPaymentsScreen} />
-      <Stack.Screen name="Reports" component={ReportsScreen} />
-      <Stack.Screen name="CashRegister" component={CashRegisterScreen} />
-      <Stack.Screen name="Settings" component={SettingsScreen} />
-      <Stack.Screen name="BusinessProfile" component={BusinessProfileScreen} />
-      <Stack.Screen name="ReceiptSettings" component={ReceiptSettingsScreen} />
-      <Stack.Screen name="TaxSettings" component={TaxSettingsScreen} />
-      <Stack.Screen name="LanguageSettings" component={LanguageSettingsScreen} />
-      <Stack.Screen name="PrinterSettings" component={PrinterSettingsScreen} />
-      <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
-      <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
-      <Stack.Screen name="AboutBusiness" component={AboutBusinessScreen} />
-      <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
-      <Stack.Screen name="Notifications" component={NotificationsScreen} />
-      <Stack.Screen name="Profile" component={ProfileScreen} />
+      {screens.map((screen) => (
+        <Stack.Screen key={screen.name} name={screen.name} component={screen.component} />
+      ))}
     </Stack.Navigator>
   );
 }

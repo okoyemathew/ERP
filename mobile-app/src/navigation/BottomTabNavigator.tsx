@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { BottomTabParamList } from "@/types/navigation.types";
 import { BottomNav, DrawerMenu } from "@/components/common";
 import { OwnerDashboard } from "@/screens/dashboard/OwnerDashboard";
+import { EmployeeDashboard } from "@/screens/dashboard/EmployeeDashboard";
 import { SalesRecordsScreen } from "@/screens/sales/SalesRecordsScreen";
 import { AddNewSalesScreen } from "@/screens/sales/AddNewSalesScreen";
 import { CustomersScreen } from "@/screens/customers/CustomersScreen";
@@ -19,7 +20,7 @@ export function BottomTabNavigator() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const role = useAuthStore((state) => state.user?.role ?? "owner");
   const logout = useAuthStore((state) => state.logout);
-  const Dashboard = OwnerDashboard;
+  const Dashboard = role === "owner" ? OwnerDashboard : EmployeeDashboard;
 
   return (
     <Tabs.Navigator

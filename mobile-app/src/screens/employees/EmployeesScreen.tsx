@@ -144,6 +144,20 @@ export function EmployeesScreen({ navigation }: { navigation: any }) {
 
   const canShowDeleteAction = canManage && isOwnerUser;
 
+  const explainDeleteUnavailable = (employee: ApiEmployee) => {
+    if (employee.userId === currentUser?.id || employee.id === currentUser?.employeeId) {
+      Alert.alert("Cannot remove account", "You cannot delete your own employee profile while you are signed in.");
+      return;
+    }
+
+    if (employee.user.role?.name === "Owner") {
+      Alert.alert("Cannot remove owner", "Business owner profiles cannot be removed from the Employees screen.");
+      return;
+    }
+
+    Alert.alert("Cannot remove employee", "You do not have permission to delete this employee.");
+  };
+
   const updateEmployeeInList = (updated: ApiEmployee) => {
     setEmployees((current) => current.map((employee) => (employee.id === updated.id ? updated : employee)));
   };
@@ -204,6 +218,7 @@ export function EmployeesScreen({ navigation }: { navigation: any }) {
                 delete next[employee.id];
                 return next;
               });
+              void load(false);
               Alert.alert("Employee deleted", `${name} has been removed from the employee list.`);
             } catch (deleteError) {
               const message = deleteError instanceof Error ? deleteError.message : "Unable to delete employee.";
@@ -279,7 +294,7 @@ export function EmployeesScreen({ navigation }: { navigation: any }) {
             onOpen={() => navigation.navigate("EmployeeDetail", { employeeId: item.id })}
             onEdit={() => navigation.navigate("EmployeeForm", { employeeId: item.id })}
             onToggleLogin={() => toggleLogin(item)}
-            onDelete={() => deleteEmployee(item)}
+            onDelete={() => (canUseOwnerActions(item) ? deleteEmployee(item) : explainDeleteUnavailable(item))}
           />
         )}
       />
@@ -354,7 +369,7 @@ function EmployeeCard({
                 icon={<Trash2 size={16} color={colors.error} />}
                 label={canDelete ? `Delete ${name}` : `Delete unavailable for ${name}`}
                 destructive
-                disabled={processing || !canDelete}
+                disabled={processing}
                 onPress={onDelete}
               />
             ) : null}

@@ -5,8 +5,10 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Plus, Truck } from "lucide-react-native";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
 import { suppliersService } from "@/services/suppliers.service";
+import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
 import type { ApiSupplier } from "@/types/supplier";
+import { canAccess } from "@/utils/permissions";
 import { formatCurrency } from "@/utils/format";
 
 function money(value: string | number | null | undefined): number {
@@ -14,6 +16,8 @@ function money(value: string | number | null | undefined): number {
 }
 
 export function SuppliedScreen({ navigation }: { navigation: any }) {
+  const role = useAuthStore((state) => state.user?.role ?? "owner");
+  const canCreateSupplier = canAccess(role, "SupplierForm");
   const [query, setQuery] = useState("");
   const [suppliers, setSuppliers] = useState<ApiSupplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +63,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   if (loading && suppliers.length === 0) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title="Suppliers" right={<Pressable onPress={() => navigation.navigate("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable>} />
+        <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigation.navigate("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
         <LoadingState label="Loading suppliers" />
       </View>
     );
@@ -68,7 +72,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   if (error && suppliers.length === 0) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title="Suppliers" right={<Pressable onPress={() => navigation.navigate("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable>} />
+        <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigation.navigate("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
         <ErrorState onRetry={() => void loadSuppliers()} />
       </View>
     );
@@ -76,7 +80,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Suppliers" right={<Pressable onPress={() => navigation.navigate("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable>} />
+      <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigation.navigate("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
       <FlatList
         data={suppliers}
         keyExtractor={(item) => item.id}
