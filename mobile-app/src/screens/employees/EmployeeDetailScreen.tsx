@@ -10,7 +10,7 @@ import { employeesService } from "@/services/employees.service";
 import { printingService } from "@/services/printing.service";
 import { salesService } from "@/services/sales.service";
 import { useAuthStore } from "@/store/authStore";
-import { colors } from "@/theme";
+import { colors, spacing } from "@/theme";
 import type { ApiEmployee, EmployeeProfileResponse, EmployeeSalesResponse } from "@/types/employee";
 import type { ApiSale } from "@/types/sales";
 import { formatCurrency } from "@/utils/format";
@@ -42,6 +42,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [selectedSale, setSelectedSale] = useState<ApiSale | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [loginAccessLoading, setLoginAccessLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
@@ -138,12 +139,20 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   };
 
   const toggleLogin = async (employee: ApiEmployee) => {
+    if (loginAccessLoading || deleting) return;
+    const nextCanLogin = !employee.canLogin;
+    const employeeName = `${employee.firstName} ${employee.lastName}`.trim() || employee.user.username;
+    setLoginAccessLoading(true);
     try {
-      await employeesService.setLoginAccess(employee.id, !employee.canLogin);
+      const updatedEmployee = await employeesService.setLoginAccess(employee.id, nextCanLogin);
+      setProfile((current) => current ? { ...current, employee: updatedEmployee } : current);
       await load();
+      Alert.alert(nextCanLogin ? "Login enabled" : "Login disabled", `${employeeName}'s login access has been ${nextCanLogin ? "enabled" : "disabled"}.`);
     } catch (loginError) {
       const message = loginError instanceof Error ? loginError.message : "Unable to update login access.";
       Alert.alert("Unable to update", message);
+    } finally {
+      setLoginAccessLoading(false);
     }
   };
 
@@ -151,8 +160,8 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     if (deleting) return;
 
     Alert.alert(
-      "Delete employee",
-      `${employeeName} will be removed from the employee list and their login access will be revoked.`,
+      "Delete Employee?",
+      `Are you sure you want to delete ${employeeName}? This action will remove their access to the business.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -162,7 +171,11 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
             setDeleting(true);
             try {
               await employeesService.remove(employee.id);
-              navigation.goBack();
+              if (navigation.canGoBack()) {
+                navigation.goBack();
+              } else {
+                navigation.navigate("Employees");
+              }
             } catch (deleteError) {
               const message = deleteError instanceof Error ? deleteError.message : "Unable to delete employee.";
               Alert.alert("Unable to delete", message);
@@ -183,16 +196,25 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const latestSession = profile.recentSessions[0];
   const isOwnerProfile = employee.user.role?.name === "Owner";
   const isCurrentUserProfile = employee.userId === currentUser?.id || employee.id === currentUser?.employeeId;
-  const canDeleteEmployee = canManage && currentUser?.roleName === "Owner" && !isOwnerProfile && !isCurrentUserProfile;
+  const isOwnerUser = currentUser?.roleName === "Owner";
+  const canUseStatusActions = canManage && !isOwnerProfile && !isCurrentUserProfile;
+  const canUseOwnerActions = canManage && isOwnerUser && !isOwnerProfile && !isCurrentUserProfile;
+  const displayStatus = employee.canLogin ? employee.status : "Disabled";
+  const actionDisabled = loginAccessLoading || deleting;
 
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Employee Detail" onBack={() => navigation.goBack()} />
-      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, 16) + 24 }]} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scroller}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: spacing.bottomNavHeight + Math.max(insets.bottom, 16) + 32 }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.hero}>
           <Avatar name={name} imageUri={employee.profileImage ?? undefined} size={64} />
           <Text style={styles.name}>{name}</Text>
-          <Text style={styles.role}>{employee.user.role?.name ?? "No role"} | {employee.status}</Text>
+          <Text style={styles.role}>{employee.user.role?.name ?? "No role"} | {displayStatus}</Text>
         </LinearGradient>
         <View style={styles.grid}>
           <Card style={styles.stat}><Text style={styles.value}>{profile.summary.salesCount}</Text><Text style={styles.label}>Sales</Text></Card>
@@ -260,11 +282,32 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
           {canManage ? (
             <View style={styles.actions}>
               <Button label="Edit Employee" onPress={() => navigation.navigate("EmployeeForm", { employeeId: employee.id })} />
-              <Button label={employee.canLogin ? "Disable Login" : "Enable Login"} variant="ghost" onPress={() => void toggleLogin(employee)} />
-              <Button label={employee.status === "ACTIVE" ? "Deactivate" : "Activate"} variant={employee.status === "ACTIVE" ? "danger" : "success"} onPress={() => void updateStatus(employee.status === "ACTIVE" ? "deactivate" : "activate")} />
-              {canManageRoles ? <Button label="Suspend" variant="ghost" onPress={() => void updateStatus("suspend")} /> : null}
-              {canDeleteEmployee ? <Button label="Delete Employee" variant="danger" loading={deleting} icon={<Trash2 size={16} color={colors.error} />} onPress={() => deleteEmployee(employee, name)} /> : null}
+              {canUseStatusActions ? (
+                <Button label={employee.status === "ACTIVE" ? "Deactivate" : "Activate"} variant={employee.status === "ACTIVE" ? "danger" : "success"} onPress={() => void updateStatus(employee.status === "ACTIVE" ? "deactivate" : "activate")} />
+              ) : null}
+              {canManageRoles && canUseStatusActions ? <Button label="Suspend" variant="ghost" onPress={() => void updateStatus("suspend")} /> : null}
             </View>
+          ) : null}
+
+          {canUseOwnerActions ? (
+            <Card style={styles.managementCard}>
+              <Text style={styles.sectionTitle}>Employee Management</Text>
+              <Button
+                label={employee.canLogin ? "Disable Login" : "Enable Login"}
+                variant="ghost"
+                loading={loginAccessLoading}
+                disabled={actionDisabled}
+                onPress={() => void toggleLogin(employee)}
+              />
+              <Button
+                label="Delete Employee"
+                variant="danger"
+                loading={deleting}
+                disabled={actionDisabled}
+                icon={<Trash2 size={16} color={colors.error} />}
+                onPress={() => deleteEmployee(employee, name)}
+              />
+            </Card>
           ) : null}
         </View>
       </ScrollView>
@@ -332,6 +375,7 @@ function Info({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  scroller: { flex: 1 },
   scrollContent: { flexGrow: 1 },
   hero: { padding: 20, alignItems: "center", gap: 6 },
   name: { color: colors.surface, fontSize: 20, fontWeight: "800" },
@@ -345,6 +389,7 @@ const styles = StyleSheet.create({
   infoRow: { gap: 3 },
   item: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
   actions: { gap: 10 },
+  managementCard: { gap: 12 },
   salesCard: { gap: 14 },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   sectionTitle: { color: colors.foreground, fontSize: 15, fontWeight: "800" },

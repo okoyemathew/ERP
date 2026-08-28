@@ -11,14 +11,16 @@ interface ButtonProps {
   onPress?: () => void;
   variant?: "primary" | "ghost" | "danger" | "success";
   loading?: boolean;
+  disabled?: boolean;
   icon?: React.ReactNode;
   style?: ViewStyle;
   accessibilityLabel?: string;
 }
 
-export function Button({ label, onPress, variant = "primary", loading, icon, style, accessibilityLabel }: ButtonProps) {
+export function Button({ label, onPress, variant = "primary", loading, disabled, icon, style, accessibilityLabel }: ButtonProps) {
   const { t } = useTranslation();
   const handlePress = () => {
+    if (disabled || loading) return;
     void Haptics.selectionAsync();
     onPress?.();
   };
@@ -32,7 +34,13 @@ export function Button({ label, onPress, variant = "primary", loading, icon, sty
 
   if (variant === "primary") {
     return (
-      <Pressable onPress={handlePress} style={[styles.pressable, style]} accessibilityRole="button" accessibilityLabel={t(accessibilityLabel ?? label)}>
+      <Pressable
+        onPress={handlePress}
+        disabled={disabled || loading}
+        style={[styles.pressable, (disabled || loading) && styles.disabled, style]}
+        accessibilityRole="button"
+        accessibilityLabel={t(accessibilityLabel ?? label)}
+      >
         <LinearGradient colors={[colors.primary, colors.primaryDark]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradient}>
           {content}
         </LinearGradient>
@@ -43,7 +51,8 @@ export function Button({ label, onPress, variant = "primary", loading, icon, sty
   return (
     <Pressable
       onPress={handlePress}
-      style={[styles.secondary, variant === "danger" && styles.danger, variant === "success" && styles.success, style]}
+      disabled={disabled || loading}
+      style={[styles.secondary, variant === "danger" && styles.danger, variant === "success" && styles.success, (disabled || loading) && styles.disabled, style]}
       accessibilityRole="button"
       accessibilityLabel={t(accessibilityLabel ?? label)}
     >
@@ -84,6 +93,9 @@ const styles = StyleSheet.create({
   success: {
     borderColor: colors.successBorder,
     backgroundColor: colors.successBg
+  },
+  disabled: {
+    opacity: 0.62
   },
   label: {
     ...typography.subtitle,

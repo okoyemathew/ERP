@@ -178,7 +178,7 @@ export class EmployeeController {
   }
 
   @Patch(':id/login-access')
-  @Roles(SYSTEM_ROLES.OWNER, SYSTEM_ROLES.ADMIN, SYSTEM_ROLES.MANAGER)
+  @Roles(SYSTEM_ROLES.OWNER)
   @ApiOperation({ summary: 'Enable or disable employee login' })
   setLoginAccess(
     @CurrentUser() user: AuthenticatedUser,

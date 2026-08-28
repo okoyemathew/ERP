@@ -384,13 +384,7 @@ export class EmployeeService {
       throw new NotFoundException('Employee not found');
     }
 
-    if (current.id === actor.employeeId || current.userId === actor.id) {
-      throw new ForbiddenException('You cannot delete your own employee profile');
-    }
-
-    if (current.user.role?.name === SYSTEM_ROLES.OWNER) {
-      throw new ForbiddenException('Owner employee profile cannot be deleted');
-    }
+    this.assertOwnerCanManageEmployee(current, actor, 'delete');
 
     const deletedAt = new Date();
 
@@ -491,12 +485,14 @@ export class EmployeeService {
   ) {
     const current = await this.prisma.employee.findFirst({
       where: { id, businessId, deletedAt: null },
-      include: { user: true },
+      include: { user: { include: { role: true } } },
     });
 
     if (!current) {
       throw new NotFoundException('Employee not found');
     }
+
+    this.assertOwnerCanManageEmployee(current, actor, 'update login access for');
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
@@ -1014,9 +1010,18 @@ export class EmployeeService {
   ) {
     const current = await this.prisma.employee.findFirst({
       where: { id, businessId, deletedAt: null },
+      include: { user: { include: { role: true } } },
     });
     if (!current) {
       throw new NotFoundException('Employee not found');
+    }
+
+    if (actor && (current.id === actor.employeeId || current.userId === actor.id)) {
+      throw new ForbiddenException('You cannot update your own employee status');
+    }
+
+    if (current.user.role?.name === SYSTEM_ROLES.OWNER) {
+      throw new ForbiddenException('Owner employee profile status cannot be changed');
     }
 
     const employee = await this.prisma.$transaction(async (tx) => {
@@ -1054,6 +1059,30 @@ export class EmployeeService {
     });
 
     return this.sanitize(employee);
+  }
+
+  private assertOwnerCanManageEmployee(
+    employee: {
+      id: string;
+      userId: string;
+      user: { role?: { name: string } | null };
+    },
+    actor: AuthenticatedUser,
+    action: string,
+  ): void {
+    if (actor.roleName !== SYSTEM_ROLES.OWNER) {
+      throw new ForbiddenException('Only a business owner can manage employees');
+    }
+
+    if (employee.id === actor.employeeId || employee.userId === actor.id) {
+      throw new ForbiddenException(
+        `You cannot ${action} your own employee profile`,
+      );
+    }
+
+    if (employee.user.role?.name === SYSTEM_ROLES.OWNER) {
+      throw new ForbiddenException('Owner employee profile cannot be managed');
+    }
   }
 
   private async getEmployeeContext(businessId: string, id: string) {
