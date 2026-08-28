@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Eye, EyeOff, Lock, Mail, ShoppingCart } from "lucide-react-native";
 import { Button, Input } from "@/components/common";
@@ -16,17 +16,18 @@ export function LoginScreen({ navigation }: { navigation: any }) {
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const submit = async () => {
-    const emailOrPhone = email.trim();
+    const emailOrPhone = email.trim().toLowerCase();
     if (!emailOrPhone || !password) {
-      setValidationError("Enter your email or phone and password.");
+      setValidationError("Enter your email, phone, or username and password.");
       return;
     }
 
     setValidationError(null);
     try {
       await login({ emailOrPhone, password });
-    } catch {
-      // The store exposes a clean API error for the screen.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Login failed. Please try again.";
+      Alert.alert("Unable to sign in", message);
     }
   };
 
@@ -40,7 +41,15 @@ export function LoginScreen({ navigation }: { navigation: any }) {
         <Text style={styles.subtitle}>Welcome back</Text>
       </View>
       <View style={styles.form}>
-        <Input label="Email Address" value={email} onChangeText={setEmail} keyboardType="email-address" icon={<Mail size={15} color={colors.textPlaceholder} />} accessibilityLabel="Email address" />
+        <Input
+          label="Email, Phone or Username"
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          icon={<Mail size={15} color={colors.textPlaceholder} />}
+          accessibilityLabel="Email, phone or username"
+        />
         <Input
           label="Password"
           value={password}

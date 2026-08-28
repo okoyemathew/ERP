@@ -9,6 +9,13 @@ type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 
 let unauthorizedHandler: (() => void) | undefined;
 let refreshPromise: Promise<string | null> | null = null;
+const publicAuthEndpoints = new Set<string>([
+  endpoints.auth.login,
+  endpoints.auth.registerOwner,
+  endpoints.auth.forgotPassword,
+  endpoints.auth.resetPassword,
+  endpoints.auth.refresh
+]);
 
 export function setUnauthorizedHandler(handler: () => void) {
   unauthorizedHandler = handler;
@@ -22,6 +29,17 @@ export const api = axios.create({
     "Content-Type": "application/json"
   }
 });
+
+function isPublicAuthEndpoint(url?: string) {
+  if (!url) return false;
+
+  try {
+    const path = url.startsWith("http") ? new URL(url).pathname.replace(/^\/api/, "") : url;
+    return publicAuthEndpoints.has(path);
+  } catch {
+    return publicAuthEndpoints.has(url);
+  }
+}
 
 async function refreshAccessToken() {
   if (refreshPromise) return refreshPromise;
@@ -61,8 +79,9 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const original = error.config as RetriableConfig | undefined;
+    const publicAuthEndpoint = isPublicAuthEndpoint(original?.url);
 
-    if (error.response?.status === 401 && original && !original._retry && original.url !== endpoints.auth.refresh) {
+    if (error.response?.status === 401 && original && !original._retry && !publicAuthEndpoint) {
       original._retry = true;
       const refreshedToken = await refreshAccessToken();
       if (refreshedToken) {
@@ -71,7 +90,7 @@ api.interceptors.response.use(
       }
     }
 
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && !publicAuthEndpoint) {
       await clearAuthStorage();
       unauthorizedHandler?.();
     }

@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -283,6 +284,8 @@ const ROLE_PERMISSIONS: Record<DefaultRoleName, string[]> = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -294,6 +297,7 @@ export class AuthService {
     const user = await this.validateUser(
       loginDto.emailOrPhone,
       loginDto.password,
+      request,
     );
 
     return this.loginWithUser(user, request, {
@@ -614,12 +618,23 @@ export class AuthService {
     password: string,
     request?: Request,
   ): Promise<ValidatedLoginUser> {
+    const identifier = emailOrPhone.trim();
     const user = await this.prisma.user.findFirst({
       where: {
         OR: [
-          { email: emailOrPhone },
-          { phone: emailOrPhone },
-          { username: emailOrPhone },
+          {
+            email: {
+              equals: identifier,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          { phone: identifier },
+          {
+            username: {
+              equals: identifier,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
         ],
       },
       select: {
@@ -1481,18 +1496,26 @@ export class AuthService {
     businessId: string,
     request?: Request,
   ): Promise<void> {
-    await this.prisma.auditLog.create({
-      data: {
-        businessId,
-        userId,
-        action: AuditAction.LOGIN_FAILED,
-        entity: 'User',
-        entityId: userId,
-        description: 'Failed login attempt',
-        ipAddress: request ? this.getIpAddress(request) : undefined,
-        deviceId: this.getDeviceId(request),
-      },
-    });
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          businessId,
+          userId,
+          action: AuditAction.LOGIN_FAILED,
+          entity: 'User',
+          entityId: userId,
+          description: 'Failed login attempt',
+          ipAddress: request ? this.getIpAddress(request) : undefined,
+          deviceId: this.getDeviceId(request),
+        },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Unable to audit failed login for user ${userId}: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
+    }
   }
 
   private getIpAddress(request: Request): string | undefined {
