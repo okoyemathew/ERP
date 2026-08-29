@@ -16,7 +16,8 @@ function money(value: string | number | null | undefined): number {
 }
 
 export function SuppliedScreen({ navigation }: { navigation: any }) {
-  const role = useAuthStore((state) => state.user?.role ?? "owner");
+  const user = useAuthStore((state) => state.user);
+  const role = user?.roleName ? (user.roleName === "Owner" ? "owner" : "employee") : user?.role ?? "owner";
   const canCreateSupplier = canAccess(role, "SupplierForm");
   const [query, setQuery] = useState("");
   const [suppliers, setSuppliers] = useState<ApiSupplier[]>([]);

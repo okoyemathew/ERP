@@ -1,61 +1,132 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
-import { Bell, DollarSign, Receipt, ShoppingBag, ShoppingCart, Truck, Users } from "lucide-react-native";
-import { Button, Card } from "@/components/common";
+import { Bell, DollarSign, HandCoins, Receipt, ShoppingBag, ShoppingCart, TrendingUp, Truck, Users } from "lucide-react-native";
+import { Card, EmptyState, StatCard } from "@/components/common";
 import { ErrorState, LoadingState } from "@/components/common/StateViews";
-import { reportsService } from "@/services/reports.service";
+import { AreaChart } from "@/components/charts";
+import { salesService } from "@/services/sales.service";
 import { useAuth } from "@/hooks/useAuth";
 import { colors, spacing } from "@/theme";
-import type { DashboardSummary } from "@/types/report";
+import type { ApiSale } from "@/types/sales";
 import { formatCurrency } from "@/utils/format";
 
-const quickAccess = [
-  { label: "Sales Records", route: "SalesRecords", icon: ShoppingBag },
-  { label: "My Customers", route: "Customers", icon: Users },
-  { label: "Expenses", route: "Expenses", icon: Receipt },
-  { label: "Supplied Products", route: "Supplied", icon: Truck }
+const quickActions = [
+  { label: "New Sale", route: "AddNewSales", icon: ShoppingBag, color: colors.primary },
+  { label: "Credit Sales", route: "CreditSales", icon: HandCoins, color: "#0891B2" },
+  { label: "Expenses", route: "Expenses", icon: Receipt, color: colors.orange },
+  { label: "Supplied Products", route: "Supplied", icon: Truck, color: "#00838F" }
 ];
+
+type ChartPoint = { label: string; revenue: number };
+
+function saleCustomerName(sale: ApiSale) {
+  if (sale.customer?.companyName) return sale.customer.companyName;
+  return [sale.customer?.firstName, sale.customer?.lastName].filter(Boolean).join(" ") || "Walk-in Customer";
+}
+
+function saleAmount(sale: ApiSale) {
+  return Number(sale.totalAmount ?? 0);
+}
+
+function buildChartData(sales: ApiSale[]): ChartPoint[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - 6 + index);
+    return date;
+  });
+
+  const buckets = new Map(days.map((date) => [date.toISOString().slice(0, 10), 0]));
+
+  sales.forEach((sale) => {
+    const key = new Date(sale.saleDate).toISOString().slice(0, 10);
+    if (buckets.has(key)) {
+      buckets.set(key, (buckets.get(key) ?? 0) + saleAmount(sale));
+    }
+  });
+
+  return days.map((date) => {
+    const key = date.toISOString().slice(0, 10);
+    return { label: key.slice(5), revenue: buckets.get(key) ?? 0 };
+  });
+}
 
 export function EmployeeDashboard({ navigation }: { navigation: any }) {
   const user = useAuth((state) => state.user);
   const businessId = useAuth((state) => state.business?.id);
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [todaySales, setTodaySales] = useState<ApiSale[]>([]);
+  const [weeklySales, setWeeklySales] = useState<ApiSale[]>([]);
+  const [recentSales, setRecentSales] = useState<ApiSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId || !user?.id) {
+      setLoading(false);
+      return;
+    }
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(todayStart);
+    todayEnd.setHours(23, 59, 59, 999);
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(todayStart.getDate() - 6);
+
     setLoading(true);
     setError(null);
     try {
-      setSummary(await reportsService.dashboardSummary(businessId));
+      const [nextTodaySales, nextWeeklySales, nextRecentSales] = await Promise.all([
+        salesService.list({
+          userId: user.id,
+          status: "COMPLETED",
+          startDate: todayStart.toISOString(),
+          endDate: todayEnd.toISOString(),
+          limit: 200
+        }),
+        salesService.list({
+          userId: user.id,
+          status: "COMPLETED",
+          startDate: weekStart.toISOString(),
+          endDate: todayEnd.toISOString(),
+          limit: 200
+        }),
+        salesService.list({
+          userId: user.id,
+          status: "COMPLETED",
+          limit: 10
+        })
+      ]);
+
+      setTodaySales(nextTodaySales.data ?? []);
+      setWeeklySales(nextWeeklySales.data ?? []);
+      setRecentSales(nextRecentSales.data ?? []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load dashboard.");
     } finally {
       setLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, user?.id]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const statCards = useMemo(
-    () => [
-      { label: "Today's Sales", value: formatCurrency(summary?.totalRevenueToday ?? 0), icon: DollarSign, color: colors.primary },
-      { label: "This Week", value: formatCurrency(summary?.totalSales ?? 0), icon: ShoppingCart, color: colors.success },
-      { label: "Orders", value: String(summary?.totalSalesToday ?? 0), icon: Receipt, color: colors.warning }
-    ],
-    [summary]
-  );
+  const chartData = useMemo(() => buildChartData(weeklySales), [weeklySales]);
+
+  const todayRevenue = useMemo(() => todaySales.reduce((total, sale) => total + saleAmount(sale), 0), [todaySales]);
+  const weeklyRevenue = useMemo(() => weeklySales.reduce((total, sale) => total + saleAmount(sale), 0), [weeklySales]);
+  const uniqueCustomers = useMemo(() => new Set(weeklySales.map((sale) => sale.customerId).filter(Boolean)).size, [weeklySales]);
 
   if (loading) {
     return (
       <View style={styles.screen}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>{new Date().toLocaleDateString()}</Text>
+            <Text style={styles.greeting}>Good morning</Text>
             <Text style={styles.name}>{user?.firstName ?? "Employee"}</Text>
           </View>
         </View>
@@ -69,7 +140,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
       <View style={styles.screen}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>{new Date().toLocaleDateString()}</Text>
+            <Text style={styles.greeting}>Good morning</Text>
             <Text style={styles.name}>{user?.firstName ?? "Employee"}</Text>
           </View>
         </View>
@@ -82,47 +153,72 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
     <View style={styles.screen}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.greeting}>{new Date().toLocaleDateString()}</Text>
+          <Text style={styles.greeting}>Good morning</Text>
           <Text style={styles.name}>{[user?.firstName, user?.lastName].filter(Boolean).join(" ") || "Employee"}</Text>
         </View>
         <Pressable onPress={() => navigation.navigate("Notifications")} style={styles.bell} accessibilityLabel="Notifications">
           <Bell size={18} color={colors.textTertiary} />
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.stats}>
-          {statCards.map((stat) => {
-            const Icon = stat.icon;
-            return (
-            <Card key={stat.label} style={styles.stat}>
-              <Icon size={15} color={stat.color} />
-              <Text style={styles.statValue}>{stat.value}</Text>
-              <Text style={styles.statLabel}>{stat.label}</Text>
+      <FlatList
+        data={recentSales}
+        keyExtractor={(item) => item.id}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <View style={styles.headerContent}>
+            <View style={styles.grid}>
+              <StatCard label="Today's Sales" value={formatCurrency(todayRevenue)} icon={<DollarSign size={17} color={colors.primary} />} color={colors.primary} background={colors.secondaryBg} />
+              <StatCard label="Orders" value={String(todaySales.length)} icon={<ShoppingCart size={17} color={colors.success} />} color={colors.success} background={colors.successBg} />
+              <StatCard label="Week Sales" value={formatCurrency(weeklyRevenue)} icon={<TrendingUp size={17} color={colors.warning} />} color={colors.warning} background={colors.warningBg} />
+              <StatCard label="Customers" value={String(uniqueCustomers)} icon={<Users size={17} color={colors.purple} />} color={colors.purple} background={colors.purpleBg} />
+            </View>
+            <Text style={styles.section}>Quick Actions</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actions}>
+              {quickActions.map((action) => {
+                const Icon = action.icon;
+                return (
+                  <Pressable key={action.label} onPress={() => navigation.navigate(action.route)} style={styles.action} accessibilityLabel={action.label}>
+                    <Icon size={21} color={action.color} />
+                    <Text style={styles.actionText}>{action.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Card>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>My Weekly Revenue</Text>
+                <Text style={styles.delta}>{weeklySales.length} sales</Text>
+              </View>
+              <AreaChart data={chartData.length ? chartData : [{ label: "Today", revenue: 0 }]} />
             </Card>
-          );})}
-        </View>
-        <Button label="Start New Sale" icon={<ShoppingCart size={19} color={colors.surface} />} onPress={() => navigation.navigate("AddNewSales")} style={styles.cta} />
-        <Text style={styles.section}>Quick Access</Text>
-        <View style={styles.grid}>
-          {quickAccess.map((item) => {
-            const Icon = item.icon;
-            return (
-            <Pressable key={item.label} onPress={() => navigation.navigate(item.route)} accessibilityLabel={item.label}>
-              <Card style={styles.tile}>
-                <Icon size={20} color={colors.primary} />
-                <Text style={styles.tileText}>{item.label}</Text>
+            <Pressable onPress={() => navigation.navigate("Supplied")} accessibilityLabel="View supplied products">
+              <Card style={styles.supplied}>
+                <Truck size={18} color="#00838F" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.suppliedTitle}>Supplied Products</Text>
+                  <Text style={styles.suppliedText}>Review products supplied through your assigned workflow</Text>
+                </View>
+                <Text style={styles.view}>View</Text>
               </Card>
             </Pressable>
-          );})}
-        </View>
-        <Text style={styles.section}>Recent Activity</Text>
-        {(summary?.recentSales ?? []).map((item) => (
-          <Card key={item.id} style={styles.sale}>
-            <Text style={styles.saleCustomer}>{item.customerName}</Text>
-            <Text style={styles.saleAmount}>{formatCurrency(item.totalAmount)}</Text>
+            <Text style={styles.section}>Recent Sales</Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <Card style={styles.sale}>
+            <View style={styles.saleIcon}>
+              <ShoppingBag size={15} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.saleCustomer}>{saleCustomerName(item)}</Text>
+              <Text style={styles.saleMeta}>{item.saleNumber} | {item.items?.length ?? 0} items</Text>
+            </View>
+            <Text style={styles.saleAmount}>{formatCurrency(saleAmount(item))}</Text>
           </Card>
-        ))}
-      </ScrollView>
+        )}
+        ListEmptyComponent={<EmptyState icon={<ShoppingBag size={28} color={colors.textPlaceholder} />} title="No recent sales" />}
+        contentContainerStyle={styles.content}
+      />
     </View>
   );
 }
@@ -130,20 +226,26 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: { paddingTop: 58, paddingHorizontal: 16, paddingBottom: 14, backgroundColor: colors.surface, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  greeting: { color: colors.textPlaceholder, fontSize: 12, fontWeight: "600" },
+  greeting: { color: colors.textPlaceholder, fontSize: 14, fontWeight: "600" },
   name: { color: colors.foreground, fontSize: 20, fontWeight: "800", marginTop: 2 },
   bell: { width: 44, height: 44, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: "center", justifyContent: "center" },
   content: { padding: spacing.screenHorizontal, paddingBottom: 110, gap: 12 },
-  stats: { flexDirection: "row", gap: 10 },
-  stat: { flex: 1, alignItems: "center", gap: 5 },
-  statValue: { color: colors.foreground, fontSize: 16, fontWeight: "800" },
-  statLabel: { color: colors.textPlaceholder, fontSize: 10, textAlign: "center" },
-  cta: { borderRadius: 20 },
-  section: { color: colors.textTertiary, fontSize: 13, fontWeight: "800", marginTop: 6 },
+  headerContent: { gap: 12 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  tile: { width: "47.8%", height: 112, justifyContent: "space-between" },
-  tileText: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
-  sale: { flexDirection: "row", justifyContent: "space-between" },
+  section: { color: colors.textTertiary, fontSize: 13, fontWeight: "800", marginTop: 6 },
+  actions: { gap: 14, paddingVertical: 2 },
+  action: { width: 76, alignItems: "center", gap: 8, paddingVertical: 6 },
+  actionText: { color: colors.textTertiary, fontSize: 10, fontWeight: "600", textAlign: "center" },
+  cardHeader: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
+  cardTitle: { color: colors.textSecondary, fontSize: 14, fontWeight: "800" },
+  delta: { color: colors.success, fontSize: 11, fontWeight: "800" },
+  supplied: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#E0F7FA", borderColor: "#B2EBF2" },
+  suppliedTitle: { color: "#006064", fontSize: 12, fontWeight: "800" },
+  suppliedText: { color: "#00838F", fontSize: 11, marginTop: 3 },
+  view: { color: "#00838F", fontSize: 12, fontWeight: "800" },
+  sale: { flexDirection: "row", alignItems: "center", gap: 12 },
+  saleIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.secondaryBg, alignItems: "center", justifyContent: "center" },
   saleCustomer: { color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
+  saleMeta: { color: colors.textPlaceholder, fontSize: 11, marginTop: 2 },
   saleAmount: { color: colors.foreground, fontSize: 13, fontWeight: "800" }
 });

@@ -5,6 +5,7 @@ import BottomSheet from "@gorhom/bottom-sheet";
 import { CreditCard, HandCoins, Search } from "lucide-react-native";
 import { AppBottomSheet, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
 import { creditSalesService } from "@/services/credit-sales.service";
+import { useAuth } from "@/hooks/useAuth";
 import { colors, spacing } from "@/theme";
 import type { ApiCreditSale, CreditSaleListResponse } from "@/types/creditSale";
 import type { PosPaymentMethod } from "@/types/sales";
@@ -27,6 +28,9 @@ function todayDate() {
 }
 
 export function CreditSalesScreen() {
+  const user = useAuth((state) => state.user);
+  const roleName = user?.roleName?.trim();
+  const canUseFinancialCredit = Boolean(user?.permissions?.includes("credit-sales.manage") || roleName === "Owner" || roleName === "Admin" || (!roleName && user?.role === "owner"));
   const [query, setQuery] = useState("");
   const [response, setResponse] = useState<CreditSaleListResponse | null>(null);
   const [selected, setSelected] = useState<ApiCreditSale | null>(null);
@@ -44,9 +48,12 @@ export function CreditSalesScreen() {
     if (showSpinner) setLoading(true);
     setError(null);
     try {
-      const data = search.trim()
-        ? await creditSalesService.search(search.trim(), { limit: 50 })
-        : await creditSalesService.outstanding({ limit: 50 });
+      const term = search.trim();
+      const data = canUseFinancialCredit
+        ? term
+          ? await creditSalesService.search(term, { limit: 50 })
+          : await creditSalesService.outstanding({ limit: 50 })
+        : await creditSalesService.posOutstanding({ limit: 50, search: term || undefined });
       setResponse(data);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load credit sales.");
@@ -54,7 +61,7 @@ export function CreditSalesScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [query]);
+  }, [canUseFinancialCredit, query]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -101,7 +108,8 @@ export function CreditSalesScreen() {
 
     setProcessing(true);
     try {
-      const updated = await creditSalesService.collectPayment(selected.id, {
+      const collectCreditPayment = canUseFinancialCredit ? creditSalesService.collectPayment : creditSalesService.collectPosPayment;
+      const updated = await collectCreditPayment(selected.id, {
         amount: value,
         paymentMethod: toApiPaymentMethod(method),
         paymentDate: new Date(paymentDate).toISOString(),

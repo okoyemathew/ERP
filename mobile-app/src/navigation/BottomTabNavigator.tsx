@@ -18,7 +18,8 @@ function EmptyMore() {
 
 export function BottomTabNavigator() {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const role = useAuthStore((state) => state.user?.role ?? "owner");
+  const user = useAuthStore((state) => state.user);
+  const role = user?.roleName ? (user.roleName === "Owner" ? "owner" : "employee") : user?.role ?? "owner";
   const logout = useAuthStore((state) => state.logout);
   const Dashboard = role === "owner" ? OwnerDashboard : EmployeeDashboard;
 

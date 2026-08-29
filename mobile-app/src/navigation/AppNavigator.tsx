@@ -74,7 +74,8 @@ const appScreens: Array<{
 ];
 
 export function AppNavigator() {
-  const role = useAuthStore((state) => state.user?.role ?? "owner");
+  const user = useAuthStore((state) => state.user);
+  const role = user?.roleName ? (user.roleName === "Owner" ? "owner" : "employee") : user?.role ?? "owner";
   const screens = appScreens.filter((screen) => canAccess(role, screen.name));
 
   return (

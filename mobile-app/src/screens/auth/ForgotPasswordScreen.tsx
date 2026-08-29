@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Mail, Phone } from "lucide-react-native";
 import { Button, Input, ScreenHeader } from "@/components/common";
@@ -22,10 +22,21 @@ export function ForgotPasswordScreen({ navigation }: { navigation: any }) {
     setError(null);
     try {
       const response = await authService.forgotPassword({ emailOrPhone: value });
-      navigation.navigate("ResetPassword", {
+      const params = {
         emailOrPhone: value,
         token: response.devToken
-      });
+      };
+
+      if (response.devToken) {
+        Alert.alert("Reset token", `Development token: ${response.devToken}`, [
+          { text: "Continue", onPress: () => navigation.navigate("ResetPassword", params) }
+        ]);
+        return;
+      }
+
+      Alert.alert("Reset token sent", response.message, [
+        { text: "Continue", onPress: () => navigation.navigate("ResetPassword", params) }
+      ]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to send reset token.");
     } finally {

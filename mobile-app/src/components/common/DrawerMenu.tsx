@@ -27,6 +27,7 @@ import { Overlay } from "./Overlay";
 import { Badge } from "./Badge";
 import { colors, typography } from "@/theme";
 import { canAccess } from "@/utils/permissions";
+import { useAuthStore } from "@/store/authStore";
 
 type RouteName = keyof AppStackParamList;
 
@@ -62,8 +63,10 @@ export function DrawerMenu({
   onLogout: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((state) => state.user);
   const translateX = useRef(new Animated.Value(-286)).current;
-  const name = role === "owner" ? "James Becker" : "Sarah Johnson";
+  const name = user?.name || [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.username || (role === "owner" ? "Business Owner" : "Employee");
+  const roleLabel = user?.roleName ?? (role === "owner" ? "Business Owner" : "Employee");
   const items = role === "owner" ? [...ownerOnly, ...shared] : shared.filter((item) => canAccess(role, item.route));
 
   useEffect(() => {
@@ -89,14 +92,14 @@ export function DrawerMenu({
             </Pressable>
           </View>
           <View style={styles.profile}>
-            <Avatar name={name} size={48} />
+            <Avatar name={name} imageUri={user?.profileImage ?? undefined} size={48} />
             <View>
               <Text style={styles.name}>{name}</Text>
-              <Badge label={role === "owner" ? "Business Owner" : "Employee"} variant="primary" />
+              <Badge label={roleLabel} variant="primary" />
             </View>
           </View>
         </View>
-        <ScrollView contentContainerStyle={styles.list}>
+        <ScrollView style={styles.menuScroll} contentContainerStyle={styles.list}>
           {items.map((item) => {
             const Icon = item.icon;
             return (
@@ -129,7 +132,8 @@ const styles = StyleSheet.create({
     left: 0,
     width: 286,
     backgroundColor: colors.surface,
-    zIndex: 30
+    zIndex: 30,
+    flexDirection: "column"
   },
   header: {
     paddingTop: 56,
@@ -167,6 +171,9 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingVertical: 8
+  },
+  menuScroll: {
+    flex: 1
   },
   item: {
     minHeight: 56,

@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -798,10 +799,29 @@ export class AuthService {
     devToken?: string;
   }> {
     const genericResponse = this.passwordResetRequestedResponse();
+    if (
+      this.configService.get<string>('NODE_ENV') === 'production' &&
+      !this.passwordResetDeliveryService.hasConfiguredDelivery()
+    ) {
+      throw new ServiceUnavailableException(
+        'Password reset delivery is not configured',
+      );
+    }
+
     const identifier = dto.emailOrPhone.trim();
+    const normalizedPhone = this.normalizePhoneIdentifier(identifier);
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ email: identifier }, { phone: identifier }],
+        OR: [
+          {
+            email: {
+              equals: identifier,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          { phone: identifier },
+          ...(normalizedPhone !== identifier ? [{ phone: normalizedPhone }] : []),
+        ],
       },
       select: {
         id: true,
@@ -816,11 +836,23 @@ export class AuthService {
       return genericResponse;
     }
 
-    const channel = this.resolvePasswordResetChannel(dto, identifier, user);
+    const requestedChannel = this.resolvePasswordResetChannel(
+      dto,
+      identifier,
+      normalizedPhone,
+      user,
+    );
+    const channel = this.resolveDeliverablePasswordResetChannel(
+      requestedChannel,
+      user,
+    );
     const destination =
       channel === PasswordResetChannel.EMAIL ? user.email : user.phone;
 
-    if (!destination) {
+    if (
+      !destination ||
+      !this.passwordResetDeliveryService.canDeliver(channel, destination)
+    ) {
       return genericResponse;
     }
 
@@ -879,9 +911,19 @@ export class AuthService {
     request: Request,
   ): Promise<{ success: true }> {
     const identifier = dto.emailOrPhone.trim();
+    const normalizedPhone = this.normalizePhoneIdentifier(identifier);
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ email: identifier }, { phone: identifier }],
+        OR: [
+          {
+            email: {
+              equals: identifier,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          { phone: identifier },
+          ...(normalizedPhone !== identifier ? [{ phone: normalizedPhone }] : []),
+        ],
       },
       select: {
         id: true,
@@ -1322,6 +1364,7 @@ export class AuthService {
   private resolvePasswordResetChannel(
     dto: ForgotPasswordDto,
     identifier: string,
+    normalizedPhone: string,
     user: { email: string | null; phone: string | null },
   ): PasswordResetChannel {
     if (dto.channel) {
@@ -1332,7 +1375,57 @@ export class AuthService {
       return PasswordResetChannel.EMAIL;
     }
 
+    if (
+      user.phone &&
+      (user.phone === identifier || user.phone === normalizedPhone)
+    ) {
+      return PasswordResetChannel.SMS;
+    }
+
+    if (user.email) {
+      return PasswordResetChannel.EMAIL;
+    }
+
     return PasswordResetChannel.SMS;
+  }
+
+  private resolveDeliverablePasswordResetChannel(
+    requestedChannel: PasswordResetChannel,
+    user: { email: string | null; phone: string | null },
+  ): PasswordResetChannel {
+    const requestedDestination =
+      requestedChannel === PasswordResetChannel.EMAIL ? user.email : user.phone;
+
+    if (
+      this.passwordResetDeliveryService.canDeliver(
+        requestedChannel,
+        requestedDestination,
+      )
+    ) {
+      return requestedChannel;
+    }
+
+    const fallbackChannel =
+      requestedChannel === PasswordResetChannel.EMAIL
+        ? PasswordResetChannel.SMS
+        : PasswordResetChannel.EMAIL;
+    const fallbackDestination =
+      fallbackChannel === PasswordResetChannel.EMAIL ? user.email : user.phone;
+
+    if (
+      this.passwordResetDeliveryService.canDeliver(
+        fallbackChannel,
+        fallbackDestination,
+      )
+    ) {
+      return fallbackChannel;
+    }
+
+    return requestedChannel;
+  }
+
+  private normalizePhoneIdentifier(identifier: string): string {
+    return identifier.replace(/[\s().-]/g, '');
   }
 
   private generateResetToken(): string {
