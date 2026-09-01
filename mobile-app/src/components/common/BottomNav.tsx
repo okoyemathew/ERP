@@ -1,7 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
-import { Bell, HandCoins, LayoutDashboard, Menu, Plus, Receipt, Settings, ShoppingBag, Truck, User, Users } from "lucide-react-native";
+import { LayoutDashboard, Menu, Plus, ShoppingBag, Users } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,15 +17,6 @@ export const ownerBottomTabs: BottomNavItem[] = [
   { name: "AddNewSales", label: "Add New Sales", icon: Plus },
   { name: "Customers", label: "Customers", icon: Users },
   { name: "More", label: "More", icon: Menu }
-];
-
-export const employeeBottomTabs: BottomNavItem[] = [
-  { name: "CreditSales", label: "Credit Sales", icon: HandCoins },
-  { name: "Expenses", label: "Expenses", icon: Receipt },
-  { name: "Supplied", label: "Supplied Products", icon: Truck },
-  { name: "Notifications", label: "Notifications", icon: Bell },
-  { name: "Profile", label: "Profile", icon: User },
-  { name: "Settings", label: "Settings", icon: Settings }
 ];
 
 export function BottomNav({
