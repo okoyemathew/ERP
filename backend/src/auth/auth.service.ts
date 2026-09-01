@@ -842,6 +842,21 @@ export class AuthService {
       normalizedPhone,
       user,
     );
+    const requestedDestination =
+      requestedChannel === PasswordResetChannel.EMAIL ? user.email : user.phone;
+
+    if (
+      requestedChannel === PasswordResetChannel.EMAIL &&
+      !this.passwordResetDeliveryService.canDeliver(
+        requestedChannel,
+        requestedDestination,
+      )
+    ) {
+      throw new ServiceUnavailableException(
+        'Password reset email delivery is not configured',
+      );
+    }
+
     const channel = this.resolveDeliverablePasswordResetChannel(
       requestedChannel,
       user,

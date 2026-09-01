@@ -21,6 +21,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@nestjs/cli": "^11.0.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -28,7 +29,6 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/swagger": "^11.4.6",
-    "@nestjs/cli": "^11.0.0",
     "@prisma/client": "^6.19.3",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
@@ -39,6 +39,7 @@
     "passport-local": "^1.0.0",
     "prisma": "^6.19.3",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.25.0",
     "rxjs": "^7.8.1",
     "swagger-ui-express": "^5.0.0",
     "ts-loader": "^9.5.2",
