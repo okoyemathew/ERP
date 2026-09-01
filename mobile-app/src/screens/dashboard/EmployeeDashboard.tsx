@@ -18,6 +18,8 @@ const quickActions = [
   { label: "Supplied Products", route: "Supplied", icon: Truck, color: "#00838F" }
 ];
 
+const tabRoutes = new Set(["Dashboard", "SalesRecords", "AddNewSales", "Customers", "More"]);
+
 type ChartPoint = { label: string; revenue: number };
 
 function saleCustomerName(sale: ApiSale) {
@@ -121,6 +123,16 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
   const weeklyRevenue = useMemo(() => weeklySales.reduce((total, sale) => total + saleAmount(sale), 0), [weeklySales]);
   const uniqueCustomers = useMemo(() => new Set(weeklySales.map((sale) => sale.customerId).filter(Boolean)).size, [weeklySales]);
 
+  const navigateApp = (route: string) => {
+    if (tabRoutes.has(route)) {
+      navigation.navigate(route);
+      return;
+    }
+    const parent = navigation.getParent?.();
+    if (parent) parent.navigate(route as never);
+    else navigation.navigate(route);
+  };
+
   if (loading) {
     return (
       <View style={styles.screen}>
@@ -156,7 +168,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
           <Text style={styles.greeting}>Good morning</Text>
           <Text style={styles.name}>{[user?.firstName, user?.lastName].filter(Boolean).join(" ") || "Employee"}</Text>
         </View>
-        <Pressable onPress={() => navigation.navigate("Notifications")} style={styles.bell} accessibilityLabel="Notifications">
+        <Pressable onPress={() => navigateApp("Notifications")} style={styles.bell} accessibilityLabel="Notifications">
           <Bell size={18} color={colors.textTertiary} />
         </Pressable>
       </View>
@@ -177,7 +189,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
               {quickActions.map((action) => {
                 const Icon = action.icon;
                 return (
-                  <Pressable key={action.label} onPress={() => navigation.navigate(action.route)} style={styles.action} accessibilityLabel={action.label}>
+                  <Pressable key={action.label} onPress={() => navigateApp(action.route)} style={styles.action} accessibilityLabel={action.label}>
                     <Icon size={21} color={action.color} />
                     <Text style={styles.actionText}>{action.label}</Text>
                   </Pressable>
@@ -191,7 +203,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
               </View>
               <AreaChart data={chartData.length ? chartData : [{ label: "Today", revenue: 0 }]} />
             </Card>
-            <Pressable onPress={() => navigation.navigate("Supplied")} accessibilityLabel="View supplied products">
+            <Pressable onPress={() => navigateApp("Supplied")} accessibilityLabel="View supplied products">
               <Card style={styles.supplied}>
                 <Truck size={18} color="#00838F" />
                 <View style={{ flex: 1 }}>

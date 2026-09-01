@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -22,10 +24,13 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { CreditSalesService } from './credit-sales.service';
+import { CreditSaleActionDecisionDto } from './dto/credit-sale-action-decision.dto';
+import { CreditSaleActionRequestDto } from './dto/credit-sale-action-request.dto';
 import { CreateCreditPaymentDto } from './dto/create-credit-payment.dto';
 import { CreateCreditSaleDto } from './dto/create-credit-sale.dto';
 import { CreditPaymentQueryDto } from './dto/credit-payment-query.dto';
 import { CreditSaleQueryDto } from './dto/credit-sale-query.dto';
+import { UpdateEmployeeCreditSaleDto } from './dto/update-employee-credit-sale.dto';
 
 const CREDIT_SALE_ROLES = [
   SYSTEM_ROLES.OWNER,
@@ -121,7 +126,53 @@ export class CreditSalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: CreditSaleQueryDto,
   ) {
-    return this.creditSalesService.getOutstandingReport(user.businessId, query);
+    return this.creditSalesService.getOutstandingReport(
+      user.businessId,
+      query,
+      user,
+    );
+  }
+
+  @Get('action-requests')
+  @Roles(SYSTEM_ROLES.OWNER)
+  @ApiOperation({ summary: 'List pending employee credit sale action requests' })
+  actionRequests(@CurrentUser() user: AuthenticatedUser) {
+    return this.creditSalesService.listPendingEmployeeActionRequests(
+      user.businessId,
+      user,
+    );
+  }
+
+  @Post('action-requests/:requestId/approve')
+  @Roles(SYSTEM_ROLES.OWNER)
+  @ApiOperation({ summary: 'Approve an employee credit sale edit/delete request' })
+  approveActionRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Body() dto: CreditSaleActionDecisionDto,
+  ) {
+    return this.creditSalesService.approveEmployeeActionRequest(
+      user.businessId,
+      requestId,
+      dto.note,
+      user,
+    );
+  }
+
+  @Post('action-requests/:requestId/reject')
+  @Roles(SYSTEM_ROLES.OWNER)
+  @ApiOperation({ summary: 'Reject an employee credit sale edit/delete request' })
+  rejectActionRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Body() dto: CreditSaleActionDecisionDto,
+  ) {
+    return this.creditSalesService.rejectEmployeeActionRequest(
+      user.businessId,
+      requestId,
+      dto.note,
+      user,
+    );
   }
 
   @Get('overdue')
@@ -223,6 +274,56 @@ export class CreditSalesController {
       user.businessId,
       customerId,
       query,
+    );
+  }
+
+  @Post(':id/action-requests')
+  @Permissions('sales.manage')
+  @Roles(...CREDIT_SALE_ROLES)
+  @ApiOperation({ summary: 'Request owner approval before employee credit sale edit/delete' })
+  requestAction(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreditSaleActionRequestDto,
+  ) {
+    return this.creditSalesService.requestEmployeeAction(
+      user.businessId,
+      id,
+      dto.action,
+      dto.reason,
+      user,
+    );
+  }
+
+  @Patch(':id/employee-edit')
+  @Permissions('sales.manage')
+  @Roles(...CREDIT_SALE_ROLES)
+  @ApiOperation({ summary: 'Edit employee credit sale after owner approval' })
+  updateEmployeeCreditSale(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateEmployeeCreditSaleDto,
+  ) {
+    return this.creditSalesService.updateEmployeeCreditSale(
+      user.businessId,
+      id,
+      dto,
+      user,
+    );
+  }
+
+  @Delete(':id/employee-delete')
+  @Permissions('sales.manage')
+  @Roles(...CREDIT_SALE_ROLES)
+  @ApiOperation({ summary: 'Remove employee credit sale after owner approval' })
+  removeEmployeeCreditSale(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.creditSalesService.removeEmployeeCreditSale(
+      user.businessId,
+      id,
+      user,
     );
   }
 

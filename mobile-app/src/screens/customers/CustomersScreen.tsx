@@ -27,6 +27,12 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const navigateStack = (route: string, params?: Record<string, string>) => {
+    const parent = navigation.getParent?.();
+    if (parent) parent.navigate(route as never, params as never);
+    else navigation.navigate(route, params);
+  };
+
   const loadCustomers = useCallback(async (search = query, showSpinner = true) => {
     if (showSpinner) setLoading(true);
     setError(null);
@@ -73,7 +79,7 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
   if (loading && customers.length === 0) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title="Customers" right={<Pressable onPress={() => navigation.navigate("CustomerForm")}><Plus size={20} color={colors.primary} /></Pressable>} />
+        <ScreenHeader title="Customers" right={<Pressable onPress={() => navigateStack("CustomerForm")}><Plus size={20} color={colors.primary} /></Pressable>} />
         <LoadingState label="Loading customers" />
       </View>
     );
@@ -82,7 +88,7 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
   if (error && customers.length === 0) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title="Customers" right={<Pressable onPress={() => navigation.navigate("CustomerForm")}><Plus size={20} color={colors.primary} /></Pressable>} />
+        <ScreenHeader title="Customers" right={<Pressable onPress={() => navigateStack("CustomerForm")}><Plus size={20} color={colors.primary} /></Pressable>} />
         <ErrorState onRetry={() => void loadCustomers()} />
       </View>
     );
@@ -90,7 +96,7 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Customers" right={<Pressable onPress={() => navigation.navigate("CustomerForm")}><Plus size={20} color={colors.primary} /></Pressable>} />
+      <ScreenHeader title="Customers" right={<Pressable onPress={() => navigateStack("CustomerForm")}><Plus size={20} color={colors.primary} /></Pressable>} />
       <FlatList
         data={customers}
         keyExtractor={(item) => item.id}
@@ -110,7 +116,7 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
           const name = customerDisplayName(item);
           const outstanding = money(item.outstandingBalance);
           return (
-            <Pressable onPress={() => navigation.navigate("CustomerDetail", { customerId: item.id })} accessibilityLabel={`Open ${name}`}>
+            <Pressable onPress={() => navigateStack("CustomerDetail", { customerId: item.id })} accessibilityLabel={`Open ${name}`}>
               <Card style={styles.row}>
                 <Avatar name={name} />
                 <View style={styles.body}>

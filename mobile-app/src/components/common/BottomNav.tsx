@@ -1,7 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
-import { LayoutDashboard, Menu, Plus, ShoppingBag, Users } from "lucide-react-native";
+import { Bell, HandCoins, LayoutDashboard, Menu, Plus, Receipt, Settings, ShoppingBag, Truck, User, Users } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,8 +9,9 @@ import type { BottomTabParamList } from "@/types/navigation.types";
 import { colors, shadows, spacing, typography } from "@/theme";
 
 type TabName = keyof BottomTabParamList;
+export type BottomNavItem = { name: TabName; label: string; icon: LucideIcon };
 
-const tabs: Array<{ name: TabName; label: string; icon: LucideIcon }> = [
+export const ownerBottomTabs: BottomNavItem[] = [
   { name: "Dashboard", label: "Dashboard", icon: LayoutDashboard },
   { name: "SalesRecords", label: "Sales Records", icon: ShoppingBag },
   { name: "AddNewSales", label: "Add New Sales", icon: Plus },
@@ -18,14 +19,33 @@ const tabs: Array<{ name: TabName; label: string; icon: LucideIcon }> = [
   { name: "More", label: "More", icon: Menu }
 ];
 
-export function BottomNav({ active, onTabPress }: { active: TabName; onTabPress: (tab: TabName) => void }) {
+export const employeeBottomTabs: BottomNavItem[] = [
+  { name: "CreditSales", label: "Credit Sales", icon: HandCoins },
+  { name: "Expenses", label: "Expenses", icon: Receipt },
+  { name: "Supplied", label: "Supplied Products", icon: Truck },
+  { name: "Notifications", label: "Notifications", icon: Bell },
+  { name: "Profile", label: "Profile", icon: User },
+  { name: "Settings", label: "Settings", icon: Settings }
+];
+
+export function BottomNav({
+  active,
+  onTabPress,
+  tabs = ownerBottomTabs,
+  fabIndex = 2
+}: {
+  active: TabName;
+  onTabPress: (tab: TabName) => void;
+  tabs?: BottomNavItem[];
+  fabIndex?: number | null;
+}) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.wrap, { height: spacing.bottomNavHeight + insets.bottom, paddingBottom: insets.bottom || 12 }]}>
       {tabs.map((tab, index) => {
         const Icon = tab.icon;
         const selected = active === tab.name;
-        const isFab = index === 2;
+        const isFab = fabIndex === index;
         return (
           <Pressable key={tab.name} style={styles.tab} onPress={() => onTabPress(tab.name)} accessibilityRole="tab" accessibilityLabel={tab.label}>
             {isFab ? (

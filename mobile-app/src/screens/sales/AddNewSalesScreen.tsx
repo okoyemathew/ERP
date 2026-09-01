@@ -570,7 +570,11 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       if (role === "owner") {
         Alert.alert("No products", "Create a product before starting a sale.", [
           { text: "Cancel", style: "cancel" },
-          { text: "Add Product", onPress: () => navigation.getParent()?.navigate("ProductForm") }
+          { text: "Add Product", onPress: () => {
+            const parent = navigation.getParent?.();
+            if (parent) parent.navigate("ProductForm");
+            else navigation.navigate("ProductForm");
+          } }
         ]);
         return;
       }

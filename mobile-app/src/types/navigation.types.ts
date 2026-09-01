@@ -18,6 +18,12 @@ export type BottomTabParamList = {
   AddNewSales: undefined;
   Customers: undefined;
   More: undefined;
+  CreditSales: undefined;
+  Expenses: undefined;
+  Supplied: undefined;
+  Notifications: undefined;
+  Profile: undefined;
+  Settings: undefined;
 };
 
 export type AppStackParamList = {

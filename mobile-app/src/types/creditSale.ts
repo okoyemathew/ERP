@@ -2,6 +2,8 @@ import type { ApiListMeta } from "./customer";
 import type { ApiPaymentMethod } from "./sales";
 
 export type CreditSaleStatus = "ACTIVE" | "PARTIALLY_PAID" | "PAID" | "DEFAULTED";
+export type CreditSaleEmployeeAction = "EDIT" | "DELETE";
+export type CreditSaleActionApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "USED";
 
 export interface CreditSaleSummary {
   totalCreditSales: number;
@@ -38,6 +40,7 @@ export interface ApiCreditSale {
     id: string;
     saleNumber: string;
     saleDate: string;
+    remarks?: string | null;
     subtotal: string | number;
     discountAmount: string | number;
     taxAmount: string | number;
@@ -61,6 +64,38 @@ export interface ApiCreditSale {
     }>;
   };
   payments: CreditPayment[];
+  employeeActionRequests?: CreditSaleActionRequest[];
+}
+
+export interface CreditSaleActionRequest {
+  id: string;
+  creditSaleId?: string;
+  saleId?: string;
+  saleNumber?: string;
+  action: CreditSaleEmployeeAction;
+  status: CreditSaleActionApprovalStatus;
+  reason?: string | null;
+  decisionNote?: string | null;
+  expiresAt?: string | null;
+  decidedAt?: string | null;
+  usedAt?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  customer?: {
+    id: string;
+    name: string;
+    phone: string;
+  };
+  requestedBy?: {
+    id: string;
+    name: string;
+    username: string;
+  };
+  approvedBy?: {
+    id: string;
+    name: string;
+    username: string;
+  } | null;
 }
 
 export interface CreditPayment {

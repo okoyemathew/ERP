@@ -25,6 +25,12 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const navigateStack = (route: string, params?: Record<string, string>) => {
+    const parent = navigation.getParent?.();
+    if (parent) parent.navigate(route as never, params as never);
+    else navigation.navigate(route, params);
+  };
+
   const loadSuppliers = useCallback(async (search = query, showSpinner = true) => {
     if (showSpinner) setLoading(true);
     setError(null);
@@ -64,7 +70,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   if (loading && suppliers.length === 0) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigation.navigate("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
+        <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigateStack("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
         <LoadingState label="Loading suppliers" />
       </View>
     );
@@ -73,7 +79,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   if (error && suppliers.length === 0) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigation.navigate("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
+        <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigateStack("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
         <ErrorState onRetry={() => void loadSuppliers()} />
       </View>
     );
@@ -81,7 +87,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigation.navigate("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
+      <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigateStack("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
       <FlatList
         data={suppliers}
         keyExtractor={(item) => item.id}
@@ -98,7 +104,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
           </View>
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => navigation.navigate("SupplierDetail", { supplierId: item.id })} accessibilityLabel={`Open ${item.companyName}`}>
+          <Pressable onPress={() => navigateStack("SupplierDetail", { supplierId: item.id })} accessibilityLabel={`Open ${item.companyName}`}>
             <Card style={styles.row}>
               <View style={styles.icon}><Truck size={18} color={colors.primary} /></View>
               <View style={styles.body}>

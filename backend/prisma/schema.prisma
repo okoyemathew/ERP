@@ -75,31 +75,32 @@ model Business {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  branches              Branch[]
-  users                 User[]
-  roles                 Role[]
-  permissions           Permission[]
-  categories            Category[]
-  brands                Brand[]
-  units                 Unit[]
-  products              Product[]
-  inventories           Inventory[]
-  inventoryTransactions InventoryTransaction[]
-  stockAdjustments      StockAdjustment[]
-  customers             Customer[]
-  suppliers             Supplier[]
-  purchaseOrders        PurchaseOrder[]
-  goodsSupplied         GoodsSupplied[]
-  goodsDisbursements    GoodsDisbursement[]
-  sales                 Sale[]
-  payments              Payment[]
-  expenseCategories     ExpenseCategory[]
-  expenses              Expense[]
-  cashRegisters         CashRegister[]
-  dailyBalances         DailyBalance[]
-  notifications         Notification[]
-  auditLogs             AuditLog[]
-  employees             Employee[]
+  branches                 Branch[]
+  users                    User[]
+  roles                    Role[]
+  permissions              Permission[]
+  categories               Category[]
+  brands                   Brand[]
+  units                    Unit[]
+  products                 Product[]
+  inventories              Inventory[]
+  inventoryTransactions    InventoryTransaction[]
+  stockAdjustments         StockAdjustment[]
+  customers                Customer[]
+  suppliers                Supplier[]
+  purchaseOrders           PurchaseOrder[]
+  goodsSupplied            GoodsSupplied[]
+  goodsDisbursements       GoodsDisbursement[]
+  sales                    Sale[]
+  payments                 Payment[]
+  expenseCategories        ExpenseCategory[]
+  expenses                 Expense[]
+  cashRegisters            CashRegister[]
+  dailyBalances            DailyBalance[]
+  notifications            Notification[]
+  auditLogs                AuditLog[]
+  employees                Employee[]
+  creditSaleActionRequests CreditSaleActionRequest[]
 
   @@index([name])
 }
@@ -169,15 +170,17 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sessions            UserSession[]
-  passwordResetTokens PasswordResetToken[]
-  sales               Sale[]
-  payments            Payment[]
-  creditPayments      CreditPayment[]
-  auditLogs           AuditLog[]
-  expenses            Expense[]
-  cashRegisters       CashRegister[]
-  notifications       Notification[]
+  sessions                   UserSession[]
+  passwordResetTokens        PasswordResetToken[]
+  sales                      Sale[]
+  payments                   Payment[]
+  creditPayments             CreditPayment[]
+  auditLogs                  AuditLog[]
+  expenses                   Expense[]
+  cashRegisters              CashRegister[]
+  notifications              Notification[]
+  requestedCreditSaleActions CreditSaleActionRequest[] @relation("CreditSaleActionRequester")
+  approvedCreditSaleActions  CreditSaleActionRequest[] @relation("CreditSaleActionApprover")
 
   @@index([businessId])
   @@index([branchId])
@@ -420,7 +423,7 @@ model Product {
 
   purchasePrice    Decimal  @db.Decimal(12, 2)
   sellingPrice     Decimal  @db.Decimal(12, 2)
-  baseSellingPrice Decimal @db.Decimal(12, 2)
+  baseSellingPrice Decimal  @db.Decimal(12, 2)
   wholesalePrice   Decimal? @db.Decimal(12, 2)
 
   minimumStock Int  @default(0)
@@ -1161,6 +1164,18 @@ enum CreditSaleStatus {
   DEFAULTED
 }
 
+enum CreditSaleEmployeeAction {
+  EDIT
+  DELETE
+}
+
+enum CreditSaleActionApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  USED
+}
+
 model CreditSale {
   id String @id @default(uuid()) @db.Uuid
 
@@ -1180,14 +1195,56 @@ model CreditSale {
 
   status CreditSaleStatus @default(ACTIVE)
 
+  deletedAt      DateTime?
+  deletedById    String?   @db.Uuid
+  deletionReason String?
+
   createdAt DateTime @default(now())
 
   updatedAt DateTime @updatedAt
 
-  payments CreditPayment[]
+  payments       CreditPayment[]
+  actionRequests CreditSaleActionRequest[]
 
   @@index([customerId])
   @@index([status])
+  @@index([deletedAt])
+}
+
+model CreditSaleActionRequest {
+  id String @id @default(uuid()) @db.Uuid
+
+  businessId String   @db.Uuid
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  creditSaleId String     @db.Uuid
+  creditSale   CreditSale @relation(fields: [creditSaleId], references: [id], onDelete: Cascade)
+
+  requestedById String @db.Uuid
+  requestedBy   User   @relation("CreditSaleActionRequester", fields: [requestedById], references: [id])
+
+  approvedById String? @db.Uuid
+  approvedBy   User?   @relation("CreditSaleActionApprover", fields: [approvedById], references: [id])
+
+  action CreditSaleEmployeeAction
+  status CreditSaleActionApprovalStatus @default(PENDING)
+
+  reason       String?
+  decisionNote String?
+  expiresAt    DateTime?
+  decidedAt    DateTime?
+  usedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([creditSaleId])
+  @@index([requestedById])
+  @@index([approvedById])
+  @@index([action])
+  @@index([status])
+  @@index([expiresAt])
 }
 
 //////////////////////////////////////////////////////

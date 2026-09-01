@@ -8,9 +8,12 @@ import {
   AuditAction,
   CashRegisterStatus,
   CashTransactionType,
+  CreditSaleActionApprovalStatus,
+  CreditSaleEmployeeAction,
   CreditSaleStatus,
   CustomerStatus,
   InventoryTransactionType,
+  NotificationType,
   PaymentMethod,
   PaymentStatus,
   Prisma,
@@ -35,6 +38,15 @@ const CREDIT_SALE_ROLES = [
   SYSTEM_ROLES.CASHIER,
   SYSTEM_ROLES.SALESPERSON,
 ] as const;
+
+const FINANCIAL_CREDIT_ROLES = [
+  SYSTEM_ROLES.OWNER,
+  SYSTEM_ROLES.ADMIN,
+  SYSTEM_ROLES.MANAGER,
+  SYSTEM_ROLES.ACCOUNTANT,
+] as const;
+
+const CREDIT_SALE_ACTION_APPROVAL_HOURS = 24;
 
 @Injectable()
 export class CreditSalesService {
@@ -216,6 +228,369 @@ export class CreditSalesService {
     return this.formatCreditSale(creditSale);
   }
 
+  async requestEmployeeAction(
+    businessId: string,
+    id: string,
+    action: CreditSaleEmployeeAction,
+    reason: string | undefined,
+    user: AuthenticatedUser,
+  ) {
+    this.assertCanManageCredit(user);
+    await this.refreshCreditStatus(businessId, id, this.prisma);
+
+    return this.prisma.$transaction(async (tx) => {
+      const creditSale = await this.getCreditSaleOrThrow(businessId, id, tx);
+      this.assertEmployeeOwnsCreditSale(creditSale, user);
+
+      const existing = await tx.creditSaleActionRequest.findFirst({
+        where: {
+          businessId,
+          creditSaleId: id,
+          requestedById: user.id,
+          action,
+          status: {
+            in: [
+              CreditSaleActionApprovalStatus.PENDING,
+              CreditSaleActionApprovalStatus.APPROVED,
+            ],
+          },
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        include: this.creditSaleActionRequestInclude(),
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (existing) {
+        return this.formatCreditSaleActionRequest(existing);
+      }
+
+      const request = await tx.creditSaleActionRequest.create({
+        data: {
+          businessId,
+          creditSaleId: id,
+          requestedById: user.id,
+          action,
+          reason: reason?.trim() || null,
+        },
+        include: this.creditSaleActionRequestInclude(),
+      });
+
+      await tx.notification.create({
+        data: {
+          businessId,
+          title: 'Credit sale approval requested',
+          message: `${this.userName(creditSale.sale.user)} requested ${action.toLowerCase()} approval for ${creditSale.sale.saleNumber}`,
+          type: NotificationType.INFO,
+        },
+      });
+
+      await this.audit(tx, {
+        businessId,
+        userId: user.id,
+        action: AuditAction.CREATE,
+        entity: 'CreditSaleActionRequest',
+        entityId: request.id,
+        description: `Requested ${action.toLowerCase()} approval for credit sale ${creditSale.sale.saleNumber}`,
+      });
+
+      return this.formatCreditSaleActionRequest(request);
+    });
+  }
+
+  async listPendingEmployeeActionRequests(
+    businessId: string,
+    user: AuthenticatedUser,
+  ) {
+    this.assertBusinessOwner(user);
+
+    const requests = await this.prisma.creditSaleActionRequest.findMany({
+      where: { businessId, status: CreditSaleActionApprovalStatus.PENDING },
+      include: this.creditSaleActionRequestInclude(),
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+
+    return { data: requests.map((item) => this.formatCreditSaleActionRequest(item)) };
+  }
+
+  async approveEmployeeActionRequest(
+    businessId: string,
+    requestId: string,
+    note: string | undefined,
+    user: AuthenticatedUser,
+  ) {
+    this.assertBusinessOwner(user);
+
+    return this.prisma.$transaction(async (tx) => {
+      const current = await this.getActionRequestOrThrow(
+        businessId,
+        requestId,
+        tx,
+      );
+      this.assertPendingActionRequest(current.status);
+
+      if (current.creditSale.deletedAt || current.creditSale.sale.deletedAt) {
+        throw new BadRequestException('Credit sale has already been removed');
+      }
+
+      const expiresAt = new Date(
+        Date.now() + CREDIT_SALE_ACTION_APPROVAL_HOURS * 60 * 60 * 1000,
+      );
+      const updated = await tx.creditSaleActionRequest.update({
+        where: { id: requestId },
+        data: {
+          status: CreditSaleActionApprovalStatus.APPROVED,
+          approvedById: user.id,
+          decisionNote: note?.trim() || null,
+          decidedAt: new Date(),
+          expiresAt,
+        },
+        include: this.creditSaleActionRequestInclude(),
+      });
+
+      await tx.notification.create({
+        data: {
+          businessId,
+          userId: current.requestedById,
+          title: 'Credit sale request approved',
+          message: `Your ${current.action.toLowerCase()} request for ${current.creditSale.sale.saleNumber} was approved.`,
+          type: NotificationType.SUCCESS,
+        },
+      });
+
+      await this.audit(tx, {
+        businessId,
+        userId: user.id,
+        action: AuditAction.UPDATE,
+        entity: 'CreditSaleActionRequest',
+        entityId: requestId,
+        description: `Approved ${current.action.toLowerCase()} request for credit sale ${current.creditSale.sale.saleNumber}`,
+      });
+
+      return this.formatCreditSaleActionRequest(updated);
+    });
+  }
+
+  async rejectEmployeeActionRequest(
+    businessId: string,
+    requestId: string,
+    note: string | undefined,
+    user: AuthenticatedUser,
+  ) {
+    this.assertBusinessOwner(user);
+
+    return this.prisma.$transaction(async (tx) => {
+      const current = await this.getActionRequestOrThrow(
+        businessId,
+        requestId,
+        tx,
+      );
+      this.assertPendingActionRequest(current.status);
+
+      const updated = await tx.creditSaleActionRequest.update({
+        where: { id: requestId },
+        data: {
+          status: CreditSaleActionApprovalStatus.REJECTED,
+          approvedById: user.id,
+          decisionNote: note?.trim() || null,
+          decidedAt: new Date(),
+        },
+        include: this.creditSaleActionRequestInclude(),
+      });
+
+      await tx.notification.create({
+        data: {
+          businessId,
+          userId: current.requestedById,
+          title: 'Credit sale request rejected',
+          message: `Your ${current.action.toLowerCase()} request for ${current.creditSale.sale.saleNumber} was rejected.`,
+          type: NotificationType.WARNING,
+        },
+      });
+
+      await this.audit(tx, {
+        businessId,
+        userId: user.id,
+        action: AuditAction.UPDATE,
+        entity: 'CreditSaleActionRequest',
+        entityId: requestId,
+        description: `Rejected ${current.action.toLowerCase()} request for credit sale ${current.creditSale.sale.saleNumber}`,
+      });
+
+      return this.formatCreditSaleActionRequest(updated);
+    });
+  }
+
+  async updateEmployeeCreditSale(
+    businessId: string,
+    id: string,
+    dto: { dueDate?: Date; remarks?: string },
+    user: AuthenticatedUser,
+  ) {
+    this.assertCanManageCredit(user);
+    await this.refreshCreditStatus(businessId, id, this.prisma);
+
+    if (dto.dueDate === undefined && dto.remarks === undefined) {
+      throw new BadRequestException('No credit sale changes were provided');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const creditSale = await this.getCreditSaleOrThrow(businessId, id, tx);
+      this.assertEmployeeOwnsCreditSale(creditSale, user);
+      const approval = await this.getUsableActionApproval(
+        businessId,
+        id,
+        CreditSaleEmployeeAction.EDIT,
+        user,
+        tx,
+      );
+
+      if (dto.dueDate !== undefined) {
+        await tx.creditSale.update({
+          where: { id },
+          data: { dueDate: dto.dueDate },
+        });
+      }
+
+      if (dto.remarks !== undefined) {
+        await tx.sale.update({
+          where: { id: creditSale.saleId },
+          data: {
+            remarks: dto.remarks.trim() || null,
+            syncVersion: { increment: 1 },
+          },
+        });
+      }
+
+      await this.markActionApprovalUsed(approval.id, tx);
+
+      await this.audit(tx, {
+        businessId,
+        userId: user.id,
+        action: AuditAction.UPDATE,
+        entity: 'CreditSale',
+        entityId: id,
+        description: `Edited approved credit sale ${creditSale.sale.saleNumber}`,
+      });
+
+      const updated = await this.getCreditSaleOrThrow(businessId, id, tx);
+      return this.formatCreditSale(updated);
+    });
+  }
+
+  async removeEmployeeCreditSale(
+    businessId: string,
+    id: string,
+    user: AuthenticatedUser,
+  ) {
+    this.assertCanManageCredit(user);
+    await this.refreshCreditStatus(businessId, id, this.prisma);
+
+    return this.prisma.$transaction(async (tx) => {
+      const creditSale = await this.getCreditSaleOrThrow(businessId, id, tx);
+      this.assertEmployeeOwnsCreditSale(creditSale, user);
+      const approval = await this.getUsableActionApproval(
+        businessId,
+        id,
+        CreditSaleEmployeeAction.DELETE,
+        user,
+        tx,
+      );
+      const now = new Date();
+
+      for (const item of creditSale.sale.items) {
+        const inventory = await tx.inventory.findUnique({
+          where: { productId: item.productId },
+        });
+
+        if (!inventory || inventory.businessId !== businessId) {
+          throw new BadRequestException(
+            `Inventory not found for product ${item.productId}`,
+          );
+        }
+
+        const quantityBefore = inventory.quantityOnHand;
+        const quantityAfter = quantityBefore + item.quantity;
+
+        await tx.inventory.update({
+          where: { id: inventory.id },
+          data: {
+            quantityOnHand: { increment: item.quantity },
+            quantityAvailable: { increment: item.quantity },
+            lastStockUpdate: now,
+            syncVersion: { increment: 1 },
+          },
+        });
+
+        await tx.inventoryTransaction.create({
+          data: {
+            businessId,
+            inventoryId: inventory.id,
+            productId: item.productId,
+            transactionType: InventoryTransactionType.RETURN,
+            quantity: item.quantity,
+            quantityBefore,
+            quantityAfter,
+            unitCost: item.unitPrice,
+            referenceNumber: creditSale.sale.saleNumber,
+            remarks: `Removed approved credit sale ${creditSale.sale.saleNumber}`,
+            transactionDate: now,
+            isSynced: true,
+            syncVersion: 1,
+          },
+        });
+      }
+
+      await tx.creditSale.update({
+        where: { id },
+        data: {
+          balance: 0,
+          status: CreditSaleStatus.PAID,
+          deletedAt: now,
+          deletedById: user.id,
+          deletionReason: 'Employee removal approved by business owner',
+        },
+      });
+
+      await tx.sale.update({
+        where: { id: creditSale.saleId },
+        data: {
+          status: SaleStatus.CANCELLED,
+          deletedAt: now,
+          syncVersion: { increment: 1 },
+        },
+      });
+
+      const nextOutstanding = await this.customerOutstandingBalance(
+        businessId,
+        creditSale.customerId,
+        tx,
+      );
+
+      await tx.customer.update({
+        where: { id: creditSale.customerId },
+        data: {
+          outstandingBalance: nextOutstanding,
+          isSynced: true,
+          syncVersion: { increment: 1 },
+        },
+      });
+
+      await this.markActionApprovalUsed(approval.id, tx);
+
+      await this.audit(tx, {
+        businessId,
+        userId: user.id,
+        action: AuditAction.DELETE,
+        entity: 'CreditSale',
+        entityId: id,
+        description: `Removed approved credit sale ${creditSale.sale.saleNumber}`,
+      });
+
+      return { success: true, id, saleId: creditSale.saleId };
+    });
+  }
+
   async getCustomerCredit(
     businessId: string,
     customerId: string,
@@ -291,7 +666,8 @@ export class CreditSalesService {
     const [active, partiallyPaid, defaulted] = await Promise.all([
       this.prisma.creditSale.aggregate({
         where: {
-          sale: { businessId },
+          deletedAt: null,
+          sale: { businessId, deletedAt: null },
           status: CreditSaleStatus.ACTIVE,
           balance: { gt: 0 },
         },
@@ -300,7 +676,8 @@ export class CreditSalesService {
       }),
       this.prisma.creditSale.aggregate({
         where: {
-          sale: { businessId },
+          deletedAt: null,
+          sale: { businessId, deletedAt: null },
           status: CreditSaleStatus.PARTIALLY_PAID,
           balance: { gt: 0 },
         },
@@ -309,7 +686,8 @@ export class CreditSalesService {
       }),
       this.prisma.creditSale.aggregate({
         where: {
-          sale: { businessId },
+          deletedAt: null,
+          sale: { businessId, deletedAt: null },
           status: CreditSaleStatus.DEFAULTED,
           balance: { gt: 0 },
         },
@@ -336,6 +714,7 @@ export class CreditSalesService {
   async getOutstandingReport(
     businessId: string,
     query: CreditSaleQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
     await this.refreshDefaultedCredits(businessId, this.prisma);
 
@@ -347,6 +726,9 @@ export class CreditSalesService {
       AND: [
         this.buildWhere(businessId, query),
         { balance: { gt: 0 }, status: { not: CreditSaleStatus.PAID } },
+        ...(viewer && !this.canViewFinancialCredit(viewer)
+          ? [{ sale: { userId: viewer.id } }]
+          : []),
       ],
     };
 
@@ -364,7 +746,7 @@ export class CreditSalesService {
 
     return {
       summary,
-      data: data.map((creditSale) => this.formatCreditSale(creditSale)),
+      data: data.map((creditSale) => this.formatCreditSale(creditSale, viewer)),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -549,8 +931,10 @@ export class CreditSalesService {
       this.prisma.creditSale.findMany({
         where: {
           customerId,
+          deletedAt: null,
           sale: {
             businessId,
+            deletedAt: null,
             ...(search
               ? {
                   saleNumber: {
@@ -1096,7 +1480,8 @@ export class CreditSalesService {
       tx.creditSale.aggregate({
         where: {
           customerId,
-          sale: { businessId },
+          deletedAt: null,
+          sale: { businessId, deletedAt: null },
           balance: { gt: 0 },
           status: { not: CreditSaleStatus.PAID },
         },
@@ -1145,7 +1530,8 @@ export class CreditSalesService {
     const result = await tx.creditSale.aggregate({
       where: {
         customerId,
-        sale: { businessId },
+        deletedAt: null,
+        sale: { businessId, deletedAt: null },
         balance: { gt: 0 },
         status: { not: CreditSaleStatus.PAID },
       },
@@ -1170,7 +1556,8 @@ export class CreditSalesService {
         tx.creditSale.aggregate({
           where: {
             customerId,
-            sale: { businessId },
+            deletedAt: null,
+            sale: { businessId, deletedAt: null },
             balance: { gt: 0 },
             status: { not: CreditSaleStatus.PAID },
           },
@@ -1180,7 +1567,8 @@ export class CreditSalesService {
         tx.creditSale.aggregate({
           where: {
             customerId,
-            sale: { businessId },
+            deletedAt: null,
+            sale: { businessId, deletedAt: null },
             balance: { gt: 0 },
             OR: [
               { status: CreditSaleStatus.DEFAULTED },
@@ -1192,7 +1580,8 @@ export class CreditSalesService {
         tx.creditSale.findFirst({
           where: {
             customerId,
-            sale: { businessId },
+            deletedAt: null,
+            sale: { businessId, deletedAt: null },
             balance: { gt: 0 },
             status: { not: CreditSaleStatus.PAID },
             dueDate: { not: null },
@@ -1303,7 +1692,8 @@ export class CreditSalesService {
       ...(scope.creditSaleId ? { creditSaleId: scope.creditSaleId } : {}),
       ...(scope.customerId ? { customerId: scope.customerId } : {}),
       creditSale: {
-        sale: { businessId },
+        deletedAt: null,
+        sale: { businessId, deletedAt: null },
       },
       ...(query.paymentMethod ? { paymentMethod: query.paymentMethod } : {}),
       ...(query.startDate || query.endDate
@@ -1381,7 +1771,7 @@ export class CreditSalesService {
     tx: Tx | PrismaService,
   ) {
     const creditSale = await tx.creditSale.findFirst({
-      where: { id, sale: { businessId } },
+      where: { id, deletedAt: null, sale: { businessId, deletedAt: null } },
       include: this.creditSaleInclude(),
     });
 
@@ -1400,7 +1790,8 @@ export class CreditSalesService {
     const now = new Date();
 
     return {
-      sale: { businessId },
+      deletedAt: null,
+      sale: { businessId, deletedAt: null },
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.overdue
@@ -1495,7 +1886,16 @@ export class CreditSalesService {
     creditSale: Prisma.CreditSaleGetPayload<{
       include: ReturnType<CreditSalesService['creditSaleInclude']>;
     }>,
+    viewer?: AuthenticatedUser,
   ) {
+    const visibleActionRequests = viewer
+      ? this.canViewFinancialCredit(viewer)
+        ? creditSale.actionRequests
+        : creditSale.actionRequests.filter(
+            (request) => request.requestedById === viewer.id,
+          )
+      : creditSale.actionRequests;
+
     return {
       id: creditSale.id,
       saleId: creditSale.saleId,
@@ -1520,6 +1920,7 @@ export class CreditSalesService {
         id: creditSale.sale.id,
         saleNumber: creditSale.sale.saleNumber,
         saleDate: creditSale.sale.saleDate,
+        remarks: creditSale.sale.remarks,
         subtotal: creditSale.sale.subtotal,
         discountAmount: creditSale.sale.discountAmount,
         taxAmount: creditSale.sale.taxAmount,
@@ -1566,6 +1967,17 @@ export class CreditSalesService {
               username: payment.user.username,
             }
           : null,
+      })),
+      employeeActionRequests: visibleActionRequests.map((request) => ({
+        id: request.id,
+        action: request.action,
+        status: request.status,
+        reason: request.reason,
+        decisionNote: request.decisionNote,
+        expiresAt: request.expiresAt,
+        decidedAt: request.decidedAt,
+        usedAt: request.usedAt,
+        createdAt: request.createdAt,
       })),
     };
   }
@@ -1628,6 +2040,10 @@ export class CreditSalesService {
   private creditSaleInclude() {
     return {
       customer: true,
+      actionRequests: {
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      },
       payments: {
         include: {
           user: {
@@ -1695,6 +2111,182 @@ export class CreditSalesService {
     } satisfies Prisma.CreditPaymentInclude;
   }
 
+  private creditSaleActionRequestInclude() {
+    return {
+      requestedBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          username: true,
+        },
+      },
+      approvedBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          username: true,
+        },
+      },
+      creditSale: {
+        include: {
+          customer: true,
+          sale: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  username: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    } satisfies Prisma.CreditSaleActionRequestInclude;
+  }
+
+  private formatCreditSaleActionRequest(
+    request: Prisma.CreditSaleActionRequestGetPayload<{
+      include: ReturnType<CreditSalesService['creditSaleActionRequestInclude']>;
+    }>,
+  ) {
+    return {
+      id: request.id,
+      creditSaleId: request.creditSaleId,
+      saleId: request.creditSale.saleId,
+      saleNumber: request.creditSale.sale.saleNumber,
+      customer: {
+        id: request.creditSale.customer.id,
+        name: this.customerName(request.creditSale.customer),
+        phone: request.creditSale.customer.phone,
+      },
+      action: request.action,
+      status: request.status,
+      reason: request.reason,
+      decisionNote: request.decisionNote,
+      expiresAt: request.expiresAt,
+      decidedAt: request.decidedAt,
+      usedAt: request.usedAt,
+      createdAt: request.createdAt,
+      updatedAt: request.updatedAt,
+      requestedBy: {
+        id: request.requestedBy.id,
+        name: this.userName(request.requestedBy),
+        username: request.requestedBy.username,
+      },
+      approvedBy: request.approvedBy
+        ? {
+            id: request.approvedBy.id,
+            name: this.userName(request.approvedBy),
+            username: request.approvedBy.username,
+          }
+        : null,
+    };
+  }
+
+  private async getActionRequestOrThrow(
+    businessId: string,
+    requestId: string,
+    tx: Tx,
+  ) {
+    const request = await tx.creditSaleActionRequest.findFirst({
+      where: { id: requestId, businessId },
+      include: this.creditSaleActionRequestInclude(),
+    });
+
+    if (!request) {
+      throw new NotFoundException('Credit sale action request not found');
+    }
+
+    return request;
+  }
+
+  private async getUsableActionApproval(
+    businessId: string,
+    creditSaleId: string,
+    action: CreditSaleEmployeeAction,
+    user: AuthenticatedUser,
+    tx: Tx,
+  ) {
+    const approval = await tx.creditSaleActionRequest.findFirst({
+      where: {
+        businessId,
+        creditSaleId,
+        requestedById: user.id,
+        action,
+        status: CreditSaleActionApprovalStatus.APPROVED,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+      orderBy: { decidedAt: 'desc' },
+      select: { id: true },
+    });
+
+    if (!approval) {
+      throw new ForbiddenException(
+        `Business owner approval is required before this employee can ${action.toLowerCase()} the credit sale`,
+      );
+    }
+
+    return approval;
+  }
+
+  private async markActionApprovalUsed(requestId: string, tx: Tx) {
+    await tx.creditSaleActionRequest.update({
+      where: { id: requestId },
+      data: {
+        status: CreditSaleActionApprovalStatus.USED,
+        usedAt: new Date(),
+      },
+    });
+  }
+
+  private assertBusinessOwner(user: AuthenticatedUser) {
+    if (user.roleName !== SYSTEM_ROLES.OWNER) {
+      throw new ForbiddenException(
+        'Only the business owner can approve employee credit sale actions',
+      );
+    }
+  }
+
+  private assertPendingActionRequest(
+    status: CreditSaleActionApprovalStatus,
+  ) {
+    if (status !== CreditSaleActionApprovalStatus.PENDING) {
+      throw new BadRequestException('Credit sale action request is not pending');
+    }
+  }
+
+  private assertEmployeeOwnsCreditSale(
+    creditSale: Prisma.CreditSaleGetPayload<{
+      include: ReturnType<CreditSalesService['creditSaleInclude']>;
+    }>,
+    user: AuthenticatedUser,
+  ) {
+    if (user.roleName === SYSTEM_ROLES.OWNER) {
+      throw new BadRequestException(
+        'Owner approval is only required for employee credit sale actions',
+      );
+    }
+
+    if (creditSale.sale.user.id !== user.id) {
+      throw new ForbiddenException(
+        'Employees can only request or use approval for their own credit sales',
+      );
+    }
+  }
+
+  private userName(user: {
+    firstName: string;
+    lastName: string;
+    username: string;
+  }) {
+    return `${user.firstName} ${user.lastName}`.trim() || user.username;
+  }
+
   private async nextSaleNumber(businessId: string, tx: Tx) {
     const date = new Date();
     const prefix = `CREDIT-${date.getUTCFullYear()}${String(
@@ -1746,7 +2338,8 @@ export class CreditSalesService {
   ) {
     await tx.creditSale.updateMany({
       where: {
-        sale: { businessId },
+        deletedAt: null,
+        sale: { businessId, deletedAt: null },
         status: {
           in: [CreditSaleStatus.ACTIVE, CreditSaleStatus.PARTIALLY_PAID],
         },
@@ -1765,7 +2358,8 @@ export class CreditSalesService {
     await tx.creditSale.updateMany({
       where: {
         id,
-        sale: { businessId },
+        deletedAt: null,
+        sale: { businessId, deletedAt: null },
         status: {
           in: [CreditSaleStatus.ACTIVE, CreditSaleStatus.PARTIALLY_PAID],
         },
@@ -1786,6 +2380,10 @@ export class CreditSalesService {
         'User is not allowed to manage credit sales',
       );
     }
+  }
+
+  private canViewFinancialCredit(user: AuthenticatedUser) {
+    return FINANCIAL_CREDIT_ROLES.includes(user.roleName as never);
   }
 
   private assertAllowedCreditPaymentMethod(paymentMethod: PaymentMethod) {
