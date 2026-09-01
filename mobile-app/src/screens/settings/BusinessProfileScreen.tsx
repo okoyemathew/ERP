@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet } from "react-native";
+import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Button, Card, ErrorState, Input, LoadingState } from "@/components/common";
 import { ScrollScreen, SectionTitle } from "@/screens/shared/ScreenKit";
@@ -7,6 +7,7 @@ import { businessService } from "@/services/business.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, typography } from "@/theme";
 import type { BusinessConfig } from "@/types/business";
+import { DEFAULT_BUSINESS_CURRENCY, SUPPORTED_CURRENCIES, getCurrencyOption } from "@/utils/currency";
 
 type BusinessForm = BusinessConfig["business"] & {
   language: string;
@@ -30,7 +31,7 @@ function emptyForm(businessId: string): BusinessForm {
     taxNumber: "",
     registrationNo: "",
     logo: null,
-    currency: "USD",
+    currency: DEFAULT_BUSINESS_CURRENCY,
     timezone: "UTC",
     language: "en",
     allowCreditSales: true,
@@ -79,6 +80,7 @@ export function BusinessProfileScreen({ navigation }: { navigation: any }) {
   const setField = (field: keyof BusinessForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
+  const selectedCurrency = getCurrencyOption(form.currency);
 
   const save = async () => {
     if (!businessId || saving) return;
@@ -141,7 +143,29 @@ export function BusinessProfileScreen({ navigation }: { navigation: any }) {
 
       <SectionTitle title="Currency and Tax Identity" />
       <Card style={styles.form}>
-        <Input label="Currency" value={form.currency} onChangeText={(value) => setField("currency", value.toUpperCase())} autoCapitalize="characters" editable={canManageBusiness || canManageSettings} />
+        <View style={styles.currencyHeader}>
+          <Text style={styles.currencyLabel}>Currency</Text>
+          <Text style={styles.currencyValue}>{selectedCurrency.code} - {selectedCurrency.symbol}</Text>
+        </View>
+        <View style={styles.currencyOptions}>
+          {SUPPORTED_CURRENCIES.map((currency) => {
+            const selected = currency.code === selectedCurrency.code;
+            return (
+              <Pressable
+                key={currency.code}
+                onPress={() => setField("currency", currency.code)}
+                disabled={!canManageBusiness && !canManageSettings}
+                style={[styles.currencyOption, selected && styles.currencyOptionSelected, (!canManageBusiness && !canManageSettings) && styles.disabledOption]}
+                accessibilityRole="button"
+                accessibilityLabel={`Select ${currency.code} ${currency.name}`}
+              >
+                <Text style={[styles.currencyCode, selected && styles.currencyCodeSelected]}>{currency.code}</Text>
+                <Text style={styles.currencyName}>{currency.name}</Text>
+                <Text style={styles.currencySymbol}>{currency.symbol}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <Input label="Timezone" value={form.timezone} onChangeText={(value) => setField("timezone", value)} editable={canManageBusiness || canManageSettings} />
         <Input label="Tax Number" value={form.taxNumber ?? ""} onChangeText={(value) => setField("taxNumber", value)} editable={canManageBusiness} />
         <Input label="Registration Number" value={form.registrationNo ?? ""} onChangeText={(value) => setField("registrationNo", value)} editable={canManageBusiness} />
@@ -155,5 +179,16 @@ export function BusinessProfileScreen({ navigation }: { navigation: any }) {
 
 const styles = StyleSheet.create({
   form: { gap: 12 },
-  note: { ...typography.caption, color: colors.textMuted }
+  note: { ...typography.caption, color: colors.textMuted },
+  currencyHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  currencyLabel: { ...typography.caption, color: colors.textMuted },
+  currencyValue: { ...typography.subtitle, color: colors.foreground, fontWeight: "800" },
+  currencyOptions: { gap: 8 },
+  currencyOption: { minHeight: 52, borderWidth: 1, borderColor: colors.borderLight, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.surface, flexDirection: "row", alignItems: "center", gap: 10 },
+  currencyOptionSelected: { borderColor: colors.primary, backgroundColor: colors.secondaryBg },
+  disabledOption: { opacity: 0.62 },
+  currencyCode: { width: 36, color: colors.textSecondary, fontSize: 12, fontWeight: "900" },
+  currencyCodeSelected: { color: colors.primary },
+  currencyName: { flex: 1, color: colors.textMuted, fontSize: 11, fontWeight: "700" },
+  currencySymbol: { color: colors.foreground, fontSize: 12, fontWeight: "900" }
 });

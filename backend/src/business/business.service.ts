@@ -14,6 +14,10 @@ import { UpdateNotificationSettingsDto } from './dto/update-notification-setting
 import { BusinessLogoService } from './business-logo.service';
 import { AuditLogService } from './audit-log.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+import {
+  assertSupportedCurrency,
+  DEFAULT_BUSINESS_CURRENCY,
+} from '../common/currency';
 
 @Injectable()
 export class BusinessService {
@@ -24,10 +28,13 @@ export class BusinessService {
   ) {}
 
   async create(createBusinessDto: CreateBusinessDto, user?: AuthenticatedUser) {
+    const currency =
+      assertSupportedCurrency(createBusinessDto.currency) ??
+      DEFAULT_BUSINESS_CURRENCY;
     const business = await this.prisma.business.create({
       data: {
         ...createBusinessDto,
-        currency: createBusinessDto.currency ?? 'USD',
+        currency,
         timezone: createBusinessDto.timezone ?? 'UTC',
       },
     });
@@ -62,10 +69,39 @@ export class BusinessService {
     user: AuthenticatedUser,
   ) {
     await this.ensureBusinessAccess(id, user);
+    const { currency: requestedCurrency, timezone, ...businessData } =
+      updateBusinessDto;
+    const currency = assertSupportedCurrency(requestedCurrency);
 
-    const business = await this.prisma.business.update({
-      where: { id },
-      data: updateBusinessDto,
+    const business = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.business.update({
+        where: { id },
+        data: {
+          ...businessData,
+          ...(currency ? { currency } : {}),
+          ...(timezone !== undefined ? { timezone } : {}),
+        },
+      });
+
+      if (currency || timezone !== undefined) {
+        await tx.businessSettings.upsert({
+          where: { businessId: id },
+          update: {
+            ...(currency ? { currency } : {}),
+            ...(timezone !== undefined ? { timezone } : {}),
+          },
+          create: {
+            businessId: id,
+            currency: currency ?? DEFAULT_BUSINESS_CURRENCY,
+            timezone: timezone ?? 'UTC',
+            language: 'en',
+            allowCreditSales: true,
+            enableOfflineMode: true,
+          },
+        });
+      }
+
+      return updated;
     });
 
     await this.auditLogService.recordAudit({
@@ -586,27 +622,46 @@ export class BusinessService {
     user: AuthenticatedUser,
   ) {
     await this.ensureBusinessAccess(id, user);
+    const currency = assertSupportedCurrency(
+      updateBusinessSettingsDto.currency,
+    );
 
-    const result = await this.prisma.businessSettings.upsert({
-      where: { businessId: id },
-      update: {
-        currency: updateBusinessSettingsDto.currency,
-        timezone: updateBusinessSettingsDto.timezone,
-        language: updateBusinessSettingsDto.language,
-        allowNegativeStock: updateBusinessSettingsDto.allowNegativeStock,
-        allowCreditSales: updateBusinessSettingsDto.allowCreditSales,
-        enableOfflineMode: updateBusinessSettingsDto.enableOfflineMode,
-      },
-      create: {
-        businessId: id,
-        currency: updateBusinessSettingsDto.currency ?? 'USD',
-        timezone: updateBusinessSettingsDto.timezone ?? 'UTC',
-        language: updateBusinessSettingsDto.language ?? 'en',
-        allowNegativeStock:
-          updateBusinessSettingsDto.allowNegativeStock ?? false,
-        allowCreditSales: updateBusinessSettingsDto.allowCreditSales ?? true,
-        enableOfflineMode: updateBusinessSettingsDto.enableOfflineMode ?? true,
-      },
+    const result = await this.prisma.$transaction(async (tx) => {
+      const settings = await tx.businessSettings.upsert({
+        where: { businessId: id },
+        update: {
+          currency,
+          timezone: updateBusinessSettingsDto.timezone,
+          language: updateBusinessSettingsDto.language,
+          allowNegativeStock: updateBusinessSettingsDto.allowNegativeStock,
+          allowCreditSales: updateBusinessSettingsDto.allowCreditSales,
+          enableOfflineMode: updateBusinessSettingsDto.enableOfflineMode,
+        },
+        create: {
+          businessId: id,
+          currency: currency ?? DEFAULT_BUSINESS_CURRENCY,
+          timezone: updateBusinessSettingsDto.timezone ?? 'UTC',
+          language: updateBusinessSettingsDto.language ?? 'en',
+          allowNegativeStock:
+            updateBusinessSettingsDto.allowNegativeStock ?? false,
+          allowCreditSales: updateBusinessSettingsDto.allowCreditSales ?? true,
+          enableOfflineMode: updateBusinessSettingsDto.enableOfflineMode ?? true,
+        },
+      });
+
+      if (currency || updateBusinessSettingsDto.timezone !== undefined) {
+        await tx.business.update({
+          where: { id },
+          data: {
+            ...(currency ? { currency } : {}),
+            ...(updateBusinessSettingsDto.timezone !== undefined
+              ? { timezone: updateBusinessSettingsDto.timezone }
+              : {}),
+          },
+        });
+      }
+
+      return settings;
     });
 
     await this.auditLogService.recordAudit({

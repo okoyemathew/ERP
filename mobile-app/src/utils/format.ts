@@ -1,5 +1,8 @@
-export const formatCurrency = (value: number) =>
-  "$" + value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { useAuthStore } from "@/store/authStore";
+import { formatMoney } from "@/utils/currency";
+
+export const formatCurrency = (value: number | string | null | undefined, currency?: string | null) =>
+  formatMoney(value, currency ?? useAuthStore.getState().business?.currency);
 
 export const initials = (name: string) => {
   const parts = name.trim().split(/\s+/);

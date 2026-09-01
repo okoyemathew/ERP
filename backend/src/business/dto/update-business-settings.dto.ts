@@ -1,16 +1,22 @@
 import {
   IsBoolean,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { SUPPORTED_CURRENCIES } from '../../common/currency';
 
 export class UpdateBusinessSettingsDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
-  @MaxLength(20)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  @IsIn(SUPPORTED_CURRENCIES)
   currency?: string;
 
   @IsOptional()

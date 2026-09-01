@@ -5,7 +5,7 @@ import { PrismaClient, BusinessStatus, BranchStatus, UserStatus, EmployeeStatus 
 const prisma = new PrismaClient();
 
 const BUSINESS_NAME = 'Smart POS Demo Business';
-const CURRENCY = 'USD';
+const CURRENCY = 'XAF';
 const TIMEZONE = 'UTC';
 const BUSINESS_STATUS = BusinessStatus.ACTIVE;
 
@@ -110,7 +110,7 @@ const EXPENSE_CATEGORIES = [
 ];
 
 const BUSINESS_SETTINGS = {
-  defaultCurrency: 'USD',
+  defaultCurrency: 'XAF',
   timezone: 'UTC',
   allowCreditSales: true,
   allowNegativeStock: false,

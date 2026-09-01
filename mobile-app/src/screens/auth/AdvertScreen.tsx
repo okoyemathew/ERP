@@ -4,6 +4,7 @@ import { Text } from "@/i18n";
 import { ArrowUpRight } from "lucide-react-native";
 import { Button, Card } from "@/components/common";
 import { colors } from "@/theme";
+import { formatCurrency } from "@/utils/format";
 
 export function AdvertScreen({ navigation }: { navigation: any }) {
   return (
@@ -13,7 +14,7 @@ export function AdvertScreen({ navigation }: { navigation: any }) {
           <View style={styles.cardHeader}>
             <View>
               <Text style={styles.muted}>Today's Revenue</Text>
-              <Text style={styles.value}>$12,450</Text>
+              <Text style={styles.value}>{formatCurrency(12450)}</Text>
             </View>
             <View style={styles.delta}>
               <ArrowUpRight size={12} color={colors.success} />

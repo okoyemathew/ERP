@@ -18,6 +18,7 @@ import {
 } from '@prisma/client';
 import { SYSTEM_ROLES } from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+import { DEFAULT_BUSINESS_CURRENCY, formatMoney } from '../common/currency';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteSaleDto } from './dto/complete-sale.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -577,11 +578,19 @@ export class SalesService {
 
     await this.createReceipt(id, sale.saleNumber, tx);
 
+    const business = await tx.business.findUnique({
+      where: { id: businessId },
+      select: { currency: true },
+    });
+
     await tx.notification.create({
       data: {
         businessId,
         title: 'Sale completed',
-        message: `${sale.saleNumber} completed for ${totals.totalAmount.toFixed(2)}`,
+        message: `${sale.saleNumber} completed for ${formatMoney(
+          totals.totalAmount,
+          business?.currency,
+        )}`,
         type: 'SUCCESS',
       },
     });
@@ -1152,6 +1161,7 @@ export class SalesService {
     reprint: boolean,
   ) {
     const divider = '-'.repeat(columns);
+    const currency = receipt.business.currency;
     const lines: ReceiptLine[] = [
       { type: 'center', text: receipt.business.name },
     ];
@@ -1188,22 +1198,22 @@ export class SalesService {
         { type: 'text', text: item.productName },
         {
           type: 'row',
-          left: `${item.quantity} x ${this.money(item.unitPrice)}`,
-          right: this.money(item.totalAmount),
+          left: `${item.quantity} x ${this.money(item.unitPrice, currency)}`,
+          right: this.money(item.totalAmount, currency),
         },
       );
       if (Number(item.discountAmount) > 0) {
         lines.push({
           type: 'row',
           left: 'Discount',
-          right: `-${this.money(item.discountAmount)}`,
+          right: `-${this.money(item.discountAmount, currency)}`,
         });
       }
       if (Number(item.taxAmount) > 0) {
         lines.push({
           type: 'row',
           left: 'Tax',
-          right: this.money(item.taxAmount),
+          right: this.money(item.taxAmount, currency),
         });
       }
     }
@@ -1213,24 +1223,32 @@ export class SalesService {
       {
         type: 'row',
         left: 'Subtotal',
-        right: this.money(receipt.sale.subtotal),
+        right: this.money(receipt.sale.subtotal, currency),
       },
       {
         type: 'row',
         left: 'Discount',
-        right: this.money(receipt.sale.discountAmount),
+        right: this.money(receipt.sale.discountAmount, currency),
       },
-      { type: 'row', left: 'Tax', right: this.money(receipt.sale.taxAmount) },
+      {
+        type: 'row',
+        left: 'Tax',
+        right: this.money(receipt.sale.taxAmount, currency),
+      },
       {
         type: 'row',
         left: 'Total',
-        right: this.money(receipt.sale.totalAmount),
+        right: this.money(receipt.sale.totalAmount, currency),
       },
-      { type: 'row', left: 'Paid', right: this.money(receipt.sale.amountPaid) },
+      {
+        type: 'row',
+        left: 'Paid',
+        right: this.money(receipt.sale.amountPaid, currency),
+      },
       {
         type: 'row',
         left: 'Balance',
-        right: this.money(receipt.sale.balanceDue),
+        right: this.money(receipt.sale.balanceDue, currency),
       },
       { type: 'divider', text: divider },
     );
@@ -1239,7 +1257,7 @@ export class SalesService {
       lines.push({
         type: 'row',
         left: payment.paymentMethod,
-        right: this.money(payment.amount),
+        right: this.money(payment.amount, currency),
       });
     }
 
@@ -1440,8 +1458,11 @@ export class SalesService {
     return paperWidth === '58mm' ? '58mm' : '80mm';
   }
 
-  private money(value: Prisma.Decimal | number | string) {
-    return new Prisma.Decimal(value).toFixed(2);
+  private money(
+    value: Prisma.Decimal | number | string,
+    currency: string = DEFAULT_BUSINESS_CURRENCY,
+  ) {
+    return formatMoney(value, currency);
   }
 
   private async nextSaleNumber(businessId: string, tx: Tx) {

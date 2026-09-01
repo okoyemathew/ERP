@@ -1,11 +1,14 @@
 import {
   IsEnum,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUrl,
   MaxLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { SUPPORTED_CURRENCIES } from '../../common/currency';
 import { BusinessStatus } from '../enums/business-status.enum';
 
 export class UpdateBusinessDto {
@@ -57,7 +60,10 @@ export class UpdateBusinessDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  @IsIn(SUPPORTED_CURRENCIES)
   currency?: string;
 
   @IsOptional()

@@ -1,0 +1,2 @@
+ALTER TABLE "Business" ALTER COLUMN "currency" SET DEFAULT 'XAF';
+ALTER TABLE "BusinessSettings" ALTER COLUMN "currency" SET DEFAULT 'XAF';

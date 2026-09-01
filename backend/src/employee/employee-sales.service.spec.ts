@@ -170,7 +170,7 @@ describe('EmployeeService sales reporting', () => {
       name: 'Smart Store',
       address: 'Main Road',
       phone: '12345',
-      currency: 'INR',
+      currency: 'XAF',
     });
     prisma.sale.aggregate.mockResolvedValue({
       _count: { id: 1 },
@@ -196,7 +196,7 @@ describe('EmployeeService sales reporting', () => {
     expect(response.text).toContain('Employee Sales Record');
     expect(response.text).toContain('Employee: John Doe');
     expect(response.text).toContain('SALE-000001');
-    expect(response.text).toContain('INR 1,000.00');
+    expect(response.text).toContain('FCFA 1,000');
   });
 
   it('rejects cross-business employee sales access as not found', async () => {

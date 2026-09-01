@@ -68,7 +68,7 @@ model Business {
   receiptSettings      ReceiptSettings?
   taxSettings          TaxSettings?
   notificationSettings NotificationSettings?
-  currency             String                @default("USD")
+  currency             String                @default("XAF")
   timezone             String                @default("UTC")
   status               BusinessStatus        @default(ACTIVE)
 
@@ -1474,7 +1474,7 @@ model BusinessSettings {
   businessId String   @unique @db.Uuid
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  currency String @default("USD")
+  currency String @default("XAF")
   timezone String @default("UTC")
   language String @default("en")
 

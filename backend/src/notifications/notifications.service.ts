@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { NotificationType, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+import { formatMoney } from '../common/currency';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationQueryDto } from './dto/notification-query.dto';
 
@@ -148,10 +149,18 @@ export class NotificationsService {
     saleNumber: string,
     amount: Prisma.Decimal | number | string,
   ) {
+    const business = await this.prisma.business.findUnique({
+      where: { id: businessId },
+      select: { currency: true },
+    });
+
     await this.createBusinessEvent({
       businessId,
       title: 'Sale completed',
-      message: `${saleNumber} completed for ${new Prisma.Decimal(amount).toFixed(2)}`,
+      message: `${saleNumber} completed for ${formatMoney(
+        amount,
+        business?.currency,
+      )}`,
       type: NotificationType.SUCCESS,
     });
   }

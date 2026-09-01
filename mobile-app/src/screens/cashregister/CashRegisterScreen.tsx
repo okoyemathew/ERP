@@ -127,7 +127,7 @@ export function CashRegisterScreen() {
         <TextInput
           style={styles.input}
           keyboardType="numeric"
-          placeholder="$0.00"
+          placeholder={formatCurrency(0)}
           placeholderTextColor={colors.textPlaceholder}
           value={openStatus ? actualBalance : openingBalance}
           onChangeText={openStatus ? setActualBalance : setOpeningBalance}

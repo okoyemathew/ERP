@@ -17,6 +17,7 @@ import {
 import { SYSTEM_ROLES } from '../auth/constants/roles.constant';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { hashPassword } from '../auth/utils/password.util';
+import { DEFAULT_BUSINESS_CURRENCY, formatMoney } from '../common/currency';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssignEmployeeRoleDto } from './dto/assign-employee-role.dto';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
@@ -1523,12 +1524,11 @@ export class EmployeeService {
     };
   }
 
-  private money(value: Prisma.Decimal | number | string, currency = 'USD') {
-    const amount = Number(value);
-    return `${currency} ${amount.toLocaleString('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
+  private money(
+    value: Prisma.Decimal | number | string,
+    currency: string = DEFAULT_BUSINESS_CURRENCY,
+  ) {
+    return formatMoney(value, currency);
   }
 
   private basicEmployee(employee: {

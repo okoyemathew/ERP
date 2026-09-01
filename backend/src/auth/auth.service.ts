@@ -33,6 +33,7 @@ import type { AuthenticatedUser } from './types/authenticated-user.type';
 import { JwtPayload } from './types/jwt-payload.type';
 import { hashPassword, verifyPassword } from './utils/password.util';
 import { PasswordResetDeliveryService } from './services/password-reset-delivery.service';
+import { DEFAULT_BUSINESS_CURRENCY } from '../common/currency';
 
 type TokenPair = {
   accessToken: string;
@@ -367,10 +368,11 @@ export class AuthService {
           email: ownerEmail,
           phone: ownerPhone,
           address: dto.businessAddress?.trim() || undefined,
+          currency: DEFAULT_BUSINESS_CURRENCY,
           status: BusinessStatus.ACTIVE,
           settings: {
             create: {
-              currency: 'USD',
+              currency: DEFAULT_BUSINESS_CURRENCY,
               timezone: 'UTC',
               language: 'en',
               allowCreditSales: true,
