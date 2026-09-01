@@ -590,7 +590,7 @@ export class EmployeeService {
   async getProfile(businessId: string, id: string) {
     const employee = await this.findOne(businessId, id);
     const userId = employee.userId;
-    const [salesCount, paymentsCount, expensesCount, sessions] =
+    const [salesCount, paymentsCount, expensesCount, sessions, profileActivity] =
       await Promise.all([
         this.prisma.sale.count({
           where: { businessId, userId, deletedAt: null },
@@ -613,6 +613,7 @@ export class EmployeeService {
           orderBy: { createdAt: 'desc' },
           take: 10,
         }),
+        this.getEmployeeProfileActivity(businessId, employee),
       ]);
 
     return {
@@ -625,6 +626,7 @@ export class EmployeeService {
           (session) => session.status === SessionStatus.ACTIVE,
         ).length,
       },
+      profileActivity,
       recentSessions: sessions,
     };
   }
@@ -674,6 +676,262 @@ export class EmployeeService {
       },
       data: items.map((sale) => this.formatEmployeeSale(sale)),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  private async getEmployeeProfileActivity(
+    businessId: string,
+    employee: Awaited<ReturnType<EmployeeService['findOne']>>,
+  ) {
+    const userId = employee.userId;
+    const employeeName =
+      `${employee.firstName} ${employee.lastName}`.trim() ||
+      employee.user.username;
+    const matchTokens = [
+      employee.employeeCode,
+      employeeName,
+      employee.user.username,
+    ].filter(Boolean);
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date(startOfToday);
+    endOfToday.setDate(endOfToday.getDate() + 1);
+    const disbursementEmployeeMatches: Prisma.GoodsDisbursementWhereInput[] = [
+      { employeeId: employee.id },
+      ...matchTokens.flatMap((token) => [
+        {
+          destination: {
+            contains: token,
+            mode: Prisma.QueryMode.insensitive,
+          },
+        },
+        {
+          remarks: {
+            contains: token,
+            mode: Prisma.QueryMode.insensitive,
+          },
+        },
+      ]),
+    ];
+
+    const [soldItems, disbursements, salesTodayCount, salesTodayValue] =
+      await Promise.all([
+        this.prisma.saleItem.findMany({
+          where: {
+            sale: {
+              businessId,
+              userId,
+              deletedAt: null,
+              status: SaleStatus.COMPLETED,
+            },
+          },
+          include: {
+            sale: { select: { saleDate: true } },
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                barcode: true,
+                sellingPrice: true,
+                inventory: {
+                  select: {
+                    quantityOnHand: true,
+                    quantityAvailable: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 500,
+        }),
+        this.prisma.goodsDisbursement.findMany({
+          where: {
+            businessId,
+            OR: disbursementEmployeeMatches,
+          },
+          include: {
+            items: {
+              include: {
+                product: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    barcode: true,
+                    sellingPrice: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: { disbursementDate: 'desc' },
+          take: 100,
+        }),
+        this.prisma.sale.count({
+          where: {
+            businessId,
+            userId,
+            deletedAt: null,
+            status: SaleStatus.COMPLETED,
+            saleDate: { gte: startOfToday, lt: endOfToday },
+          },
+        }),
+        this.prisma.sale.aggregate({
+          where: {
+            businessId,
+            userId,
+            deletedAt: null,
+            status: SaleStatus.COMPLETED,
+            saleDate: { gte: startOfToday, lt: endOfToday },
+          },
+          _sum: { totalAmount: true },
+        }),
+      ]);
+
+    const suppliedByProduct = new Map<string, number>();
+    const supplyRecords = disbursements.map((run) => {
+      let totalQuantity = 0;
+      let totalValue = new Prisma.Decimal(0);
+
+      for (const item of run.items) {
+        totalQuantity += item.quantity;
+        totalValue = totalValue.add(
+          new Prisma.Decimal(item.product.sellingPrice).mul(item.quantity),
+        );
+        suppliedByProduct.set(
+          item.productId,
+          (suppliedByProduct.get(item.productId) ?? 0) + item.quantity,
+        );
+      }
+
+      return {
+        id: run.id,
+        employeeId: run.employeeId,
+        disbursementNumber: run.disbursementNumber,
+        disbursementDate: run.disbursementDate,
+        destination: run.destination,
+        remarks: run.remarks,
+        totalQuantity,
+        totalValue,
+        items: run.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product.name,
+          sku: item.product.sku,
+          barcode: item.product.barcode,
+          quantity: item.quantity,
+          value: new Prisma.Decimal(item.product.sellingPrice).mul(
+            item.quantity,
+          ),
+        })),
+      };
+    });
+
+    const stockByProduct = new Map<
+      string,
+      {
+        productId: string;
+        productName: string;
+        sku: string | null;
+        barcode: string | null;
+        quantityInHand: number;
+        quantitySold: number;
+        suppliedQuantity: number;
+        unitValue: Prisma.Decimal;
+        totalSoldValue: Prisma.Decimal;
+        lastActivityAt: Date;
+      }
+    >();
+
+    for (const item of soldItems) {
+      const existing = stockByProduct.get(item.productId);
+      const unitValue = new Prisma.Decimal(item.product.sellingPrice);
+      const totalSoldValue = new Prisma.Decimal(item.totalAmount);
+      const lastActivityAt =
+        !existing || item.sale.saleDate > existing.lastActivityAt
+          ? item.sale.saleDate
+          : existing.lastActivityAt;
+
+      stockByProduct.set(item.productId, {
+        productId: item.productId,
+        productName: item.product.name,
+        sku: item.product.sku,
+        barcode: item.product.barcode,
+        quantityInHand: existing?.quantityInHand ?? 0,
+        quantitySold: (existing?.quantitySold ?? 0) + item.quantity,
+        suppliedQuantity: suppliedByProduct.get(item.productId) ?? 0,
+        unitValue,
+        totalSoldValue: (existing?.totalSoldValue ?? new Prisma.Decimal(0)).add(
+          totalSoldValue,
+        ),
+        lastActivityAt,
+      });
+    }
+
+    for (const [productId, quantity] of suppliedByProduct) {
+      if (stockByProduct.has(productId)) {
+        continue;
+      }
+
+      const suppliedItem = disbursements
+        .flatMap((run) => run.items)
+        .find((item) => item.productId === productId);
+      if (!suppliedItem) continue;
+
+      stockByProduct.set(productId, {
+        productId,
+        productName: suppliedItem.product.name,
+        sku: suppliedItem.product.sku,
+        barcode: suppliedItem.product.barcode,
+        quantityInHand: Math.max(0, quantity),
+        quantitySold: 0,
+        suppliedQuantity: quantity,
+        unitValue: new Prisma.Decimal(suppliedItem.product.sellingPrice),
+        totalSoldValue: new Prisma.Decimal(0),
+        lastActivityAt: suppliedItem.createdAt,
+      });
+    }
+
+    const stockItems = Array.from(stockByProduct.values())
+      .map((item) => ({
+        ...item,
+        quantityInHand: Math.max(0, item.suppliedQuantity - item.quantitySold),
+      }))
+      .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime());
+    const stockValue = stockItems.reduce(
+      (total, item) =>
+        total.add(item.unitValue.mul(Math.max(0, item.quantityInHand))),
+      new Prisma.Decimal(0),
+    );
+    const totalSuppliedQuantity = supplyRecords.reduce(
+      (sum, run) => sum + run.totalQuantity,
+      0,
+    );
+    const totalSuppliedValue = supplyRecords.reduce(
+      (sum, run) => sum.add(run.totalValue),
+      new Prisma.Decimal(0),
+    );
+
+    return {
+      stats: {
+        stockItems: stockItems.length,
+        stockValue,
+        totalSupplied: totalSuppliedQuantity,
+        salesToday: salesTodayCount,
+        salesTodayValue:
+          salesTodayValue._sum.totalAmount ?? new Prisma.Decimal(0),
+      },
+      stock: stockItems.slice(0, 50),
+      supplies: {
+        summary: {
+          totalSupplyRuns: supplyRecords.length,
+          totalSuppliedQuantity,
+          totalSuppliedValue,
+        },
+        data: supplyRecords,
+      },
     };
   }
 

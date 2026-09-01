@@ -50,6 +50,53 @@ export interface EmployeeProfileResponse {
     expensesCount: number;
     activeSessions: number;
   };
+  profileActivity?: {
+    stats: {
+      stockItems: number;
+      stockValue: string | number;
+      totalSupplied: number;
+      salesToday: number;
+      salesTodayValue: string | number;
+    };
+    stock: Array<{
+      productId: string;
+      productName: string;
+      sku?: string | null;
+      barcode?: string | null;
+      quantityInHand: number;
+      quantitySold: number;
+      suppliedQuantity: number;
+      unitValue: string | number;
+      totalSoldValue: string | number;
+      lastActivityAt: string;
+    }>;
+    supplies: {
+      summary: {
+        totalSupplyRuns: number;
+        totalSuppliedQuantity: number;
+        totalSuppliedValue: string | number;
+      };
+      data: Array<{
+        id: string;
+        employeeId?: string | null;
+        disbursementNumber: string;
+        disbursementDate: string;
+        destination?: string | null;
+        remarks?: string | null;
+        totalQuantity: number;
+        totalValue: string | number;
+        items: Array<{
+          id: string;
+          productId: string;
+          productName: string;
+          sku?: string | null;
+          barcode?: string | null;
+          quantity: number;
+          value: string | number;
+        }>;
+      }>;
+    };
+  };
   recentSessions: Array<{
     id: string;
     deviceName: string | null;

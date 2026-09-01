@@ -28,6 +28,11 @@ export class CreateGoodsDisbursementItemDto {
 }
 
 export class CreateGoodsDisbursementDto {
+  @ApiPropertyOptional({ description: 'Employee recipient identifier', format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  employeeId?: string;
+
   @ApiPropertyOptional({ description: 'Disbursement number' })
   @IsOptional()
   @IsString()

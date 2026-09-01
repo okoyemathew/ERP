@@ -16,6 +16,14 @@ export interface ApiGoodsDisbursementItem {
 export interface ApiGoodsDisbursement {
   id: string;
   businessId: string;
+  employeeId?: string | null;
+  employee?: {
+    id: string;
+    employeeCode: string;
+    firstName: string;
+    lastName: string;
+    user?: { username: string };
+  } | null;
   disbursementNumber: string;
   disbursementDate: string;
   destination?: string | null;
@@ -31,6 +39,7 @@ export interface GoodsDisbursementListResponse {
 }
 
 export interface CreateGoodsDisbursementPayload {
+  employeeId?: string;
   disbursementNumber?: string;
   disbursementDate?: string;
   destination?: string;

@@ -6,6 +6,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
 } from 'class-validator';
 
@@ -36,6 +37,11 @@ export class GoodsDisbursementQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by employee recipient identifier', format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  employeeId?: string;
 
   @ApiPropertyOptional({ enum: SORT_FIELDS })
   @IsOptional()

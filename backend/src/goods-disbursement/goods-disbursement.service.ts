@@ -52,15 +52,42 @@ export class GoodsDisbursementService {
       );
     }
 
+    const employee = dto.employeeId
+      ? await this.prisma.employee.findFirst({
+          where: { id: dto.employeeId, businessId, deletedAt: null },
+          select: {
+            id: true,
+            employeeCode: true,
+            firstName: true,
+            lastName: true,
+            user: { select: { username: true } },
+          },
+        })
+      : null;
+
+    if (dto.employeeId && !employee) {
+      throw new BadRequestException(
+        'Employee recipient was not found in this business',
+      );
+    }
+
+    const employeeDisplayName = employee
+      ? `${employee.firstName} ${employee.lastName}`.trim() ||
+        employee.user.username ||
+        employee.employeeCode
+      : null;
+    const destination = dto.destination?.trim() || employeeDisplayName || null;
+
     return this.prisma.$transaction(async (tx) => {
       const created = await tx.goodsDisbursement.create({
         data: {
           businessId,
+          employeeId: employee?.id ?? null,
           disbursementNumber,
           disbursementDate: dto.disbursementDate
             ? new Date(dto.disbursementDate)
             : new Date(),
-          destination: dto.destination?.trim() || null,
+          destination,
           remarks: dto.remarks?.trim() || null,
           items: {
             create: dto.items.map((item) => ({
@@ -152,6 +179,7 @@ export class GoodsDisbursementService {
             },
           }
         : {}),
+      ...(query.employeeId ? { employeeId: query.employeeId } : {}),
       ...(search
         ? {
             OR: [
@@ -249,6 +277,15 @@ export class GoodsDisbursementService {
 
   private include() {
     return {
+      employee: {
+        select: {
+          id: true,
+          employeeCode: true,
+          firstName: true,
+          lastName: true,
+          user: { select: { username: true } },
+        },
+      },
       items: {
         include: {
           product: {

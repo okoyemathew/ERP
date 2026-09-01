@@ -902,6 +902,9 @@ model GoodsDisbursement {
   businessId String   @db.Uuid
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
+  employeeId String?   @db.Uuid
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
   disbursementNumber String
 
   disbursementDate DateTime @default(now())
@@ -917,6 +920,7 @@ model GoodsDisbursement {
 
   @@unique([businessId, disbursementNumber])
   @@index([businessId])
+  @@index([employeeId])
 }
 
 //////////////////////////////////////////////////////
@@ -1684,6 +1688,8 @@ model Employee {
   deviceId String?
 
   deletedAt DateTime?
+
+  goodsDisbursements GoodsDisbursement[]
 
   createdAt DateTime @default(now())
 
