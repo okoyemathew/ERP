@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "NexPOS",
+    "name": "EST JP MOTORS CAMEROON",
     "slug": "nexpos-mobile",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -9,7 +9,7 @@
       "**/*"
     ],
     "android": {
-      "package": "com.nexpos.mobile",
+      "package": "com.estjpmotorscameroon.pos",
       "adaptiveIcon": {
         "backgroundColor": "#1565C0"
       }
