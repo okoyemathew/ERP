@@ -15,6 +15,10 @@ import { CreateProductImageDto } from './dto/create-product-image.dto';
 import { CreateProductBarcodeDto } from './dto/create-product-barcode.dto';
 import { ProductQueryDto } from './product-query.dto';
 
+const DEFAULT_PRODUCT_CATEGORY_NAME = 'Uncategorized';
+const DEFAULT_PRODUCT_UNIT_NAME = 'Unit';
+const DEFAULT_PRODUCT_UNIT_SYMBOL = 'UNIT';
+
 @Injectable()
 export class ProductService {
   constructor(private readonly prisma: PrismaService) {}
@@ -24,41 +28,52 @@ export class ProductService {
     dto: CreateProductDto,
     user?: AuthenticatedUser,
   ) {
-    await this.ensureCategoryExists(businessId, dto.categoryId);
-    await this.ensureUnitExists(businessId, dto.unitId);
+    const name = dto.name.trim();
+    const categoryId = await this.resolveCategoryId(businessId, dto.categoryId);
+    const unitId = await this.resolveUnitId(businessId, dto.unitId);
+    const sku = await this.resolveSku(businessId, name, dto.sku);
+    const purchasePrice = dto.purchasePrice ?? 0;
+    const sellingPrice =
+      dto.sellingPrice ?? Math.max(dto.baseSellingPrice ?? 0, dto.wholesalePrice ?? 0);
     if (dto.brandId) {
       await this.ensureBrandExists(businessId, dto.brandId);
     }
     if (dto.supplierId) {
       await this.ensureSupplierExists(businessId, dto.supplierId);
     }
-    this.validatePricesAndStock(dto);
-    await this.validateUniqueSku(businessId, dto.sku);
+    this.validatePricesAndStock({
+      purchasePrice,
+      sellingPrice,
+      baseSellingPrice: dto.baseSellingPrice,
+      wholesalePrice: dto.wholesalePrice,
+      minimumStock: dto.minimumStock,
+      maximumStock: dto.maximumStock,
+    });
     if (dto.barcode) {
       await this.validateUniqueBarcode(businessId, dto.barcode, undefined);
     }
     this.assertCanSetBaseSellingPrice(dto, user);
 
     const initialStock = dto.initialStock ?? 0;
-    const baseSellingPrice = dto.baseSellingPrice ?? dto.sellingPrice;
+    const baseSellingPrice = dto.baseSellingPrice ?? sellingPrice;
 
     const createdProduct = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
         data: {
           businessId,
-          categoryId: dto.categoryId,
+          categoryId,
           brandId: dto.brandId,
           supplierId: dto.supplierId,
-          unitId: dto.unitId,
-          name: dto.name.trim(),
-          sku: dto.sku.trim(),
+          unitId,
+          name,
+          sku,
           barcode: dto.barcode?.trim() || null,
           description: dto.description?.trim() || null,
-          purchasePrice: dto.purchasePrice,
-          sellingPrice: dto.sellingPrice,
+          purchasePrice,
+          sellingPrice,
           baseSellingPrice,
           wholesalePrice: dto.wholesalePrice ?? null,
-          minimumStock: dto.minimumStock ?? 0,
+          minimumStock: dto.minimumStock,
           maximumStock: dto.maximumStock ?? null,
           imageUrl: dto.imageUrl?.trim() || null,
           isActive: dto.isActive ?? true,
@@ -72,9 +87,9 @@ export class ProductService {
           quantityOnHand: initialStock,
           quantityReserved: 0,
           quantityAvailable: initialStock,
-          reorderLevel: dto.minimumStock ?? 0,
-          reorderQuantity: dto.minimumStock ?? 0,
-          averageCost: dto.purchasePrice,
+          reorderLevel: dto.minimumStock,
+          reorderQuantity: dto.minimumStock,
+          averageCost: purchasePrice,
           lastStockUpdate: new Date(),
           isSynced: true,
           syncVersion: 1,
@@ -95,7 +110,7 @@ export class ProductService {
             quantity: initialStock,
             quantityBefore: 0,
             quantityAfter: initialStock,
-            unitCost: dto.purchasePrice,
+            unitCost: purchasePrice,
             referenceNumber: `INITIAL_STOCK:${product.id}`,
             remarks: 'Initial stock on product creation',
             transactionDate: new Date(),
@@ -920,6 +935,118 @@ export class ProductService {
     }
   }
 
+  private async resolveCategoryId(
+    businessId: string,
+    categoryId?: string,
+  ): Promise<string> {
+    if (categoryId) {
+      await this.ensureCategoryExists(businessId, categoryId);
+      return categoryId;
+    }
+
+    const category = await this.prisma.category.upsert({
+      where: {
+        businessId_name: {
+          businessId,
+          name: DEFAULT_PRODUCT_CATEGORY_NAME,
+        },
+      },
+      update: { isActive: true },
+      create: {
+        businessId,
+        name: DEFAULT_PRODUCT_CATEGORY_NAME,
+        code: 'UNCATEGORIZED',
+        description: 'Default category for products without a selected category',
+        isActive: true,
+      },
+    });
+
+    return category.id;
+  }
+
+  private async resolveUnitId(
+    businessId: string,
+    unitId?: string,
+  ): Promise<string> {
+    if (unitId) {
+      await this.ensureUnitExists(businessId, unitId);
+      return unitId;
+    }
+
+    const unit = await this.prisma.unit.upsert({
+      where: {
+        businessId_symbol: {
+          businessId,
+          symbol: DEFAULT_PRODUCT_UNIT_SYMBOL,
+        },
+      },
+      update: { isActive: true },
+      create: {
+        businessId,
+        name: DEFAULT_PRODUCT_UNIT_NAME,
+        symbol: DEFAULT_PRODUCT_UNIT_SYMBOL,
+        description: 'Default unit for products without a selected unit',
+        isActive: true,
+      },
+    });
+
+    return unit.id;
+  }
+
+  private async resolveSku(
+    businessId: string,
+    name: string,
+    sku?: string,
+  ): Promise<string> {
+    const normalized = sku?.trim();
+
+    if (normalized) {
+      await this.validateUniqueSku(businessId, normalized);
+      return normalized;
+    }
+
+    return this.generateUniqueSku(businessId, name);
+  }
+
+  private async generateUniqueSku(
+    businessId: string,
+    name: string,
+  ): Promise<string> {
+    const base =
+      name
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64) || 'PRODUCT';
+    let candidate = base;
+    let suffix = 1;
+
+    while (await this.productSkuExists(businessId, candidate)) {
+      suffix += 1;
+      const suffixText = `-${suffix}`;
+      candidate = `${base.slice(0, 80 - suffixText.length)}${suffixText}`;
+    }
+
+    return candidate;
+  }
+
+  private async productSkuExists(
+    businessId: string,
+    sku: string,
+    excludeId?: string,
+  ): Promise<boolean> {
+    const existing = await this.prisma.product.findFirst({
+      where: {
+        businessId,
+        sku,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+    });
+
+    return Boolean(existing);
+  }
+
   private async validateUniqueSku(
     businessId: string,
     sku: string,
@@ -927,15 +1054,7 @@ export class ProductService {
   ): Promise<void> {
     const normalized = sku.trim();
 
-    const existing = await this.prisma.product.findFirst({
-      where: {
-        businessId,
-        sku: normalized,
-        ...(excludeId ? { id: { not: excludeId } } : {}),
-      },
-    });
-
-    if (existing) {
+    if (await this.productSkuExists(businessId, normalized, excludeId)) {
       throw new ConflictException('SKU already exists for this business');
     }
   }

@@ -117,54 +117,60 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
   };
 
   const save = async () => {
-    const purchasePrice = Number(form.purchasePrice);
-    const sellingPrice = Number(form.sellingPrice);
-    const baseSellingPrice = form.baseSellingPrice ? Number(form.baseSellingPrice) : undefined;
-    const wholesalePrice = form.wholesalePrice ? Number(form.wholesalePrice) : undefined;
-    const minimumStock = Number(form.minimumStock || 0);
-    const maximumStock = form.maximumStock ? Number(form.maximumStock) : undefined;
-    const initialStock = form.initialStock ? Number(form.initialStock) : 0;
+    const parseOptionalNumber = (value: string) => value.trim() ? Number(value) : undefined;
+    const purchasePrice = parseOptionalNumber(form.purchasePrice);
+    const sellingPrice = parseOptionalNumber(form.sellingPrice);
+    const baseSellingPrice = parseOptionalNumber(form.baseSellingPrice);
+    const wholesalePrice = parseOptionalNumber(form.wholesalePrice);
+    const minimumStockInput = form.minimumStock.trim();
+    const minimumStock = Number(minimumStockInput);
+    const maximumStock = parseOptionalNumber(form.maximumStock);
+    const initialStock = parseOptionalNumber(form.initialStock);
 
-    if (!form.name || !form.sku || !form.categoryId || !form.unitId) {
-      Alert.alert("Missing details", "Product name, SKU, category, and unit are required.");
+    if (!form.name.trim() || !minimumStockInput) {
+      Alert.alert("Missing details", "Product name and stock limit are required.");
       return;
     }
-    if (Number.isNaN(purchasePrice) || Number.isNaN(sellingPrice) || purchasePrice < 0 || sellingPrice < 0) {
-      Alert.alert("Invalid prices", "Purchase and selling prices must be valid numbers.");
+    if (!Number.isInteger(minimumStock) || minimumStock < 0) {
+      Alert.alert("Invalid stock limit", "Stock limit must be a whole number greater than or equal to zero.");
       return;
     }
-    if (isOwner && (baseSellingPrice === undefined || Number.isNaN(baseSellingPrice) || baseSellingPrice < 0)) {
-      Alert.alert("Invalid base price", "Base selling price must be a valid number.");
+    if ((purchasePrice !== undefined && (Number.isNaN(purchasePrice) || purchasePrice < 0)) || (sellingPrice !== undefined && (Number.isNaN(sellingPrice) || sellingPrice < 0))) {
+      Alert.alert("Invalid prices", "Purchase and selling prices must be valid numbers when entered.");
       return;
     }
-    if (isOwner && baseSellingPrice !== undefined && sellingPrice < baseSellingPrice) {
+    if (isOwner && baseSellingPrice !== undefined && (Number.isNaN(baseSellingPrice) || baseSellingPrice < 0)) {
+      Alert.alert("Invalid base price", "Base selling price must be a valid number when entered.");
+      return;
+    }
+    if (isOwner && baseSellingPrice !== undefined && sellingPrice !== undefined && sellingPrice < baseSellingPrice) {
       Alert.alert("Invalid base price", "Selling price cannot be lower than base selling price.");
       return;
     }
-    if (wholesalePrice !== undefined && (Number.isNaN(wholesalePrice) || wholesalePrice < 0 || wholesalePrice > sellingPrice)) {
-      Alert.alert("Invalid wholesale price", "Wholesale price must be valid and cannot exceed selling price.");
+    if (wholesalePrice !== undefined && (Number.isNaN(wholesalePrice) || wholesalePrice < 0 || (sellingPrice !== undefined && wholesalePrice > sellingPrice))) {
+      Alert.alert("Invalid wholesale price", "Wholesale price must be valid and cannot exceed selling price when entered.");
       return;
     }
-    if (maximumStock !== undefined && maximumStock < minimumStock) {
+    if (maximumStock !== undefined && (!Number.isInteger(maximumStock) || maximumStock < 0 || maximumStock < minimumStock)) {
       Alert.alert("Invalid stock limits", "Maximum stock cannot be lower than minimum stock.");
       return;
     }
-    if (!productId && (!Number.isInteger(initialStock) || initialStock < 0)) {
-      Alert.alert("Invalid stock", "Initial stock must be a whole number greater than or equal to zero.");
+    if (!productId && initialStock !== undefined && (!Number.isInteger(initialStock) || initialStock < 0)) {
+      Alert.alert("Invalid stock", "Initial stock must be a whole number greater than or equal to zero when entered.");
       return;
     }
 
     setSaving(true);
     try {
       const payload: UpsertProductPayload = {
-        categoryId: form.categoryId,
-        brandId: form.brandId,
-        supplierId: form.supplierId,
-        unitId: form.unitId,
-        name: form.name,
-        sku: form.sku,
-        barcode: form.barcode || undefined,
-        description: form.description || undefined,
+        categoryId: form.categoryId || undefined,
+        brandId: form.brandId || undefined,
+        supplierId: form.supplierId || undefined,
+        unitId: form.unitId || undefined,
+        name: form.name.trim(),
+        sku: form.sku?.trim() || undefined,
+        barcode: form.barcode?.trim() || undefined,
+        description: form.description?.trim() || undefined,
         purchasePrice,
         sellingPrice,
         baseSellingPrice: isOwner ? baseSellingPrice : undefined,
@@ -172,7 +178,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         minimumStock,
         maximumStock,
         initialStock: productId ? undefined : initialStock,
-        imageUrl: form.imageUrl || undefined,
+        imageUrl: form.imageUrl?.trim() || undefined,
         isActive: form.isActive
       };
       if (productId) await productsService.update(productId, payload);

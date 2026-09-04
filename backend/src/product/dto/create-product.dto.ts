@@ -12,10 +12,10 @@ import {
 } from 'class-validator';
 
 export class CreateProductDto {
-  @ApiProperty({ description: 'Category identifier', format: 'uuid' })
+  @ApiPropertyOptional({ description: 'Category identifier', format: 'uuid' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  categoryId!: string;
+  categoryId?: string;
 
   @ApiPropertyOptional({ description: 'Brand identifier', format: 'uuid' })
   @IsOptional()
@@ -27,10 +27,10 @@ export class CreateProductDto {
   @IsString()
   supplierId?: string;
 
-  @ApiProperty({ description: 'Unit identifier', format: 'uuid' })
+  @ApiPropertyOptional({ description: 'Unit identifier', format: 'uuid' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  unitId!: string;
+  unitId?: string;
 
   @ApiProperty({ description: 'Product name', minLength: 2, maxLength: 200 })
   @IsString()
@@ -39,16 +39,14 @@ export class CreateProductDto {
   @MaxLength(200)
   name!: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Stock keeping unit',
-    minLength: 2,
     maxLength: 80,
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  @MinLength(2)
   @MaxLength(80)
-  sku!: string;
+  sku?: string;
 
   @ApiPropertyOptional({ description: 'Product barcode', maxLength: 120 })
   @IsOptional()
@@ -62,15 +60,17 @@ export class CreateProductDto {
   @MaxLength(1000)
   description?: string;
 
-  @ApiProperty({ description: 'Purchase price', minimum: 0 })
+  @ApiPropertyOptional({ description: 'Purchase price', minimum: 0 })
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  purchasePrice!: number;
+  purchasePrice?: number;
 
-  @ApiProperty({ description: 'Selling price', minimum: 0 })
+  @ApiPropertyOptional({ description: 'Selling price', minimum: 0 })
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  sellingPrice!: number;
+  sellingPrice?: number;
 
   @ApiPropertyOptional({
     description: 'Owner-controlled minimum selling price',
@@ -87,11 +87,10 @@ export class CreateProductDto {
   @Min(0)
   wholesalePrice?: number;
 
-  @ApiPropertyOptional({ description: 'Minimum stock level', minimum: 0 })
-  @IsOptional()
-  @IsNumber()
+  @ApiProperty({ description: 'Minimum stock level', minimum: 0 })
+  @IsInt()
   @Min(0)
-  minimumStock?: number;
+  minimumStock!: number;
 
   @ApiPropertyOptional({ description: 'Maximum stock level', minimum: 0 })
   @IsOptional()

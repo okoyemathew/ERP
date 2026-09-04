@@ -122,19 +122,19 @@ export interface ProductQuery {
 }
 
 export interface UpsertProductPayload {
-  categoryId: string;
+  categoryId?: string;
   brandId?: string;
   supplierId?: string;
-  unitId: string;
+  unitId?: string;
   name: string;
-  sku: string;
+  sku?: string;
   barcode?: string;
   description?: string;
-  purchasePrice: number;
-  sellingPrice: number;
+  purchasePrice?: number;
+  sellingPrice?: number;
   baseSellingPrice?: number;
   wholesalePrice?: number;
-  minimumStock?: number;
+  minimumStock: number;
   maximumStock?: number;
   initialStock?: number;
   imageUrl?: string;

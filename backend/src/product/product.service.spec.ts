@@ -99,7 +99,18 @@ describe('ProductService base selling price', () => {
     prisma = createPrismaMock();
     service = new ProductService(prisma as never);
     prisma.category.findFirst.mockResolvedValue({ id: categoryId, businessId });
+    prisma.category.upsert = jest.fn().mockResolvedValue({
+      id: categoryId,
+      businessId,
+      name: 'Uncategorized',
+    });
     prisma.unit.findFirst.mockResolvedValue({ id: unitId, businessId });
+    prisma.unit.upsert = jest.fn().mockResolvedValue({
+      id: unitId,
+      businessId,
+      name: 'Unit',
+      symbol: 'UNIT',
+    });
     prisma.product.findFirst.mockResolvedValue(null);
     prisma.auditLog.findMany.mockResolvedValue([]);
     prisma.inventoryTransaction.findMany.mockResolvedValue([]);
@@ -121,6 +132,7 @@ describe('ProductService base selling price', () => {
         purchasePrice: 8000,
         sellingPrice: 10500,
         baseSellingPrice: 10000,
+        minimumStock: 0,
       },
       owner,
     );
@@ -151,11 +163,68 @@ describe('ProductService base selling price', () => {
         sku: 'CEM-001',
         purchasePrice: 8000,
         sellingPrice: 10500,
+        minimumStock: 0,
       },
       owner,
     );
 
     expect(prisma.product.create.mock.calls[0][0].data.baseSellingPrice).toBe(10500);
+  });
+
+  it('creates a product when only name and stock limit are supplied', async () => {
+    const created = product({
+      name: 'Roof Sheet',
+      sku: 'ROOF-SHEET',
+      purchasePrice: new Prisma.Decimal(0),
+      sellingPrice: new Prisma.Decimal(0),
+      baseSellingPrice: new Prisma.Decimal(0),
+      minimumStock: 12,
+    });
+    prisma.product.create.mockResolvedValue(created);
+    prisma.product.findUnique.mockResolvedValue(created);
+    prisma.inventory.create.mockResolvedValue({});
+
+    await service.create(
+      businessId,
+      {
+        name: 'Roof Sheet',
+        minimumStock: 12,
+      },
+      owner,
+    );
+
+    expect(prisma.category.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { businessId_name: { businessId, name: 'Uncategorized' } },
+      }),
+    );
+    expect(prisma.unit.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { businessId_symbol: { businessId, symbol: 'UNIT' } },
+      }),
+    );
+    expect(prisma.product.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          categoryId,
+          unitId,
+          name: 'Roof Sheet',
+          sku: 'ROOF-SHEET',
+          purchasePrice: 0,
+          sellingPrice: 0,
+          baseSellingPrice: 0,
+          minimumStock: 12,
+        }),
+      }),
+    );
+    expect(prisma.inventory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          reorderLevel: 12,
+          reorderQuantity: 12,
+        }),
+      }),
+    );
   });
 
   it('removes base selling price from employee product responses', async () => {
