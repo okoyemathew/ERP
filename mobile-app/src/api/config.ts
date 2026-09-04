@@ -1,10 +1,10 @@
-declare const process: { env?: Record<string, string | undefined> };
+declare const process: { env: Record<string, string | undefined> };
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 
 export const apiConfig = {
-  baseURL: trimTrailingSlash(process.env?.EXPO_PUBLIC_API_BASE_URL ?? ""),
-  timeoutMs: Number(process.env?.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000)
+  baseURL: trimTrailingSlash(process.env.EXPO_PUBLIC_API_BASE_URL ?? ""),
+  timeoutMs: Number(process.env.EXPO_PUBLIC_API_TIMEOUT_MS ?? 30000)
 };
 
 export function assertApiConfigured() {

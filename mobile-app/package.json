@@ -4,6 +4,8 @@
   "private": true,
   "main": "expo/AppEntry",
   "scripts": {
+    "eas-build-post-install": "node scripts/eas-android-maven-fallback.js",
+    "eas-build-pre-build": "node scripts/eas-android-maven-fallback.js",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
