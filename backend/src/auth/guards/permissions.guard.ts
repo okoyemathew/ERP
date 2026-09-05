@@ -22,6 +22,37 @@ import {
 import type { RequestUserInterface } from '../interfaces/request-user.interface';
 import { AuthorizationService } from '../services/authorization.service';
 
+const BUILT_IN_ROLE_PERMISSIONS: Partial<Record<SystemRole, readonly string[]>> =
+  {
+    [SYSTEM_ROLES.MANAGER]: [
+      'sales.manage',
+      'inventory.manage',
+      'customers.manage',
+      'reports.view',
+    ],
+    [SYSTEM_ROLES.CASHIER]: [
+      'sales.manage',
+      'receipt.manage',
+      'customers.manage',
+    ],
+    [SYSTEM_ROLES.SALESPERSON]: ['sales.manage', 'receipt.manage'],
+    [SYSTEM_ROLES.INVENTORY_OFFICER]: [
+      'inventory.manage',
+      'goods-supplied.manage',
+      'goods-disbursement.manage',
+    ],
+    [SYSTEM_ROLES.ACCOUNTANT]: [
+      'expenses.manage',
+      'reports.view',
+      'credit-sales.manage',
+    ],
+    [SYSTEM_ROLES.SUPERVISOR]: [
+      'reports.view',
+      'inventory.manage',
+      'sales.manage',
+    ],
+  };
+
 @Injectable()
 export class PermissionsGuard implements CanActivate {
   constructor(
@@ -71,11 +102,30 @@ export class PermissionsGuard implements CanActivate {
       requiredPermissions,
     );
 
-    if (!hasPermissions) {
+    if (
+      !hasPermissions &&
+      !this.builtInRoleHasPermissions(roleName, requiredPermissions)
+    ) {
       throw new ForbiddenException('Insufficient permissions');
     }
 
     return true;
+  }
+
+  private builtInRoleHasPermissions(
+    roleName: string | null,
+    requiredPermissions: readonly string[],
+  ): boolean {
+    if (!roleName) {
+      return false;
+    }
+
+    const rolePermissions =
+      BUILT_IN_ROLE_PERMISSIONS[roleName as SystemRole] ?? [];
+
+    return requiredPermissions.every((permission) =>
+      rolePermissions.includes(permission),
+    );
   }
 
   private assertEmployeeRestrictions(
