@@ -157,6 +157,7 @@ export function mapReceiptToDocument(receipt: ApiReceipt): ReceiptDocument {
   return {
     id: receipt.receiptNumber,
     kind: Number(receipt.sale.balanceDue) > 0 ? "credit" : "sale",
+    businessName: receipt.business.name,
     title: "Sales Receipt",
     orderNumber: receipt.sale.saleNumber,
     customerName: receipt.customer.name,

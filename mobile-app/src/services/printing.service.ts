@@ -21,7 +21,7 @@ const row = (left: string, right: string) => {
 export const printingService = {
   buildReceiptText(receipt: ReceiptDocument) {
     const lines = [
-      center("NexPOS Store"),
+      center(receipt.businessName ?? "EST JP MOTORS"),
       center(receipt.title),
       divider,
       row("Receipt", receipt.id),

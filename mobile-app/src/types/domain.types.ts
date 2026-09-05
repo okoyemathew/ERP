@@ -115,6 +115,7 @@ export interface CreditPayment {
 export interface ReceiptDocument {
   id: string;
   kind: "sale" | "credit" | "payment";
+  businessName?: string;
   title: string;
   orderNumber: string;
   customerName: string;

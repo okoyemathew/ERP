@@ -37,7 +37,7 @@ export function ReceiptTicket({ receipt, receiptId, items = [], method = "cash" 
         <Path d={zigzagPath(320)} fill={colors.surface} />
       </Svg>
       <View style={styles.ticket}>
-        <Text style={styles.store}>NexPOS Store</Text>
+        <Text style={styles.store}>{receipt?.businessName ?? "EST JP MOTORS"}</Text>
         <Text style={styles.address}>{receipt?.title ?? "Sales Receipt"}</Text>
         <View style={styles.dashed} />
         <View style={styles.meta}>
