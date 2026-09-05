@@ -13,6 +13,7 @@ type FormState = Omit<UpsertProductPayload, "purchasePrice" | "sellingPrice" | "
   wholesalePrice: string;
   minimumStock: string;
   maximumStock: string;
+  actualNewStock: string;
   initialStock: string;
 };
 
@@ -31,6 +32,7 @@ const defaults: FormState = {
   wholesalePrice: "",
   minimumStock: "0",
   maximumStock: "",
+  actualNewStock: "0",
   initialStock: "0",
   imageUrl: "",
   isActive: true
@@ -70,6 +72,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
           wholesalePrice: product.wholesalePrice ? String(product.wholesalePrice) : "",
           minimumStock: String(product.minimumStock),
           maximumStock: product.maximumStock === null || product.maximumStock === undefined ? "" : String(product.maximumStock),
+          actualNewStock: "",
           initialStock: String(product.initialStockQuantity ?? 0),
           imageUrl: product.imageUrl ?? "",
           isActive: product.isActive
@@ -87,6 +90,10 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
   }, [load]);
 
   const setField = (field: keyof FormState, value: string | boolean | undefined) => setForm((current) => ({ ...current, [field]: value }));
+  const setCreatedStock = (value: string) => {
+    setInitialStockEdited(true);
+    setForm((current) => ({ ...current, actualNewStock: value, initialStock: value }));
+  };
 
   const generateBarcode = async () => {
     try {
@@ -106,6 +113,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
     const minimumStockInput = form.minimumStock.trim();
     const minimumStock = Number(minimumStockInput);
     const maximumStock = parseOptionalNumber(form.maximumStock);
+    const actualNewStock = parseOptionalNumber(form.actualNewStock);
     const initialStock = parseOptionalNumber(form.initialStock);
 
     if (!form.name.trim() || !minimumStockInput) {
@@ -136,6 +144,10 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
       Alert.alert("Invalid stock limits", "Maximum stock cannot be lower than minimum stock.");
       return;
     }
+    if (!productId && actualNewStock !== undefined && (!Number.isInteger(actualNewStock) || actualNewStock < 0)) {
+      Alert.alert("Invalid stock", "Actual new stock must be a whole number greater than or equal to zero when entered.");
+      return;
+    }
     if (!productId && initialStock !== undefined && (!Number.isInteger(initialStock) || initialStock < 0)) {
       Alert.alert("Invalid stock", "Initial stock must be a whole number greater than or equal to zero when entered.");
       return;
@@ -158,7 +170,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         wholesalePrice,
         minimumStock,
         maximumStock,
-        initialStock: productId ? undefined : initialStockEdited ? initialStock : undefined,
+        initialStock: productId ? undefined : actualNewStock ?? (initialStockEdited ? initialStock : undefined),
         imageUrl: form.imageUrl?.trim() || undefined,
         isActive: form.isActive
       };
@@ -196,7 +208,8 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         <Input label="Wholesale Price" value={form.wholesalePrice} onChangeText={(value) => setField("wholesalePrice", value)} keyboardType="decimal-pad" />
         <Input label="Minimum Stock" value={form.minimumStock} onChangeText={(value) => setField("minimumStock", value)} keyboardType="number-pad" />
         <Input label="Maximum Stock" value={form.maximumStock} onChangeText={(value) => setField("maximumStock", value)} keyboardType="number-pad" />
-        {!productId ? <Input label="Initial Stock" value={form.initialStock} onChangeText={(value) => { setInitialStockEdited(true); setField("initialStock", value); }} keyboardType="number-pad" /> : null}
+        {!productId ? <Input label="Actual New Stock" value={form.actualNewStock} onChangeText={setCreatedStock} keyboardType="number-pad" /> : null}
+        {!productId ? <Input label="Initial Stock" value={form.initialStock} onChangeText={setCreatedStock} keyboardType="number-pad" /> : null}
       </Card>
 
       <Button label="Save Product" loading={saving} onPress={save} />
