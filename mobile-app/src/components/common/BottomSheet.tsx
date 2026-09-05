@@ -6,15 +6,16 @@ import { borderRadius, colors } from "@/theme";
 interface AppBottomSheetProps {
   children: React.ReactNode;
   snapPoints?: string[];
+  initialIndex?: number;
   onClose?: () => void;
 }
 
-export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>(({ children, snapPoints = ["82%"], onClose }, ref) => {
+export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>(({ children, snapPoints = ["82%"], initialIndex = -1, onClose }, ref) => {
   const points = useMemo(() => snapPoints, [snapPoints]);
   return (
     <GorhomBottomSheet
       ref={ref}
-      index={-1}
+      index={initialIndex}
       snapPoints={points}
       enablePanDownToClose
       onClose={onClose}

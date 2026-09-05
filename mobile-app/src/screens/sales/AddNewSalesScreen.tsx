@@ -745,7 +745,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         </Pressable>
       ) : null}
 
-      {checkoutVisible ? <AppBottomSheet ref={checkoutRef} snapPoints={["88%"]} onClose={() => setCheckoutVisible(false)}>
+      {checkoutVisible ? <AppBottomSheet ref={checkoutRef} snapPoints={["88%"]} initialIndex={0} onClose={() => setCheckoutVisible(false)}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Complete sale</Text>
           <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator persistentScrollbar>
@@ -815,7 +815,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         </View>
       </AppBottomSheet> : null}
 
-      {collectVisible ? <AppBottomSheet ref={collectRef} snapPoints={["88%"]} onClose={() => setCollectVisible(false)}>
+      {collectVisible ? <AppBottomSheet ref={collectRef} snapPoints={["88%"]} initialIndex={0} onClose={() => setCollectVisible(false)}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Collect Credit</Text>
           <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator persistentScrollbar>
@@ -872,7 +872,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         </View>
       </AppBottomSheet> : null}
 
-      {receiptVisible ? <AppBottomSheet ref={receiptRef} snapPoints={["90%"]} onClose={() => setReceiptVisible(false)}>
+      {receiptVisible ? <AppBottomSheet ref={receiptRef} snapPoints={["90%"]} initialIndex={0} onClose={() => setReceiptVisible(false)}>
         <View style={styles.sheet}>
           <View style={styles.receiptHeader}>
             <Text style={styles.sheetTitle}>Receipt Preview</Text>
@@ -982,7 +982,7 @@ const styles = StyleSheet.create({
   },
   stepperButton: { width: 28, height: 24, alignItems: "center", justifyContent: "center" },
   stepperQtyInput: { width: 48, color: colors.textMuted, fontSize: 10, fontWeight: "900", textAlign: "center", paddingVertical: 0 },
-  cartFab: { position: "absolute", left: 16, right: 16, bottom: spacing.cartFABBottom, borderRadius: 18, overflow: "hidden", ...shadows.cartFAB },
+  cartFab: { position: "absolute", left: 16, right: 16, bottom: spacing.cartFABBottom, borderRadius: 18, overflow: "hidden", ...shadows.cartFAB, zIndex: 60, elevation: 30 },
   cartFabGradient: { height: 56, borderRadius: 18, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, gap: 10 },
   cartText: { color: colors.surface, fontSize: 14, fontWeight: "800", flex: 1 },
   cartTotal: { color: colors.surface, fontSize: 14, fontWeight: "800" },
