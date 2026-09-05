@@ -1,6 +1,8 @@
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
+import { AppApiError } from "@/api/errors";
 import { getRequiredBusinessId } from "@/api/session";
+import { offlineDbService } from "@/services/offline-db.service";
 import type {
   ApiCustomer,
   CollectCreditPaymentPayload,
@@ -17,12 +19,47 @@ import type {
   ValidateCreditLimitPayload,
   ValidateCreditLimitResponse
 } from "@/types/customer";
+import { customerDisplayName } from "@/types/customer";
+
+function filterCachedCustomers(customers: ApiCustomer[], params: CustomerQuery) {
+  const search = params.search?.trim().toLowerCase();
+  return customers.filter((customer) => {
+    if (params.status && customer.status !== params.status) return false;
+    if (params.isActive !== undefined && (customer.status === "ACTIVE") !== params.isActive) return false;
+    if (params.isCompany !== undefined && Boolean(customer.companyName) !== params.isCompany) return false;
+    if (params.hasOutstandingBalance && Number(customer.outstandingBalance ?? 0) <= 0) return false;
+    if (!search) return true;
+    return [
+      customerDisplayName(customer),
+      customer.customerCode,
+      customer.email,
+      customer.phone,
+      customer.city,
+      customer.state
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(search));
+  });
+}
 
 export const customersService = {
   async list(params: CustomerQuery = {}): Promise<CustomerListResponse> {
     const businessId = await getRequiredBusinessId();
-    const { data } = await api.get<CustomerListResponse>(endpoints.customers.list(businessId), { params });
-    return data;
+    try {
+      const { data } = await api.get<CustomerListResponse>(endpoints.customers.list(businessId), { params });
+      await offlineDbService.cacheCustomers(businessId, data.data);
+      return data;
+    } catch (error) {
+      if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
+        const cached = filterCachedCustomers(await offlineDbService.getCachedCustomers(businessId), params);
+        const limit = params.limit ?? cached.length;
+        return {
+          data: cached.slice(0, limit),
+          meta: { page: 1, limit, total: cached.length, totalPages: cached.length > 0 ? 1 : 0 }
+        };
+      }
+      throw error;
+    }
   },
 
   async search(query: string, params: CustomerQuery = {}): Promise<CustomerListResponse> {

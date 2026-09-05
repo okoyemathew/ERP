@@ -1,6 +1,8 @@
 import NetInfo from "@react-native-community/netinfo";
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
+import { AppApiError } from "@/api/errors";
+import { getRequiredBusinessId } from "@/api/session";
 import { deviceService } from "@/services/device.service";
 import type { CreateSalePayload } from "@/types/sales";
 import type { SyncResult } from "@/types/sync";
@@ -17,10 +19,13 @@ export const offlineSyncService = {
   },
 
   async enqueueSale(payload: CreateSalePayload) {
+    const businessId = await getRequiredBusinessId();
     const { deviceId } = await deviceService.getDeviceInfo();
     const operationId = payload.idempotencyKey ?? createOperationId(deviceId);
     const queuedPayload = { ...payload, deviceId, idempotencyKey: operationId };
-    return offlineDbService.enqueueSale(operationId, queuedPayload);
+    const queued = await offlineDbService.enqueueSale(operationId, queuedPayload);
+    await offlineDbService.applySaleToCachedProducts(businessId, payload.items);
+    return queued;
   },
 
   async syncPending() {
@@ -28,15 +33,27 @@ export const offlineSyncService = {
     const operations = await offlineDbService.pendingOperations();
     if (operations.length === 0) return { synced: 0, failed: 0 };
 
-    await offlineDbService.markSyncing(operations.map((operation) => operation.id));
-    const { data } = await api.post<{ results: SyncResult[] }>(endpoints.sync.batch, {
-      operations: operations.map((operation) => ({
-        operationId: operation.id,
-        type: operation.type,
-        deviceId: operation.payload.deviceId,
-        payload: operation.payload
-      }))
-    });
+    const operationIds = operations.map((operation) => operation.id);
+    await offlineDbService.markSyncing(operationIds);
+    let data: { results: SyncResult[] };
+    try {
+      const response = await api.post<{ results: SyncResult[] }>(endpoints.sync.batch, {
+        operations: operations.map((operation) => ({
+          operationId: operation.id,
+          type: operation.type,
+          deviceId: operation.payload.deviceId,
+          payload: operation.payload
+        }))
+      });
+      data = response.data;
+    } catch (error) {
+      if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
+        await offlineDbService.markPending(operationIds);
+        return { synced: 0, failed: 0 };
+      }
+      await offlineDbService.markPending(operationIds);
+      throw error;
+    }
 
     let synced = 0;
     let failed = 0;
@@ -59,7 +76,13 @@ export const offlineSyncService = {
         void this.syncPending().catch(() => undefined);
       }
     });
+    const interval = setInterval(() => {
+      void this.syncPending().catch(() => undefined);
+    }, 30000);
     void this.syncPending().catch(() => undefined);
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
   }
 };

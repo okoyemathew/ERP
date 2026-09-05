@@ -130,7 +130,14 @@ export const authService = {
       await saveAuthSession(restoredSession);
 
       return restoredSession;
-    } catch {
+    } catch (error) {
+      const apiError = normalizeApiError(error);
+      if (apiError.code === "NETWORK" || apiError.code === "TIMEOUT") {
+        await saveAccessToken(session.accessToken);
+        await saveRefreshToken(refreshToken);
+        return session;
+      }
+
       await clearAuthStorage();
       return null;
     }

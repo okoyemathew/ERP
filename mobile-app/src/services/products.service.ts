@@ -41,13 +41,11 @@ export const productsService = {
     } catch (error) {
       if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
         const cached = filterCachedProducts(await offlineDbService.getCachedProducts(businessId), params);
-        if (cached.length > 0) {
-          const limit = params.limit ?? cached.length;
-          return {
-            data: cached.slice(0, limit),
-            meta: { page: 1, limit, total: cached.length, totalPages: 1 }
-          };
-        }
+        const limit = params.limit ?? cached.length;
+        return {
+          data: cached.slice(0, limit),
+          meta: { page: 1, limit, total: cached.length, totalPages: cached.length > 0 ? 1 : 0 }
+        };
       }
       throw error;
     }

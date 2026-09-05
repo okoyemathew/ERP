@@ -1,4 +1,5 @@
 import * as SQLite from "expo-sqlite";
+import type { ApiCustomer } from "@/types/customer";
 import type { ApiProduct } from "@/types/product";
 import type { SyncQueueItem, SyncOperationType, SyncQueueStatus } from "@/types/sync";
 import type { CreateSalePayload } from "@/types/sales";
@@ -12,6 +13,12 @@ async function getDb() {
   const db = await dbPromise;
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS product_cache (
+      id TEXT PRIMARY KEY NOT NULL,
+      businessId TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS customer_cache (
       id TEXT PRIMARY KEY NOT NULL,
       businessId TEXT NOT NULL,
       payload TEXT NOT NULL,
@@ -53,6 +60,61 @@ export const offlineDbService = {
       businessId
     );
     return rows.map((row) => JSON.parse(row.payload) as ApiProduct);
+  },
+
+  async cacheCustomers(businessId: string, customers: ApiCustomer[]) {
+    const db = await getDb();
+    const updatedAt = new Date().toISOString();
+    for (const customer of customers) {
+      await db.runAsync(
+        "INSERT OR REPLACE INTO customer_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+        customer.id,
+        businessId,
+        JSON.stringify(customer),
+        updatedAt
+      );
+    }
+  },
+
+  async getCachedCustomers(businessId: string): Promise<ApiCustomer[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ payload: string }>(
+      "SELECT payload FROM customer_cache WHERE businessId = ? ORDER BY updatedAt DESC",
+      businessId
+    );
+    return rows.map((row) => JSON.parse(row.payload) as ApiCustomer);
+  },
+
+  async applySaleToCachedProducts(businessId: string, items: CreateSalePayload["items"]) {
+    const db = await getDb();
+    const updatedAt = new Date().toISOString();
+    for (const item of items) {
+      const row = await db.getFirstAsync<{ payload: string }>(
+        "SELECT payload FROM product_cache WHERE businessId = ? AND id = ?",
+        businessId,
+        item.productId
+      );
+      if (!row) continue;
+
+      const product = JSON.parse(row.payload) as ApiProduct;
+      if (product.inventory) {
+        const nextAvailable = Math.max(0, (product.inventory.quantityAvailable ?? 0) - item.quantity);
+        const nextOnHand = Math.max(0, (product.inventory.quantityOnHand ?? 0) - item.quantity);
+        product.inventory = {
+          ...product.inventory,
+          quantityAvailable: nextAvailable,
+          quantityOnHand: nextOnHand
+        };
+      }
+
+      await db.runAsync(
+        "UPDATE product_cache SET payload = ?, updatedAt = ? WHERE businessId = ? AND id = ?",
+        JSON.stringify(product),
+        updatedAt,
+        businessId,
+        item.productId
+      );
+    }
   },
 
   async enqueueSale(id: string, payload: CreateSalePayload): Promise<SyncQueueItem> {
@@ -103,6 +165,14 @@ export const offlineDbService = {
   async markFailed(id: string, error: string) {
     const db = await getDb();
     await db.runAsync("UPDATE sync_queue SET status = 'FAILED', lastError = ?, updatedAt = ? WHERE id = ?", error, new Date().toISOString(), id);
+  },
+
+  async markPending(ids: string[]) {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    for (const id of ids) {
+      await db.runAsync("UPDATE sync_queue SET status = 'PENDING', updatedAt = ? WHERE id = ? AND status = 'SYNCING'", now, id);
+    }
   },
 
   async queueCount() {

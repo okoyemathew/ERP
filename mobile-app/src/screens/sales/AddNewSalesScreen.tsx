@@ -468,7 +468,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         remarks: paymentMethod === "credit" ? "Credit sale" : undefined
       };
 
-      const clearCheckout = async () => {
+      const clearCheckout = async (refreshCreditInvoices = true) => {
         if (role === "owner") ownerCart.clearCart();
         else employeeCart.clearCart();
         setPaidInput("");
@@ -477,12 +477,15 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         setTaxInput("0");
         checkoutRef.current?.close();
         setCheckoutVisible(false);
-        await loadCreditInvoices();
+        if (refreshCreditInvoices) {
+          await loadCreditInvoices();
+        }
       };
 
       const queueOfflineSale = async () => {
         await offlineSyncService.enqueueSale(salePayload);
-        await clearCheckout();
+        await clearCheckout(false);
+        await loadProducts();
         Alert.alert("Sale queued", "The sale was saved offline and will sync when the network is available.");
       };
 
@@ -541,6 +544,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           setTaxInput("0");
           checkoutRef.current?.close();
           setCheckoutVisible(false);
+          await loadProducts();
           Alert.alert("Sale queued", "The sale was saved offline and will sync when the network is available.");
           return;
         } catch {
