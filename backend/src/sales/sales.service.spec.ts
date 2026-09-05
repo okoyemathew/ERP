@@ -79,7 +79,11 @@ function createPrismaMock() {
       findFirst: jest.fn(),
     },
     saleItem: {
+      aggregate: jest.fn(),
       findMany: jest.fn(),
+    },
+    goodsDisbursementItem: {
+      aggregate: jest.fn(),
     },
     product: {
       findFirst: jest.fn(),
@@ -225,6 +229,63 @@ describe('SalesService sale item price and quantity validation', () => {
 
     await expect(buildItem(50, 12000)).rejects.toBeInstanceOf(
       BadRequestException,
+    );
+  });
+
+  it('allows employees to sell from supplied stock after warehouse stock is disbursed', async () => {
+    prisma.product.findFirst.mockResolvedValue(
+      sellableProduct({
+        inventory: {
+          businessId,
+          quantityAvailable: 0,
+          quantityOnHand: 0,
+          deletedAt: null,
+        },
+      }),
+    );
+    prisma.goodsDisbursementItem.aggregate.mockResolvedValue({
+      _sum: { quantity: 60 },
+    });
+    prisma.saleItem.aggregate.mockResolvedValue({
+      _sum: { quantity: 9 },
+    });
+
+    const item = await (service as unknown as {
+      buildItemData: (
+        businessId: string,
+        dto: { productId: string; quantity: number; unitPrice: number },
+        tx: unknown,
+        seller: {
+          useEmployeeStock: boolean;
+          userId: string;
+          stockMatch: Array<{ employeeId: string }>;
+        },
+      ) => Promise<{
+        quantity: number;
+        unitPrice: Prisma.Decimal;
+        totalAmount: Prisma.Decimal;
+      }>;
+    }).buildItemData(
+      businessId,
+      { productId, quantity: 51, unitPrice: 12000 },
+      prisma,
+      {
+        useEmployeeStock: true,
+        userId: employeeUserId,
+        stockMatch: [{ employeeId: authUser.employeeId! }],
+      },
+    );
+
+    expect(item.quantity).toBe(51);
+    expect(prisma.goodsDisbursementItem.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          productId,
+          goodsDisbursement: expect.objectContaining({
+            businessId,
+          }),
+        }),
+      }),
     );
   });
 

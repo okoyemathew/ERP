@@ -30,6 +30,12 @@ import { UpdateSaleCustomerDto } from './dto/update-sale-customer.dto';
 
 type Tx = Prisma.TransactionClient;
 type ReceiptPrintWidth = '58mm' | '80mm';
+type SellerStockScope = {
+  useEmployeeStock: boolean;
+  employeeId?: string;
+  userId: string;
+  stockMatch?: Prisma.GoodsDisbursementWhereInput[];
+};
 type ReceiptLine = {
   type: 'center' | 'divider' | 'row' | 'text';
   text?: string;
@@ -46,7 +52,7 @@ export class SalesService {
     dto: CreateSaleDto,
     user: AuthenticatedUser,
   ) {
-    await this.assertCanSell(businessId, user);
+    const seller = await this.getSellerStockScope(businessId, user);
     this.assertDiscountAllowed(dto.items ?? [], user);
     await this.assertCustomer(businessId, dto.customerId);
 
@@ -87,7 +93,7 @@ export class SalesService {
       });
 
       if (dto.items?.length) {
-        await this.replaceItems(businessId, created.id, dto.items, tx);
+        await this.replaceItems(businessId, created.id, dto.items, tx, seller);
       }
 
       await this.recalculateSale(created.id, tx);
@@ -109,6 +115,7 @@ export class SalesService {
           dto as CompleteSaleDto,
           user,
           tx,
+          seller,
         );
       }
 
@@ -255,7 +262,7 @@ export class SalesService {
     dto: UpdateSaleCustomerDto,
     user: AuthenticatedUser,
   ) {
-    await this.assertCanSell(businessId, user);
+    await this.getSellerStockScope(businessId, user);
     await this.assertCustomer(businessId, dto.customerId ?? undefined);
 
     const sale = await this.prisma.$transaction(async (tx) => {
@@ -293,13 +300,13 @@ export class SalesService {
     dto: AddSaleItemDto,
     user: AuthenticatedUser,
   ) {
-    await this.assertCanSell(businessId, user);
+    const seller = await this.getSellerStockScope(businessId, user);
     this.assertDiscountAllowed([dto], user);
 
     return this.prisma.$transaction(async (tx) => {
       const sale = await this.getSaleOrThrow(businessId, id, tx);
       this.assertPending(sale.status);
-      const item = await this.buildItemData(businessId, dto, tx);
+      const item = await this.buildItemData(businessId, dto, tx, seller);
       const existing = sale.items.find(
         (saleItem) => saleItem.productId === item.productId,
       );
@@ -336,7 +343,7 @@ export class SalesService {
     saleItemId: string,
     user: AuthenticatedUser,
   ) {
-    await this.assertCanSell(businessId, user);
+    await this.getSellerStockScope(businessId, user);
 
     return this.prisma.$transaction(async (tx) => {
       const sale = await this.getSaleOrThrow(businessId, id, tx);
@@ -359,10 +366,10 @@ export class SalesService {
     dto: CompleteSaleDto,
     user: AuthenticatedUser,
   ) {
-    await this.assertCanSell(businessId, user);
+    const seller = await this.getSellerStockScope(businessId, user);
 
     return this.prisma.$transaction((tx) =>
-      this.completeSale(businessId, id, dto, user, tx),
+      this.completeSale(businessId, id, dto, user, tx, seller),
     );
   }
 
@@ -408,6 +415,7 @@ export class SalesService {
     dto: CompleteSaleDto,
     user: AuthenticatedUser,
     tx: Tx,
+    seller: SellerStockScope,
   ) {
     const sale = await this.getSaleOrThrow(businessId, id, tx);
     this.assertPending(sale.status);
@@ -421,7 +429,7 @@ export class SalesService {
       sale.totalAmount,
       Boolean(sale.customerId),
     );
-    await this.validateSaleInventory(businessId, sale.items, tx);
+    await this.validateSaleInventory(businessId, sale.items, tx, seller);
 
     const totals = this.sumSaleItems(sale.items);
     const cashPaid = this.sumCashPayments(dto.payments);
@@ -498,64 +506,14 @@ export class SalesService {
       });
     }
 
-    for (const item of sale.items) {
-      const inventory = await tx.inventory.findUnique({
-        where: { productId: item.productId },
-        include: { product: { select: { name: true, minimumStock: true } } },
-      });
-
-      if (!inventory || inventory.businessId !== businessId) {
-        throw new BadRequestException(
-          `Inventory not found for product ${item.productId}`,
-        );
-      }
-
-      const quantityBefore = inventory.quantityOnHand;
-      const quantityAfter = quantityBefore - item.quantity;
-
-      await tx.inventory.update({
-        where: { id: inventory.id },
-        data: {
-          quantityOnHand: quantityAfter,
-          quantityAvailable: Math.max(
-            0,
-            inventory.quantityAvailable - item.quantity,
-          ),
-          lastStockUpdate: new Date(),
-          syncVersion: { increment: 1 },
-          deviceId: dto.deviceId ?? undefined,
-        },
-      });
-
-      await tx.inventoryTransaction.create({
-        data: {
-          businessId,
-          inventoryId: inventory.id,
-          productId: item.productId,
-          transactionType: InventoryTransactionType.SALE,
-          quantity: item.quantity,
-          quantityBefore,
-          quantityAfter,
-          unitCost: item.unitPrice,
-          referenceNumber: sale.saleNumber,
-          remarks: `Sale ${sale.saleNumber}`,
-          transactionDate: new Date(),
-          deviceId: dto.deviceId ?? null,
-          isSynced: true,
-          syncVersion: 1,
-        },
-      });
-
-      if (quantityAfter <= inventory.product.minimumStock) {
-        await tx.notification.create({
-          data: {
-            businessId,
-            title: 'Low stock',
-            message: `${inventory.product.name} is at ${quantityAfter} units`,
-            type: 'WARNING',
-          },
-        });
-      }
+    if (!seller.useEmployeeStock) {
+      await this.decrementInventoryForSale(
+        businessId,
+        sale.saleNumber,
+        sale.items,
+        dto.deviceId,
+        tx,
+      );
     }
 
     await tx.sale.update({
@@ -613,27 +571,45 @@ export class SalesService {
     saleId: string,
     items: AddSaleItemDto[],
     tx: Tx,
+    seller?: SellerStockScope,
   ) {
     await tx.saleItem.deleteMany({ where: { saleId } });
 
     for (const item of items) {
-      const data = await this.buildItemData(businessId, item, tx);
+      const data = await this.buildItemData(businessId, item, tx, seller);
       await tx.saleItem.create({ data: { saleId, ...data } });
     }
   }
 
-  private async buildItemData(businessId: string, dto: AddSaleItemDto, tx: Tx) {
+  private async buildItemData(
+    businessId: string,
+    dto: AddSaleItemDto,
+    tx: Tx,
+    seller?: SellerStockScope,
+  ) {
     const product = await this.findSellableProduct(businessId, dto, tx);
 
     if (!product.inventory || product.inventory.deletedAt) {
       throw new BadRequestException('Product inventory is not available');
     }
 
-    if (
-      product.inventory.quantityAvailable < dto.quantity ||
-      product.inventory.quantityOnHand < dto.quantity
-    ) {
-      throw new BadRequestException('Insufficient inventory for product');
+    if (seller?.useEmployeeStock) {
+      const available = await this.employeeProductAvailableQuantity(
+        businessId,
+        product.id,
+        seller,
+        tx,
+      );
+      if (available < dto.quantity) {
+        throw new BadRequestException('Insufficient inventory for product');
+      }
+    } else {
+      if (
+        product.inventory.quantityAvailable < dto.quantity ||
+        product.inventory.quantityOnHand < dto.quantity
+      ) {
+        throw new BadRequestException('Insufficient inventory for product');
+      }
     }
 
     const unitPrice = new Prisma.Decimal(
@@ -715,8 +691,9 @@ export class SalesService {
     businessId: string,
     items: Array<{ productId: string; quantity: number }>,
     tx: Tx,
+    seller?: SellerStockScope,
   ) {
-    const issues = await this.cartIssues(businessId, items, tx);
+    const issues = await this.cartIssues(businessId, items, tx, seller);
 
     if (issues.length > 0) {
       throw new BadRequestException({
@@ -821,7 +798,10 @@ export class SalesService {
     return PaymentStatus.PARTIAL;
   }
 
-  private async assertCanSell(businessId: string, user: AuthenticatedUser) {
+  private async getSellerStockScope(
+    businessId: string,
+    user: AuthenticatedUser,
+  ): Promise<SellerStockScope> {
     const employee = await this.prisma.employee.findFirst({
       where: {
         businessId,
@@ -830,17 +810,62 @@ export class SalesService {
         status: EmployeeStatus.ACTIVE,
         canSell: true,
       },
-      select: { id: true },
+      select: {
+        id: true,
+        employeeCode: true,
+        firstName: true,
+        lastName: true,
+        user: { select: { username: true } },
+      },
     });
 
+    const normalizedRole = user.roleName?.trim().toLowerCase();
     const adminRole = [
       SYSTEM_ROLES.OWNER,
       SYSTEM_ROLES.ADMIN,
       SYSTEM_ROLES.MANAGER,
-    ].includes(user.roleName as never);
+    ].some((role) => role.toLowerCase() === normalizedRole);
     if (!employee && !adminRole) {
       throw new ForbiddenException('User is not allowed to perform sales');
     }
+
+    if (adminRole) {
+      return { useEmployeeStock: false, userId: user.id };
+    }
+
+    const employeeName = employee
+      ? [employee.firstName, employee.lastName].filter(Boolean).join(' ') ||
+        employee.user?.username ||
+        employee.employeeCode
+      : undefined;
+    const matchTokens = employee
+      ? [employee.employeeCode, employeeName, employee.user?.username].filter(
+          Boolean,
+        )
+      : [];
+
+    return {
+      useEmployeeStock: true,
+      employeeId: employee?.id,
+      userId: user.id,
+      stockMatch: [
+        ...(employee ? [{ employeeId: employee.id }] : []),
+        ...matchTokens.flatMap((token) => [
+          {
+            destination: {
+              contains: token,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          {
+            remarks: {
+              contains: token,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+        ]),
+      ],
+    };
   }
 
   private async assertCustomer(businessId: string, customerId?: string) {
@@ -926,20 +951,22 @@ export class SalesService {
     businessId: string,
     items: Array<{ productId: string; quantity: number }>,
     tx: Tx | PrismaService,
+    seller?: SellerStockScope,
   ) {
     const issues: Array<{ productId: string; message: string }> = [];
+    const quantityByProduct = this.sumQuantitiesByProduct(items);
 
-    for (const item of items) {
-      if (item.quantity <= 0) {
+    for (const [productId, quantity] of quantityByProduct) {
+      if (quantity <= 0) {
         issues.push({
-          productId: item.productId,
+          productId,
           message: 'Quantity must be greater than zero',
         });
         continue;
       }
 
       const product = await tx.product.findFirst({
-        where: { id: item.productId, businessId, isActive: true },
+        where: { id: productId, businessId, isActive: true },
         select: {
           id: true,
           sellingPrice: true,
@@ -950,7 +977,7 @@ export class SalesService {
 
       if (!product) {
         issues.push({
-          productId: item.productId,
+          productId,
           message: 'Product not found or inactive',
         });
         continue;
@@ -958,31 +985,182 @@ export class SalesService {
 
       if (new Prisma.Decimal(product.sellingPrice).lt(0)) {
         issues.push({
-          productId: item.productId,
+          productId,
           message: 'Product selling price is invalid',
         });
       }
 
       if (!product.inventory || product.inventory.deletedAt) {
         issues.push({
-          productId: item.productId,
+          productId,
           message: 'Inventory is not available',
         });
         continue;
       }
 
-      if (
-        product.inventory.quantityAvailable < item.quantity ||
-        product.inventory.quantityOnHand < item.quantity
-      ) {
+      const availableQuantity = seller?.useEmployeeStock
+        ? await this.employeeProductAvailableQuantity(
+            businessId,
+            productId,
+            seller,
+            tx,
+          )
+        : Math.min(
+            product.inventory.quantityAvailable,
+            product.inventory.quantityOnHand,
+          );
+
+      if (availableQuantity < quantity) {
         issues.push({
-          productId: item.productId,
+          productId,
           message: 'Insufficient stock',
         });
       }
     }
 
     return issues;
+  }
+
+  private async employeeProductAvailableQuantity(
+    businessId: string,
+    productId: string,
+    seller: SellerStockScope,
+    tx: Tx | PrismaService,
+  ) {
+    if (!seller.useEmployeeStock || !seller.stockMatch?.length) {
+      return 0;
+    }
+
+    const [supplied, sold] = await Promise.all([
+      tx.goodsDisbursementItem.aggregate({
+        where: {
+          productId,
+          product: { businessId, isActive: true },
+          goodsDisbursement: {
+            businessId,
+            OR: seller.stockMatch,
+          },
+        },
+        _sum: { quantity: true },
+      }),
+      tx.saleItem.aggregate({
+        where: {
+          productId,
+          sale: {
+            businessId,
+            userId: seller.userId,
+            deletedAt: null,
+            status: SaleStatus.COMPLETED,
+          },
+        },
+        _sum: { quantity: true },
+      }),
+    ]);
+
+    return Math.max(
+      0,
+      (supplied._sum.quantity ?? 0) - (sold._sum.quantity ?? 0),
+    );
+  }
+
+  private sumQuantitiesByProduct(
+    items: Array<{ productId: string; quantity: number }>,
+  ) {
+    const quantities = new Map<string, number>();
+
+    for (const item of items) {
+      quantities.set(
+        item.productId,
+        (quantities.get(item.productId) ?? 0) + item.quantity,
+      );
+    }
+
+    return quantities;
+  }
+
+  private async decrementInventoryForSale(
+    businessId: string,
+    saleNumber: string,
+    items: Array<{
+      productId: string;
+      quantity: number;
+      unitPrice: Prisma.Decimal;
+    }>,
+    deviceId: string | undefined,
+    tx: Tx,
+  ) {
+    const quantityByProduct = new Map<
+      string,
+      { quantity: number; unitPrice: Prisma.Decimal }
+    >();
+
+    for (const item of items) {
+      const current = quantityByProduct.get(item.productId);
+      quantityByProduct.set(item.productId, {
+        quantity: (current?.quantity ?? 0) + item.quantity,
+        unitPrice: item.unitPrice,
+      });
+    }
+
+    for (const [productId, item] of quantityByProduct) {
+      const inventory = await tx.inventory.findUnique({
+        where: { productId },
+        include: { product: { select: { name: true, minimumStock: true } } },
+      });
+
+      if (!inventory || inventory.businessId !== businessId) {
+        throw new BadRequestException(
+          `Inventory not found for product ${productId}`,
+        );
+      }
+
+      const quantityBefore = inventory.quantityOnHand;
+      const quantityAfter = quantityBefore - item.quantity;
+
+      await tx.inventory.update({
+        where: { id: inventory.id },
+        data: {
+          quantityOnHand: quantityAfter,
+          quantityAvailable: Math.max(
+            0,
+            inventory.quantityAvailable - item.quantity,
+          ),
+          lastStockUpdate: new Date(),
+          syncVersion: { increment: 1 },
+          deviceId: deviceId ?? undefined,
+        },
+      });
+
+      await tx.inventoryTransaction.create({
+        data: {
+          businessId,
+          inventoryId: inventory.id,
+          productId,
+          transactionType: InventoryTransactionType.SALE,
+          quantity: item.quantity,
+          quantityBefore,
+          quantityAfter,
+          unitCost: item.unitPrice,
+          referenceNumber: saleNumber,
+          remarks: `Sale ${saleNumber}`,
+          transactionDate: new Date(),
+          deviceId: deviceId ?? null,
+          isSynced: true,
+          syncVersion: 1,
+        },
+      });
+
+      if (quantityAfter <= inventory.product.minimumStock) {
+        await tx.notification.create({
+          data: {
+            businessId,
+            title: 'Low stock',
+            message: `${inventory.product.name} is at ${quantityAfter} units`,
+            type: 'WARNING',
+          },
+        });
+      }
+    }
   }
 
   private assertPending(status: SaleStatus) {
