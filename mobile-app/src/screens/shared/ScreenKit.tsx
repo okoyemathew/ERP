@@ -1,18 +1,27 @@
 import React from "react";
-import { FlatList, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { ChevronRight } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, ScreenHeader, Badge, statusVariant } from "@/components/common";
 import { colors, spacing, typography } from "@/theme";
 
 export function ScrollScreen({ title, children, right, onBack }: { title: string; children: React.ReactNode; right?: React.ReactNode; onBack?: () => void }) {
+  const insets = useSafeAreaInsets();
+  const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
+
   return (
-    <View style={styles.screen}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScreenHeader title={title} right={right} onBack={onBack} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+      >
         {children}
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
