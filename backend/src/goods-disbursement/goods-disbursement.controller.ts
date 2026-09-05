@@ -25,6 +25,14 @@ const DISBURSEMENT_ROLES = [
   SYSTEM_ROLES.INVENTORY_OFFICER,
 ] as const;
 
+const DISBURSEMENT_SELF_ROLES = [
+  ...DISBURSEMENT_ROLES,
+  SYSTEM_ROLES.CASHIER,
+  SYSTEM_ROLES.SALESPERSON,
+  SYSTEM_ROLES.ACCOUNTANT,
+  SYSTEM_ROLES.SUPERVISOR,
+] as const;
+
 @ApiTags('Goods Disbursement')
 @ApiBearerAuth()
 @Permissions('goods-disbursement.manage')
@@ -55,6 +63,25 @@ export class GoodsDisbursementController {
   ) {
     this.assertBusinessAccess(businessId, user);
     return this.goodsDisbursementService.findAll(businessId, query);
+  }
+
+  @Get('me')
+  @Permissions()
+  @Roles(...DISBURSEMENT_SELF_ROLES)
+  @ApiOperation({ summary: 'List goods disbursed to the current employee' })
+  findMine(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @Query() query: GoodsDisbursementQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    this.assertBusinessAccess(businessId, user);
+    if (!user.employeeId) {
+      throw new ForbiddenException('Employee profile is required');
+    }
+    return this.goodsDisbursementService.findAll(businessId, {
+      ...query,
+      employeeId: user.employeeId,
+    });
   }
 
   @Get(':id')

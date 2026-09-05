@@ -14,6 +14,12 @@ export const goodsDisbursementService = {
     return data;
   },
 
+  async mine(params: Record<string, string | number | undefined> = {}): Promise<GoodsDisbursementListResponse> {
+    const businessId = await getRequiredBusinessId();
+    const { data } = await api.get<GoodsDisbursementListResponse>(endpoints.goodsDisbursements.mine(businessId), { params });
+    return data;
+  },
+
   async detail(id: string): Promise<ApiGoodsDisbursement> {
     const businessId = await getRequiredBusinessId();
     const { data } = await api.get<ApiGoodsDisbursement>(endpoints.goodsDisbursements.detail(businessId, id));

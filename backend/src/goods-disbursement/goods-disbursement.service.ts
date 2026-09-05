@@ -294,6 +294,7 @@ export class GoodsDisbursementService {
               name: true,
               sku: true,
               barcode: true,
+              sellingPrice: true,
             },
           },
         },

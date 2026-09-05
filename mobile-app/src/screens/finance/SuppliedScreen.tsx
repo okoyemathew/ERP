@@ -4,11 +4,11 @@ import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import { Plus, Truck } from "lucide-react-native";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
-import { employeesService } from "@/services/employees.service";
+import { goodsDisbursementService } from "@/services/goods-disbursement.service";
 import { suppliersService } from "@/services/suppliers.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
-import type { EmployeeProfileResponse } from "@/types/employee";
+import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
 import type { ApiSupplier } from "@/types/supplier";
 import { canAccess } from "@/utils/permissions";
 import { formatCurrency } from "@/utils/format";
@@ -17,9 +17,44 @@ function money(value: string | number | null | undefined): number {
   return Number(value ?? 0);
 }
 
-type EmployeeSuppliedProduct = NonNullable<EmployeeProfileResponse["profileActivity"]>["stock"][number];
-type EmployeeSuppliedSummary = NonNullable<EmployeeProfileResponse["profileActivity"]>["stats"];
+type EmployeeSuppliedProduct = {
+  productId: string;
+  productName: string;
+  sku?: string | null;
+  barcode?: string | null;
+  quantityInHand: number;
+  suppliedQuantity: number;
+  unitValue: string | number;
+  lastActivityAt: string;
+};
 type SuppliedListItem = EmployeeSuppliedProduct | ApiSupplier;
+
+function aggregateEmployeeProducts(disbursements: ApiGoodsDisbursement[]) {
+  const byProduct = new Map<string, EmployeeSuppliedProduct>();
+
+  for (const run of disbursements) {
+    for (const item of run.items) {
+      if (!item.product) continue;
+
+      const current = byProduct.get(item.productId);
+      const nextQuantity = (current?.suppliedQuantity ?? 0) + item.quantity;
+      byProduct.set(item.productId, {
+        productId: item.productId,
+        productName: item.product.name,
+        sku: item.product.sku,
+        barcode: item.product.barcode,
+        quantityInHand: nextQuantity,
+        suppliedQuantity: nextQuantity,
+        unitValue: item.product.sellingPrice ?? current?.unitValue ?? 0,
+        lastActivityAt: run.disbursementDate ?? run.createdAt,
+      });
+    }
+  }
+
+  return Array.from(byProduct.values()).sort(
+    (left, right) => new Date(right.lastActivityAt).getTime() - new Date(left.lastActivityAt).getTime()
+  );
+}
 
 export function SuppliedScreen({ navigation }: { navigation: any }) {
   const user = useAuthStore((state) => state.user);
@@ -29,7 +64,6 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const [query, setQuery] = useState("");
   const [suppliers, setSuppliers] = useState<ApiSupplier[]>([]);
   const [employeeProducts, setEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
-  const [employeeSummary, setEmployeeSummary] = useState<EmployeeSuppliedSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,8 +79,8 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
     setError(null);
     try {
       if (isEmployeeView) {
-        const response = await employeesService.myProfile();
-        const products = response.profileActivity?.stock ?? [];
+        const response = await goodsDisbursementService.mine({ limit: 100 });
+        const products = aggregateEmployeeProducts(response.data);
         const normalizedSearch = search.trim().toLowerCase();
         setEmployeeProducts(
           normalizedSearch
@@ -57,7 +91,6 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
               )
             : products
         );
-        setEmployeeSummary(response.profileActivity?.stats ?? null);
         return;
       }
 
@@ -87,8 +120,8 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   );
 
   const totalCredit = useMemo(() => suppliers.reduce((sum, supplier) => sum + money(supplier.outstandingBalance), 0), [suppliers]);
-  const totalSupplied = employeeSummary?.totalSupplied ?? employeeProducts.reduce((sum, product) => sum + product.suppliedQuantity, 0);
-  const totalStockValue = money(employeeSummary?.stockValue);
+  const totalSupplied = employeeProducts.reduce((sum, product) => sum + product.suppliedQuantity, 0);
+  const totalStockValue = employeeProducts.reduce((sum, product) => sum + money(product.unitValue) * product.quantityInHand, 0);
   const dataIsEmpty = isEmployeeView ? employeeProducts.length === 0 : suppliers.length === 0;
   const headerTitle = isEmployeeView ? "Supplied Products" : "Suppliers";
   const rightAction = !isEmployeeView && canCreateSupplier ? <Pressable onPress={() => navigateStack("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined;

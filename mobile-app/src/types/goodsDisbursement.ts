@@ -10,6 +10,7 @@ export interface ApiGoodsDisbursementItem {
     name: string;
     sku: string;
     barcode?: string | null;
+    sellingPrice?: string | number;
   };
 }
 

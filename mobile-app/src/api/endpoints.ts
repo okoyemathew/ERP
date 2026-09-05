@@ -151,6 +151,7 @@ export const endpoints = {
   },
   goodsDisbursements: {
     list: (businessId: string) => `/businesses/${businessId}/goods-disbursements`,
+    mine: (businessId: string) => `/businesses/${businessId}/goods-disbursements/me`,
     create: (businessId: string) => `/businesses/${businessId}/goods-disbursements`,
     detail: (businessId: string, disbursementId: string) => `/businesses/${businessId}/goods-disbursements/${disbursementId}`
   }
