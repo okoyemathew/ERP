@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, FlatList, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet from "@gorhom/bottom-sheet";
-import { CreditCard, Grid2X2, HandCoins, List, Minus, Package, Plus, Printer, Search, Wallet } from "lucide-react-native";
+import { CreditCard, Grid2X2, HandCoins, List, Minus, Package, Plus, Printer, Search, Trash2, Wallet } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Button, Card } from "@/components/common";
@@ -270,6 +270,19 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const openCollectSheet = () => {
     setCollectVisible(true);
+  };
+
+  const clearCart = () => {
+    if (role === "owner") ownerCart.clearCart();
+    else employeeCart.clearCart();
+    setQuantityInputs({});
+    setSelectedCustomerId(undefined);
+    setPaidInput("");
+    setReferenceInput("");
+    setDiscountInput("0");
+    setTaxInput("0");
+    checkoutRef.current?.close();
+    setCheckoutVisible(false);
   };
 
   const distributeAmount = (amount: number, lineSubtotal: number) => {
@@ -817,6 +830,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               {(paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0) ? <View style={styles.totalRow}><Text style={styles.meta}>Credit Balance</Text><Text style={styles.totalValue}>{formatCurrency(paymentMethod === "credit" ? grandTotal : Math.max(0, grandTotal - paidAmount))}</Text></View> : null}
             </Card>
           </ScrollView>
+          <Button label="Clear Cart" variant="danger" icon={<Trash2 size={16} color={colors.error} />} onPress={clearCart} />
           <Button label={paymentMethod === "credit" ? "Confirm Credit Sale" : "Confirm Payment"} loading={processingSale} onPress={() => void handleCheckout()} />
         </View>
       </AppBottomSheet> : null}
