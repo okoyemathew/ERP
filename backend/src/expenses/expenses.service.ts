@@ -11,7 +11,11 @@ import {
   PaymentMethod,
   Prisma,
 } from '@prisma/client';
-import { SYSTEM_ROLES } from '../auth/constants/roles.constant';
+import {
+  normalizeSystemRoleName,
+  SYSTEM_ROLES,
+  type SystemRole,
+} from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateExpenseCategoryDto } from './dto/create-expense-category.dto';
@@ -34,7 +38,7 @@ type ExpensePeriodRow = {
   total_amount: Prisma.Decimal | number | string | null;
 };
 
-const EXPENSE_ROLES = [
+const EXPENSE_ROLES: readonly SystemRole[] = [
   SYSTEM_ROLES.OWNER,
   SYSTEM_ROLES.ADMIN,
   SYSTEM_ROLES.MANAGER,
@@ -43,21 +47,21 @@ const EXPENSE_ROLES = [
   SYSTEM_ROLES.SALESPERSON,
   SYSTEM_ROLES.INVENTORY_OFFICER,
   SYSTEM_ROLES.SUPERVISOR,
-] as const;
+];
 
-const EXPENSE_MODIFY_ROLES = [
+const EXPENSE_MODIFY_ROLES: readonly SystemRole[] = [
   SYSTEM_ROLES.OWNER,
   SYSTEM_ROLES.ADMIN,
   SYSTEM_ROLES.MANAGER,
   SYSTEM_ROLES.ACCOUNTANT,
-] as const;
+];
 
-const EXPENSE_REPORT_ROLES = [
+const EXPENSE_REPORT_ROLES: readonly SystemRole[] = [
   SYSTEM_ROLES.OWNER,
   SYSTEM_ROLES.ADMIN,
   SYSTEM_ROLES.MANAGER,
   SYSTEM_ROLES.ACCOUNTANT,
-] as const;
+];
 
 @Injectable()
 export class ExpensesService {
@@ -1118,19 +1122,22 @@ export class ExpensesService {
   }
 
   private assertCanManageExpenses(user: AuthenticatedUser) {
-    if (!EXPENSE_ROLES.includes(user.roleName as never)) {
+    const roleName = normalizeSystemRoleName(user.roleName);
+    if (!roleName || !EXPENSE_ROLES.includes(roleName)) {
       throw new ForbiddenException('User is not allowed to manage expenses');
     }
   }
 
   private assertCanAccessExpenses(user: AuthenticatedUser) {
-    if (!EXPENSE_ROLES.includes(user.roleName as never)) {
+    const roleName = normalizeSystemRoleName(user.roleName);
+    if (!roleName || !EXPENSE_ROLES.includes(roleName)) {
       throw new ForbiddenException('User is not allowed to access expenses');
     }
   }
 
   private assertCanModifyExpenses(user: AuthenticatedUser) {
-    if (!EXPENSE_MODIFY_ROLES.includes(user.roleName as never)) {
+    const roleName = normalizeSystemRoleName(user.roleName);
+    if (!roleName || !EXPENSE_MODIFY_ROLES.includes(roleName)) {
       throw new ForbiddenException(
         'User is not allowed to modify completed expenses',
       );
@@ -1138,7 +1145,8 @@ export class ExpensesService {
   }
 
   private canViewAllExpenses(user: AuthenticatedUser) {
-    return EXPENSE_REPORT_ROLES.includes(user.roleName as never);
+    const roleName = normalizeSystemRoleName(user.roleName);
+    return Boolean(roleName && EXPENSE_REPORT_ROLES.includes(roleName));
   }
 
   private scopeQueryToUser(

@@ -125,14 +125,12 @@ export function ExpensesScreen() {
     setSelectedExpense(null);
     setSheetMode("create");
     resetForm();
-    sheetRef.current?.expand();
   };
 
   const openExpense = async (expense: ApiExpense) => {
     setSheetMode("detail");
     setSelectedExpense(expense);
     populateForm(expense);
-    sheetRef.current?.expand();
     setDetailLoading(true);
     try {
       const detail = await expensesService.detail(expense.id);
@@ -303,7 +301,7 @@ export function ExpensesScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       />
-      <AppBottomSheet ref={sheetRef} snapPoints={["84%"]} onClose={() => setSheetMode(null)}>
+      {sheetMode ? <AppBottomSheet ref={sheetRef} snapPoints={["84%"]} initialIndex={0} onClose={() => setSheetMode(null)}>
         <ScrollView contentContainerStyle={styles.sheet} showsVerticalScrollIndicator={false}>
           {sheetMode === "detail" && selectedExpense && !canMutateSelectedExpense ? (
             <>
@@ -363,7 +361,7 @@ export function ExpensesScreen() {
             </>
           )}
         </ScrollView>
-      </AppBottomSheet>
+      </AppBottomSheet> : null}
     </View>
   );
 }
