@@ -79,7 +79,8 @@ const stockStatus = (stock: number) => {
 export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
-  const role = user?.role ?? "owner";
+  const normalizedRoleName = user?.roleName?.trim().toLowerCase();
+  const role = normalizedRoleName ? (normalizedRoleName === "owner" ? "owner" : "employee") : user?.role ?? "owner";
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
@@ -99,6 +100,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const [loadingCreditInvoices, setLoadingCreditInvoices] = useState(false);
   const [processingSale, setProcessingSale] = useState(false);
   const [collectingPayment, setCollectingPayment] = useState(false);
+  const [checkoutVisible, setCheckoutVisible] = useState(false);
+  const [collectVisible, setCollectVisible] = useState(false);
+  const [receiptVisible, setReceiptVisible] = useState(false);
   const [discountInput, setDiscountInput] = useState("0");
   const [taxInput, setTaxInput] = useState("0");
   const [paidInput, setPaidInput] = useState("");
@@ -238,7 +242,18 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const openReceipt = (receipt: ReceiptDocument) => {
     setActiveReceipt(receipt);
-    requestAnimationFrame(() => receiptRef.current?.expand());
+    setReceiptVisible(true);
+    requestAnimationFrame(() => receiptRef.current?.snapToIndex(0));
+  };
+
+  const openCheckout = () => {
+    setCheckoutVisible(true);
+    requestAnimationFrame(() => checkoutRef.current?.snapToIndex(0));
+  };
+
+  const openCollectSheet = () => {
+    setCollectVisible(true);
+    requestAnimationFrame(() => collectRef.current?.snapToIndex(0));
   };
 
   const distributeAmount = (amount: number, lineSubtotal: number) => {
@@ -416,6 +431,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         setDiscountInput("0");
         setTaxInput("0");
         checkoutRef.current?.close();
+        setCheckoutVisible(false);
         await loadCreditInvoices();
       };
 
@@ -479,6 +495,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           setDiscountInput("0");
           setTaxInput("0");
           checkoutRef.current?.close();
+          setCheckoutVisible(false);
           Alert.alert("Sale queued", "The sale was saved offline and will sync when the network is available.");
           return;
         } catch {
@@ -505,7 +522,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
       setSelectedCollectInvoice(payableInvoices[0]);
       setCollectAmount(String(payableInvoices[0].remaining));
-      collectRef.current?.expand();
+      openCollectSheet();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to load outstanding credit invoices.";
       Alert.alert("Credit payments", message);
@@ -528,6 +545,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         referenceNumber: `CR-${Date.now()}`
       });
       collectRef.current?.close();
+      setCollectVisible(false);
       setSelectedCollectInvoice(null);
       setCollectAmount("");
       await loadCreditInvoices();
@@ -552,7 +570,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const handleAddSalePress = () => {
     if (cartCount > 0) {
-      checkoutRef.current?.expand();
+      openCheckout();
       return;
     }
 
@@ -697,7 +715,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       />
 
       {cartCount > 0 ? (
-        <Pressable style={styles.cartFab} accessibilityLabel="Open cart" onPress={() => checkoutRef.current?.expand()}>
+        <Pressable style={styles.cartFab} accessibilityLabel="Open cart" onPress={openCheckout}>
           <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.cartFabGradient}>
             <Wallet size={18} color={colors.surface} />
             <Text style={styles.cartText}>{cartCount} items</Text>
@@ -706,7 +724,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         </Pressable>
       ) : null}
 
-      <AppBottomSheet ref={checkoutRef} snapPoints={["88%"]}>
+      {checkoutVisible ? <AppBottomSheet ref={checkoutRef} snapPoints={["88%"]} onClose={() => setCheckoutVisible(false)}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Complete sale</Text>
           <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator persistentScrollbar>
@@ -774,9 +792,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           </ScrollView>
           <Button label={paymentMethod === "credit" ? "Confirm Credit Sale" : "Confirm Payment"} loading={processingSale} onPress={() => void handleCheckout()} />
         </View>
-      </AppBottomSheet>
+      </AppBottomSheet> : null}
 
-      <AppBottomSheet ref={collectRef} snapPoints={["88%"]}>
+      {collectVisible ? <AppBottomSheet ref={collectRef} snapPoints={["88%"]} onClose={() => setCollectVisible(false)}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Collect Credit</Text>
           <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator persistentScrollbar>
@@ -831,9 +849,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           </ScrollView>
           <Button label="Confirm Payment" variant="success" loading={collectingPayment} onPress={() => void handleCollectPayment()} />
         </View>
-      </AppBottomSheet>
+      </AppBottomSheet> : null}
 
-      <AppBottomSheet ref={receiptRef} snapPoints={["90%"]}>
+      {receiptVisible ? <AppBottomSheet ref={receiptRef} snapPoints={["90%"]} onClose={() => setReceiptVisible(false)}>
         <View style={styles.sheet}>
           <View style={styles.receiptHeader}>
             <Text style={styles.sheetTitle}>Receipt Preview</Text>
@@ -841,7 +859,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           </View>
           <ScrollView showsVerticalScrollIndicator persistentScrollbar>{activeReceipt ? <ReceiptTicket receipt={activeReceipt} /> : null}</ScrollView>
         </View>
-      </AppBottomSheet>
+      </AppBottomSheet> : null}
     </View>
   );
 }
