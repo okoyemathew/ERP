@@ -780,7 +780,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       {checkoutVisible ? <AppBottomSheet ref={checkoutRef} snapPoints={["88%"]} initialIndex={0} onClose={() => setCheckoutVisible(false)}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Complete sale</Text>
-          <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator persistentScrollbar>
+          <ScrollView contentContainerStyle={[styles.sheetScroll, { paddingBottom: 80 + bottomInset }]} showsVerticalScrollIndicator persistentScrollbar>
             {cartItems.map((item) => (
               <Card key={item.productId} style={styles.cartRow}>
                 <View style={styles.cartBody}>
@@ -843,8 +843,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               {(paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0) ? <View style={styles.totalRow}><Text style={styles.meta}>Credit Balance</Text><Text style={styles.totalValue}>{formatCurrency(paymentMethod === "credit" ? grandTotal : Math.max(0, grandTotal - paidAmount))}</Text></View> : null}
             </Card>
             <Button label="Clear Cart" variant="danger" icon={<Trash2 size={16} color={colors.error} />} onPress={clearCart} />
+            <Button label={paymentMethod === "credit" ? "Confirm Credit Sale" : "Confirm Payment"} loading={processingSale} onPress={() => void handleCheckout()} />
           </ScrollView>
-          <Button label={paymentMethod === "credit" ? "Confirm Credit Sale" : "Confirm Payment"} loading={processingSale} onPress={() => void handleCheckout()} />
         </View>
       </AppBottomSheet> : null}
 
