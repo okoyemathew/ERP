@@ -1,5 +1,12 @@
 import { BadRequestException } from '@nestjs/common';
-import { AuditAction, PaymentStatus, Prisma, SaleStatus } from '@prisma/client';
+import {
+  AuditAction,
+  CashRegisterStatus,
+  CashTransactionType,
+  PaymentStatus,
+  Prisma,
+  SaleStatus,
+} from '@prisma/client';
 import { SalesService } from './sales.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 
@@ -76,6 +83,14 @@ function createPrismaMock() {
     },
     product: {
       findFirst: jest.fn(),
+    },
+    cashRegister: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    cashRegisterTransaction: {
+      create: jest.fn(),
     },
     auditLog: {
       create: jest.fn(),
@@ -223,5 +238,75 @@ describe('SalesService sale item price and quantity validation', () => {
 
     expect(Number(mondayItem.unitPrice)).toBe(11000);
     expect(Number(tuesdayItem.unitPrice)).toBe(12000);
+  });
+
+  it('auto-opens a zero-balance cash register for first cash sale', async () => {
+    const openedAt = new Date('2026-08-28T12:00:00.000Z');
+    prisma.cashRegister.findFirst.mockResolvedValue(null);
+    prisma.cashRegister.create.mockResolvedValue({
+      id: '77777777-7777-7777-7777-777777777777',
+      openingBalance: new Prisma.Decimal(0),
+      expectedBalance: new Prisma.Decimal(0),
+    });
+
+    await (service as unknown as {
+      recordCashRegisterTransaction: (
+        tx: unknown,
+        data: {
+          businessId: string;
+          userId: string;
+          transactionType: CashTransactionType;
+          amount: Prisma.Decimal;
+          reference: string;
+          description: string;
+          transactionDate: Date;
+        },
+      ) => Promise<void>;
+    }).recordCashRegisterTransaction(prisma, {
+      businessId,
+      userId: employeeUserId,
+      transactionType: CashTransactionType.SALE,
+      amount: new Prisma.Decimal(120),
+      reference: 'SALE-000001',
+      description: 'Cash sale: SALE-000001',
+      transactionDate: openedAt,
+    });
+
+    expect(prisma.cashRegister.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          businessId,
+          userId: employeeUserId,
+          openingBalance: new Prisma.Decimal(0),
+          expectedBalance: new Prisma.Decimal(0),
+          status: CashRegisterStatus.OPEN,
+          openedAt,
+        }),
+      }),
+    );
+    expect(prisma.cashRegisterTransaction.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          transactionType: CashTransactionType.OPENING_BALANCE,
+          amount: new Prisma.Decimal(0),
+        }),
+      }),
+    );
+    expect(prisma.cashRegisterTransaction.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          transactionType: CashTransactionType.SALE,
+          amount: new Prisma.Decimal(120),
+          reference: 'SALE-000001',
+        }),
+      }),
+    );
+    expect(prisma.cashRegister.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { expectedBalance: new Prisma.Decimal(120) },
+      }),
+    );
   });
 });

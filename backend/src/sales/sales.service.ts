@@ -1647,20 +1647,17 @@ export class SalesService {
       select: { id: true, openingBalance: true, expectedBalance: true },
     });
 
-    if (!register) {
-      throw new BadRequestException(
-        'Open cash register is required for cash sales',
-      );
-    }
+    const activeRegister =
+      register ?? (await this.openRegisterForCashTransaction(tx, data));
 
     const currentBalance =
-      register.expectedBalance ??
-      (await this.calculateRegisterCashBalance(tx, register.id));
+      activeRegister.expectedBalance ??
+      (await this.calculateRegisterCashBalance(tx, activeRegister.id));
     const nextBalance = currentBalance.add(data.amount);
 
     await tx.cashRegisterTransaction.create({
       data: {
-        cashRegisterId: register.id,
+        cashRegisterId: activeRegister.id,
         transactionType: data.transactionType,
         amount: data.amount,
         reference: data.reference,
@@ -1670,9 +1667,43 @@ export class SalesService {
     });
 
     await tx.cashRegister.update({
-      where: { id: register.id },
+      where: { id: activeRegister.id },
       data: { expectedBalance: nextBalance },
     });
+  }
+
+  private async openRegisterForCashTransaction(
+    tx: Tx,
+    data: {
+      businessId: string;
+      userId: string;
+      transactionDate: Date;
+    },
+  ) {
+    const openingBalance = new Prisma.Decimal(0);
+    const register = await tx.cashRegister.create({
+      data: {
+        businessId: data.businessId,
+        userId: data.userId,
+        openingBalance,
+        expectedBalance: openingBalance,
+        status: CashRegisterStatus.OPEN,
+        openedAt: data.transactionDate,
+      },
+      select: { id: true, openingBalance: true, expectedBalance: true },
+    });
+
+    await tx.cashRegisterTransaction.create({
+      data: {
+        cashRegisterId: register.id,
+        transactionType: CashTransactionType.OPENING_BALANCE,
+        amount: openingBalance,
+        description: 'Auto-opened for cash transaction',
+        transactionDate: data.transactionDate,
+      },
+    });
+
+    return register;
   }
 
   private async calculateRegisterCashBalance(tx: Tx, cashRegisterId: string) {
