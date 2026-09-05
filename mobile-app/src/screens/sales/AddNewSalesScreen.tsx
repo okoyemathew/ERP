@@ -369,7 +369,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const submitQuantityInput = (product: ProductTile, value: string) => {
     const trimmed = value.trim();
-    if (!trimmed && cartQty(product.id) === 0) {
+    if (!trimmed) {
+      setQuantityInputs((current) => ({ ...current, [product.id]: String(cartQty(product.id)) }));
       return;
     }
     if (!/^\d+$/.test(trimmed)) {
@@ -378,7 +379,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return;
     }
     const nextQty = Number(trimmed);
-    if (!Number.isSafeInteger(nextQty) || nextQty <= 0) {
+    if (!Number.isSafeInteger(nextQty)) {
       Alert.alert("Quantity", "Enter a valid quantity.");
       setQuantityInputs((current) => ({ ...current, [product.id]: String(cartQty(product.id)) }));
       return;
@@ -681,7 +682,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           const status = stockStatus(item.stock);
           const priceInput = productPriceInput(item);
           const invalidPrice = Boolean(priceInput) && !parsePositiveMoney(priceInput);
-          const quantityValue = quantityInputs[item.id] ?? (qty > 0 ? String(qty) : "");
+          const quantityValue = quantityInputs[item.id] ?? String(qty);
 
           return (
             <View style={[styles.productCard, !grid && styles.productListCard]}>
@@ -716,6 +717,11 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
                       return;
                     }
                     setQuantityInputs((current) => ({ ...current, [item.id]: value }));
+                  }}
+                  onFocus={() => {
+                    if (cartQty(item.id) === 0 && quantityInputs[item.id] == null) {
+                      setQuantityInputs((current) => ({ ...current, [item.id]: "" }));
+                    }
                   }}
                   onBlur={() => submitQuantityInput(item, quantityValue)}
                   onSubmitEditing={() => submitQuantityInput(item, quantityValue)}
