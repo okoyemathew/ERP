@@ -30,6 +30,7 @@ export const endpoints = {
   employees: {
     list: "/employees",
     create: "/employees",
+    myProfile: "/employees/me/profile",
     detail: (employeeId: string) => `/employees/${employeeId}`,
     profile: (employeeId: string) => `/employees/${employeeId}/profile`,
     sales: (employeeId: string) => `/employees/${employeeId}/sales`,

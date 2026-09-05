@@ -4,9 +4,11 @@ import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import { Plus, Truck } from "lucide-react-native";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
+import { employeesService } from "@/services/employees.service";
 import { suppliersService } from "@/services/suppliers.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
+import type { EmployeeProfileResponse } from "@/types/employee";
 import type { ApiSupplier } from "@/types/supplier";
 import { canAccess } from "@/utils/permissions";
 import { formatCurrency } from "@/utils/format";
@@ -15,12 +17,19 @@ function money(value: string | number | null | undefined): number {
   return Number(value ?? 0);
 }
 
+type EmployeeSuppliedProduct = NonNullable<EmployeeProfileResponse["profileActivity"]>["stock"][number];
+type EmployeeSuppliedSummary = NonNullable<EmployeeProfileResponse["profileActivity"]>["stats"];
+type SuppliedListItem = EmployeeSuppliedProduct | ApiSupplier;
+
 export function SuppliedScreen({ navigation }: { navigation: any }) {
   const user = useAuthStore((state) => state.user);
-  const role = user?.roleName ? (user.roleName === "Owner" ? "owner" : "employee") : user?.role ?? "owner";
+  const role = user?.role ?? (user?.roleName === "Owner" ? "owner" : "employee");
+  const isEmployeeView = role === "employee";
   const canCreateSupplier = canAccess(role, "SupplierForm");
   const [query, setQuery] = useState("");
   const [suppliers, setSuppliers] = useState<ApiSupplier[]>([]);
+  const [employeeProducts, setEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
+  const [employeeSummary, setEmployeeSummary] = useState<EmployeeSuppliedSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,91 +40,124 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
     else navigation.navigate(route, params);
   };
 
-  const loadSuppliers = useCallback(async (search = query, showSpinner = true) => {
+  const loadSupplied = useCallback(async (search = query, showSpinner = true) => {
     if (showSpinner) setLoading(true);
     setError(null);
     try {
+      if (isEmployeeView) {
+        const response = await employeesService.myProfile();
+        const products = response.profileActivity?.stock ?? [];
+        const normalizedSearch = search.trim().toLowerCase();
+        setEmployeeProducts(
+          normalizedSearch
+            ? products.filter((product) =>
+                [product.productName, product.sku, product.barcode]
+                  .filter(Boolean)
+                  .some((value) => String(value).toLowerCase().includes(normalizedSearch))
+              )
+            : products
+        );
+        setEmployeeSummary(response.profileActivity?.stats ?? null);
+        return;
+      }
+
       const response = search.trim()
         ? await suppliersService.search(search.trim(), { limit: 50 })
         : await suppliersService.list({ limit: 50 });
       setSuppliers(response.data);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unable to load suppliers.");
+      setError(loadError instanceof Error ? loadError.message : "Unable to load supplied products.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [query]);
+  }, [isEmployeeView, query]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      void loadSuppliers(query, false);
+      void loadSupplied(query, false);
     }, 350);
     return () => clearTimeout(timer);
-  }, [query, loadSuppliers]);
+  }, [query, loadSupplied]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadSuppliers(query);
-    }, [loadSuppliers, query])
+      void loadSupplied(query);
+    }, [loadSupplied, query])
   );
 
   const totalCredit = useMemo(() => suppliers.reduce((sum, supplier) => sum + money(supplier.outstandingBalance), 0), [suppliers]);
+  const totalSupplied = employeeSummary?.totalSupplied ?? employeeProducts.reduce((sum, product) => sum + product.suppliedQuantity, 0);
+  const totalStockValue = money(employeeSummary?.stockValue);
+  const dataIsEmpty = isEmployeeView ? employeeProducts.length === 0 : suppliers.length === 0;
+  const headerTitle = isEmployeeView ? "Supplied Products" : "Suppliers";
+  const rightAction = !isEmployeeView && canCreateSupplier ? <Pressable onPress={() => navigateStack("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined;
 
   const refresh = () => {
     setRefreshing(true);
-    void loadSuppliers(query, false);
+    void loadSupplied(query, false);
   };
 
-  if (loading && suppliers.length === 0) {
+  if (loading && dataIsEmpty) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigateStack("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
-        <LoadingState label="Loading suppliers" />
+        <ScreenHeader title={headerTitle} right={rightAction} />
+        <LoadingState label={isEmployeeView ? "Loading supplied products" : "Loading suppliers"} />
       </View>
     );
   }
 
-  if (error && suppliers.length === 0) {
+  if (error && dataIsEmpty) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigateStack("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
-        <ErrorState onRetry={() => void loadSuppliers()} />
+        <ScreenHeader title={headerTitle} right={rightAction} />
+        <ErrorState onRetry={() => void loadSupplied()} />
       </View>
     );
   }
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Suppliers" right={canCreateSupplier ? <Pressable onPress={() => navigateStack("SupplierForm")}><Plus size={20} color={colors.primary} /></Pressable> : undefined} />
-      <FlatList
-        data={suppliers}
-        keyExtractor={(item) => item.id}
+      <ScreenHeader title={headerTitle} right={rightAction} />
+      <FlatList<SuppliedListItem>
+        data={isEmployeeView ? employeeProducts : suppliers}
+        keyExtractor={(item) => ("productName" in item ? item.productId : item.id)}
         refreshing={refreshing}
         onRefresh={refresh}
         ListHeaderComponent={
           <View style={styles.headerContent}>
-            <SearchBar value={query} onChangeText={setQuery} placeholder="Search suppliers" />
+            <SearchBar value={query} onChangeText={setQuery} placeholder={isEmployeeView ? "Search supplied products" : "Search suppliers"} />
             <View style={styles.stats}>
-              <Card style={styles.stat}><Text style={styles.statValue}>{suppliers.length}</Text><Text style={styles.statLabel}>Total</Text></Card>
-              <Card style={styles.stat}><Text style={styles.statValue}>{suppliers.filter((item) => money(item.outstandingBalance) > 0).length}</Text><Text style={styles.statLabel}>With credit</Text></Card>
-              <Card style={styles.stat}><Text style={styles.statValue}>{formatCurrency(totalCredit)}</Text><Text style={styles.statLabel}>Supplier credit</Text></Card>
+              <Card style={styles.stat}><Text style={styles.statValue}>{isEmployeeView ? employeeProducts.length : suppliers.length}</Text><Text style={styles.statLabel}>Total</Text></Card>
+              <Card style={styles.stat}><Text style={styles.statValue}>{isEmployeeView ? totalSupplied : suppliers.filter((item) => money(item.outstandingBalance) > 0).length}</Text><Text style={styles.statLabel}>{isEmployeeView ? "Supplied" : "With credit"}</Text></Card>
+              <Card style={styles.stat}><Text style={styles.statValue}>{formatCurrency(isEmployeeView ? totalStockValue : totalCredit)}</Text><Text style={styles.statLabel}>{isEmployeeView ? "Stock value" : "Supplier credit"}</Text></Card>
             </View>
           </View>
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => navigateStack("SupplierDetail", { supplierId: item.id })} accessibilityLabel={`Open ${item.companyName}`}>
+          "productName" in item ? (
             <Card style={styles.row}>
               <View style={styles.icon}><Truck size={18} color={colors.primary} /></View>
               <View style={styles.body}>
-                <Text style={styles.title}>{item.companyName}</Text>
-                <Text style={styles.meta}>{item.phone} | {item.contactPerson ?? "No contact"}</Text>
+                <Text style={styles.title}>{item.productName}</Text>
+                <Text style={styles.meta}>{item.sku ?? item.barcode ?? "No SKU"} | In hand: {item.quantityInHand}</Text>
               </View>
-              {money(item.outstandingBalance) > 0 ? <Badge label={formatCurrency(money(item.outstandingBalance))} variant="warning" /> : <Badge label={item.status} variant="success" />}
+              <Badge label={String(item.suppliedQuantity)} variant={item.quantityInHand > 0 ? "success" : "neutral"} />
             </Card>
-          </Pressable>
+          ) : (
+            <Pressable onPress={() => navigateStack("SupplierDetail", { supplierId: item.id })} accessibilityLabel={`Open ${item.companyName}`}>
+              <Card style={styles.row}>
+                <View style={styles.icon}><Truck size={18} color={colors.primary} /></View>
+                <View style={styles.body}>
+                  <Text style={styles.title}>{item.companyName}</Text>
+                  <Text style={styles.meta}>{item.phone} | {item.contactPerson ?? "No contact"}</Text>
+                </View>
+                {money(item.outstandingBalance) > 0 ? <Badge label={formatCurrency(money(item.outstandingBalance))} variant="warning" /> : <Badge label={item.status} variant="success" />}
+              </Card>
+            </Pressable>
+          )
         )}
-        ListEmptyComponent={<EmptyState icon={<Truck size={28} color={colors.textPlaceholder} />} title="No suppliers yet" />}
+        ListEmptyComponent={<EmptyState icon={<Truck size={28} color={colors.textPlaceholder} />} title={isEmployeeView ? "No supplied products yet" : "No suppliers yet"} />}
         contentContainerStyle={styles.list}
       />
     </View>

@@ -50,6 +50,11 @@ export const employeesService = {
     return data;
   },
 
+  async myProfile(): Promise<EmployeeProfileResponse> {
+    const { data } = await api.get<EmployeeProfileResponse>(endpoints.employees.myProfile);
+    return data;
+  },
+
   async sales(id: string, params: EmployeeSalesParams = {}): Promise<EmployeeSalesResponse> {
     const { data } = await api.get<EmployeeSalesResponse>(endpoints.employees.sales(id), { params });
     return data;

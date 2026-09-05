@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -67,6 +68,17 @@ export class EmployeeController {
     @Query() query: EmployeeQueryDto,
   ) {
     return this.employeeService.search(user.businessId, q ?? '', query);
+  }
+
+  @Get('me/profile')
+  @Permissions()
+  @ApiOperation({ summary: 'View current employee profile' })
+  myProfile(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.employeeId) {
+      throw new BadRequestException('Employee profile is not available');
+    }
+
+    return this.employeeService.getProfile(user.businessId, user.employeeId);
   }
 
   @Get(':id')
