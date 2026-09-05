@@ -58,8 +58,10 @@ function aggregateEmployeeProducts(disbursements: ApiGoodsDisbursement[]) {
 
 export function SuppliedScreen({ navigation }: { navigation: any }) {
   const user = useAuthStore((state) => state.user);
-  const role = user?.role ?? (user?.roleName === "Owner" ? "owner" : "employee");
-  const isEmployeeView = role === "employee";
+  const normalizedRoleName = user?.roleName?.trim().toLowerCase();
+  const isBusinessOwner = normalizedRoleName ? normalizedRoleName === "owner" : user?.role === "owner" && !user?.employeeId;
+  const role = isBusinessOwner ? "owner" : "employee";
+  const isEmployeeView = !isBusinessOwner;
   const canCreateSupplier = canAccess(role, "SupplierForm");
   const [query, setQuery] = useState("");
   const [suppliers, setSuppliers] = useState<ApiSupplier[]>([]);
