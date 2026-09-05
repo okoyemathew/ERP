@@ -146,8 +146,8 @@ export function ExpensesScreen() {
 
   const saveExpense = async () => {
     const parsedAmount = Number(amount);
-    if (!title.trim() || !categoryId || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Missing expense details", "Enter a title, category, and valid amount.");
+    if (!title.trim() || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      Alert.alert("Missing expense details", "Enter a title and valid amount.");
       return;
     }
 
@@ -156,7 +156,7 @@ export function ExpensesScreen() {
       const payload = {
         title: title.trim(),
         amount: parsedAmount,
-        categoryId,
+        categoryId: categoryId ?? undefined,
         description: description.trim() || undefined,
         paymentMethod: toApiPaymentMethod(method)
       };

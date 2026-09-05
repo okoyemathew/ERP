@@ -35,9 +35,10 @@ export class CreateExpenseDto {
   @Min(0.01)
   amount!: number;
 
-  @ApiProperty({ description: 'Expense category identifier' })
+  @ApiPropertyOptional({ description: 'Expense category identifier' })
+  @IsOptional()
   @IsUUID()
-  categoryId!: string;
+  categoryId?: string;
 
   @ApiPropertyOptional({ description: 'Expense date' })
   @IsOptional()

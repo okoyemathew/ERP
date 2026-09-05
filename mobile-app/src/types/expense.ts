@@ -73,7 +73,7 @@ export interface CreateExpensePayload {
   title: string;
   description?: string;
   amount: number;
-  categoryId: string;
+  categoryId?: string;
   expenseDate?: string;
   receiptNumber?: string;
   vendor?: string;

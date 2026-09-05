@@ -63,6 +63,8 @@ const EXPENSE_REPORT_ROLES: readonly SystemRole[] = [
   SYSTEM_ROLES.ACCOUNTANT,
 ];
 
+const DEFAULT_EXPENSE_CATEGORY_NAME = 'Miscellaneous';
+
 @Injectable()
 export class ExpensesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -195,12 +197,17 @@ export class ExpensesService {
     this.assertExpensePaymentMethod(dto.paymentMethod);
 
     return this.prisma.$transaction(async (tx) => {
-      await this.getActiveCategoryOrThrow(businessId, dto.categoryId, tx);
+      const categoryId = await this.resolveExpenseCategoryId(
+        businessId,
+        dto.categoryId,
+        tx,
+      );
       const amount = new Prisma.Decimal(dto.amount);
       this.assertPositiveAmount(amount);
       const expense = await this.createExpenseRecord(
         businessId,
         dto,
+        categoryId,
         user.id,
         amount,
         tx,
@@ -457,6 +464,7 @@ export class ExpensesService {
   private async createExpenseRecord(
     businessId: string,
     dto: CreateExpenseDto,
+    categoryId: string,
     userId: string,
     amount: Prisma.Decimal,
     tx: Tx,
@@ -474,7 +482,7 @@ export class ExpensesService {
         return await tx.expense.create({
           data: {
             businessId,
-            categoryId: dto.categoryId,
+            categoryId,
             userId,
             expenseNumber,
             title: dto.title.trim(),
@@ -530,6 +538,39 @@ export class ExpensesService {
 
       return this.formatCategory(updated);
     });
+  }
+
+  private async resolveExpenseCategoryId(
+    businessId: string,
+    categoryId: string | undefined,
+    tx: Tx,
+  ) {
+    if (categoryId) {
+      const category = await this.getActiveCategoryOrThrow(
+        businessId,
+        categoryId,
+        tx,
+      );
+      return category.id;
+    }
+
+    const category = await tx.expenseCategory.upsert({
+      where: {
+        businessId_name: {
+          businessId,
+          name: DEFAULT_EXPENSE_CATEGORY_NAME,
+        },
+      },
+      update: { isActive: true },
+      create: {
+        businessId,
+        name: DEFAULT_EXPENSE_CATEGORY_NAME,
+        description: 'Default category for expenses without a selected category',
+        isActive: true,
+      },
+    });
+
+    return category.id;
   }
 
   private async getCategoryOrThrow(
