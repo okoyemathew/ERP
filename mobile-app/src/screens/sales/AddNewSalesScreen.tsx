@@ -367,6 +367,18 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       Alert.alert("Stock limit", "You cannot add more than the available stock.");
       return;
     }
+    if (cartQty(product.id) === 0) {
+      const sellingPrice = parsePositiveMoney(productPriceInput(product));
+      if (!sellingPrice) {
+        Alert.alert("Selling price", "Enter the selling price before adding this product.");
+        setQuantityInputs((current) => ({ ...current, [product.id]: "0" }));
+        return;
+      }
+
+      if (role === "owner") ownerCart.addItem(product.source as Product, sellingPrice);
+      else employeeCart.addItem(product.source as EmployeeStockItem, sellingPrice);
+    }
+
     if (role === "owner") ownerCart.updateQty(product.id, nextQty);
     else employeeCart.updateQty(product.id, nextQty);
     setQuantityInputs((current) => ({ ...current, [product.id]: String(nextQty) }));
