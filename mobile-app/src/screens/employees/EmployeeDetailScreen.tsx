@@ -57,6 +57,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const employeeId = route.params?.employeeId as string;
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
+  const canManageProducts = useAuthStore((state) => state.can("products.manage"));
   const saleSheetRef = useRef<GorhomBottomSheet>(null);
   const supplySheetRef = useRef<GorhomBottomSheet>(null);
   const [profile, setProfile] = useState<EmployeeProfileResponse | null>(null);
@@ -281,6 +282,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const displayStatus = employee.canLogin ? employee.status : "DISABLED";
   const normalizedUserRole = user?.roleName?.trim().toLowerCase();
   const isOwner = normalizedUserRole ? normalizedUserRole === "owner" : user?.role === "owner";
+  const canManageStockProducts = isOwner || canManageProducts;
   const salesToday = activity?.stats.salesToday ?? 0;
   const totalSupplied = activity?.stats.totalSupplied ?? 0;
   const stockItems = activity?.stock ?? [];
@@ -303,10 +305,10 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
           {stockItems.length ? stockItems.map((item) => (
             <Pressable
               key={item.productId}
-              disabled={!isOwner}
+              disabled={!canManageStockProducts}
               onPress={() => openProductActions(item)}
-              accessibilityRole={isOwner ? "button" : undefined}
-              accessibilityLabel={isOwner ? `Manage ${item.productName}` : undefined}
+              accessibilityRole={canManageStockProducts ? "button" : undefined}
+              accessibilityLabel={canManageStockProducts ? `Manage ${item.productName}` : undefined}
             >
               <Card style={styles.productCard}>
                 <View style={styles.productHead}>

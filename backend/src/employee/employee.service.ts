@@ -725,6 +725,10 @@ export class EmployeeService {
               deletedAt: null,
               status: SaleStatus.COMPLETED,
             },
+            product: {
+              businessId,
+              isActive: true,
+            },
           },
           include: {
             sale: { select: { saleDate: true } },
