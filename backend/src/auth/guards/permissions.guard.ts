@@ -14,7 +14,11 @@ import {
   EMPLOYEE_RESTRICTED_PERMISSIONS,
   SALESPERSON_RESTRICTED_PERMISSIONS,
 } from '../constants/restricted-actions.constant';
-import { ADMIN_ROLE_NAMES, type SystemRole } from '../constants/roles.constant';
+import {
+  ADMIN_ROLE_NAMES,
+  SYSTEM_ROLES,
+  type SystemRole,
+} from '../constants/roles.constant';
 import type { RequestUserInterface } from '../interfaces/request-user.interface';
 import { AuthorizationService } from '../services/authorization.service';
 
@@ -56,6 +60,10 @@ export class PermissionsGuard implements CanActivate {
       (await this.authorizationService.getRoleName(user.roleId));
 
     this.assertEmployeeRestrictions(context, requiredPermissions, roleName);
+
+    if (roleName === SYSTEM_ROLES.OWNER) {
+      return true;
+    }
 
     const hasPermissions = await this.authorizationService.userHasPermissions(
       user.roleId,

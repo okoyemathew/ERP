@@ -17,6 +17,7 @@ export class CreateGoodsDisbursementItemDto {
   productId!: string;
 
   @ApiProperty({ description: 'Quantity to disburse', minimum: 1 })
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   quantity!: number;

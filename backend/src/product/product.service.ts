@@ -420,14 +420,16 @@ export class ProductService {
 
   async remove(businessId: string, id: string, user?: AuthenticatedUser) {
     const current = await this.findOne(businessId, id);
+    const isOwner =
+      user?.roleName?.trim().toLowerCase() === SYSTEM_ROLES.OWNER.toLowerCase();
 
     const inventory = await this.prisma.inventory.findFirst({
       where: { businessId, productId: id },
     });
 
-    if (inventory && inventory.quantityAvailable > 0) {
+    if (!isOwner && inventory && inventory.quantityAvailable > 0) {
       throw new BadRequestException(
-        'Cannot delete product with remaining stock. Deactivate it instead.',
+        'Only the owner can delete a product with remaining stock.',
       );
     }
 
@@ -445,7 +447,7 @@ export class ProductService {
             action: AuditAction.PRODUCT_DELETED,
             entity: 'Product',
             entityId: id,
-            description: `Deactivated product ${current.name}`,
+            description: `Deleted product ${current.name}`,
           },
         });
       }

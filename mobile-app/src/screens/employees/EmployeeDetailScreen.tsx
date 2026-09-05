@@ -59,7 +59,6 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [sales, setSales] = useState<EmployeeSalesResponse | null>(null);
   const [salesQuery, setSalesQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ProfileTab>("stock");
-  const [supplySheetVisible, setSupplySheetVisible] = useState(false);
   const [supplyProducts, setSupplyProducts] = useState<ApiProduct[]>([]);
   const [supplyProductsLoading, setSupplyProductsLoading] = useState(false);
   const [selectedSupplyProductId, setSelectedSupplyProductId] = useState<string | null>(null);
@@ -127,18 +126,16 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     requestAnimationFrame(() => saleSheetRef.current?.snapToIndex(0));
   }, [selectedSale]);
 
-  useEffect(() => {
-    if (!supplySheetVisible) return;
-    requestAnimationFrame(() => supplySheetRef.current?.snapToIndex(0));
-  }, [supplySheetVisible]);
-
   const openSale = (sale: ApiSale) => {
     setSelectedSale(sale);
   };
 
   const openSupplySheet = async () => {
-    setSupplySheetVisible(true);
-    if (supplyProducts.length) return;
+    requestAnimationFrame(() => supplySheetRef.current?.snapToIndex(0));
+    if (supplyProducts.length) {
+      setSelectedSupplyProductId((current) => current ?? supplyProducts[0]?.id ?? null);
+      return;
+    }
     setSupplyProductsLoading(true);
     try {
       const response = await productsService.list({
@@ -162,6 +159,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     if (!profile || supplying) return;
     const quantity = Number.parseInt(supplyQuantity, 10);
     const selectedProduct = supplyProducts.find((product) => product.id === selectedSupplyProductId);
+    const targetName = employeeName(profile.employee);
     if (!selectedProduct) {
       Alert.alert("Select product", "Choose a product to supply to this employee.");
       return;
@@ -175,17 +173,18 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     try {
       await goodsDisbursementService.create({
         employeeId: profile.employee.id,
-        destination: name,
-        remarks: supplyRemarks.trim() || `Supplied to ${name} (${profile.employee.employeeCode})`,
+        destination: targetName,
+        remarks: supplyRemarks.trim() || `Supplied to ${targetName} (${profile.employee.employeeCode})`,
         items: [{ productId: selectedProduct.id, quantity }]
       });
-      setSupplySheetVisible(false);
+      supplySheetRef.current?.close();
       setSelectedSupplyProductId(null);
+      setSupplyProducts([]);
       setSupplyQuantity("1");
       setSupplyRemarks("");
       setActiveTab("stock");
       await load();
-      Alert.alert("Supply recorded", `${selectedProduct.name} was supplied to ${name}.`);
+      Alert.alert("Supply recorded", `${selectedProduct.name} was supplied to ${targetName}.`);
     } catch (supplyError) {
       const message = supplyError instanceof Error ? supplyError.message : "Unable to supply product.";
       Alert.alert("Supply failed", message);
@@ -373,7 +372,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
         title={name}
         onBack={() => navigation.goBack()}
         right={
-          <Pressable style={styles.supplyButton} onPress={() => void openSupplySheet()} accessibilityRole="button" accessibilityLabel={`Supply products to ${name}`}>
+          <Pressable style={styles.supplyButton} onPress={() => void openSupplySheet()} accessibilityRole="button" accessibilityLabel={`Supply products to ${name}`} hitSlop={8}>
             <PackagePlus size={14} color={colors.surface} />
             <Text style={styles.supplyButtonText}>Supply</Text>
           </Pressable>
@@ -469,8 +468,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
         </AppBottomSheet>
       ) : null}
 
-      {supplySheetVisible ? (
-        <AppBottomSheet ref={supplySheetRef} snapPoints={["82%"]} onClose={() => setSupplySheetVisible(false)}>
+      <AppBottomSheet ref={supplySheetRef} snapPoints={["82%"]}>
           <ScrollView contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, 16) }]} keyboardShouldPersistTaps="handled">
             <View>
               <Text style={styles.sectionTitle}>Supply Products</Text>
@@ -529,7 +527,6 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
             <Button label="Record Supply" loading={supplying} disabled={!supplyProducts.length || supplying} onPress={() => void submitSupply()} />
           </ScrollView>
         </AppBottomSheet>
-      ) : null}
     </View>
   );
 }

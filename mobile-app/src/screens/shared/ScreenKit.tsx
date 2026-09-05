@@ -9,7 +9,7 @@ export function ScrollScreen({ title, children, right, onBack }: { title: string
   return (
     <View style={styles.screen}>
       <ScreenHeader title={title} right={right} onBack={onBack} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {children}
       </ScrollView>
     </View>

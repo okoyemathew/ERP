@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ProductService } from './product.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
@@ -284,6 +284,44 @@ describe('ProductService base selling price', () => {
         employee,
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.product.update).not.toHaveBeenCalled();
+  });
+
+  it('allows the owner to delete a product with remaining stock', async () => {
+    const ownerWithNormalizedRole = { ...owner, roleName: ' owner ' };
+    prisma.product.findFirst.mockResolvedValue(product());
+    prisma.inventory.findFirst.mockResolvedValue({
+      id: '55555555-5555-5555-5555-555555555555',
+      quantityAvailable: 8,
+    });
+    prisma.product.update.mockResolvedValue(product({ isActive: false }));
+
+    await service.remove(businessId, productId, ownerWithNormalizedRole);
+
+    expect(prisma.product.update).toHaveBeenCalledWith({
+      where: { id: productId },
+      data: { isActive: false },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'PRODUCT_DELETED',
+          description: 'Deleted product Cement',
+        }),
+      }),
+    );
+  });
+
+  it('rejects non-owner product deletion when stock remains', async () => {
+    prisma.product.findFirst.mockResolvedValue(product());
+    prisma.inventory.findFirst.mockResolvedValue({
+      id: '55555555-5555-5555-5555-555555555555',
+      quantityAvailable: 8,
+    });
+
+    await expect(service.remove(businessId, productId, employee)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     expect(prisma.product.update).not.toHaveBeenCalled();
   });
 });

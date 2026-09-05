@@ -41,15 +41,24 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
     void load();
   }, [load]);
 
-  const deactivate = async () => {
+  const deleteProduct = async () => {
     if (!product) return;
-    try {
-      await productsService.deactivate(product.id);
-      navigation.goBack();
-    } catch (deactivateError) {
-      const message = deactivateError instanceof Error ? deactivateError.message : "Unable to deactivate product.";
-      Alert.alert("Unable to update", message);
-    }
+    Alert.alert("Delete product?", `${product.name} will be removed from inventory.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await productsService.deactivate(product.id);
+            navigation.goBack();
+          } catch (deleteError) {
+            const message = deleteError instanceof Error ? deleteError.message : "Unable to delete product.";
+            Alert.alert("Unable to delete", message);
+          }
+        }
+      }
+    ]);
   };
 
   if (loading) return <LoadingState label="Loading product" />;
@@ -92,7 +101,7 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
         {canManage ? (
           <View style={styles.actions}>
             <Button label="Edit Product" onPress={() => navigation.navigate("ProductForm", { productId: product.id })} />
-            <Button label="Deactivate Product" variant="danger" onPress={deactivate} />
+            {isOwner ? <Button label="Delete Product" variant="danger" onPress={deleteProduct} /> : null}
           </View>
         ) : null}
       </ScrollView>
