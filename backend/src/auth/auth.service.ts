@@ -272,6 +272,7 @@ const ROLE_PERMISSIONS: Record<DefaultRoleName, string[]> = {
     'inventory.manage',
     'customers.manage',
     'reports.view',
+    'receipt.manage',
   ],
   Cashier: ['sales.manage', 'receipt.manage', 'customers.manage'],
   Salesperson: ['sales.manage', 'receipt.manage'],
@@ -281,7 +282,7 @@ const ROLE_PERMISSIONS: Record<DefaultRoleName, string[]> = {
     'goods-disbursement.manage',
   ],
   Accountant: ['expenses.manage', 'reports.view', 'credit-sales.manage'],
-  Supervisor: ['reports.view', 'inventory.manage', 'sales.manage'],
+  Supervisor: ['reports.view', 'inventory.manage', 'sales.manage', 'receipt.manage'],
 };
 
 @Injectable()

@@ -16,6 +16,7 @@ import {
 } from '../constants/restricted-actions.constant';
 import {
   ADMIN_ROLE_NAMES,
+  normalizeSystemRoleName,
   SYSTEM_ROLES,
   type SystemRole,
 } from '../constants/roles.constant';
@@ -24,11 +25,35 @@ import { AuthorizationService } from '../services/authorization.service';
 
 const BUILT_IN_ROLE_PERMISSIONS: Partial<Record<SystemRole, readonly string[]>> =
   {
+    [SYSTEM_ROLES.ADMIN]: [
+      'dashboard.view',
+      'users.manage',
+      'employees.manage',
+      'roles.manage',
+      'products.manage',
+      'categories.manage',
+      'brands.manage',
+      'units.manage',
+      'inventory.manage',
+      'suppliers.manage',
+      'customers.manage',
+      'sales.manage',
+      'credit-sales.manage',
+      'expenses.manage',
+      'reports.view',
+      'notifications.manage',
+      'settings.manage',
+      'receipt.manage',
+      'goods-supplied.manage',
+      'goods-disbursement.manage',
+      'audit-logs.view',
+    ],
     [SYSTEM_ROLES.MANAGER]: [
       'sales.manage',
       'inventory.manage',
       'customers.manage',
       'reports.view',
+      'receipt.manage',
     ],
     [SYSTEM_ROLES.CASHIER]: [
       'sales.manage',
@@ -50,6 +75,7 @@ const BUILT_IN_ROLE_PERMISSIONS: Partial<Record<SystemRole, readonly string[]>> 
       'reports.view',
       'inventory.manage',
       'sales.manage',
+      'receipt.manage',
     ],
   };
 
@@ -86,9 +112,10 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException('Authenticated user is required');
     }
 
-    const roleName =
+    const roleName = normalizeSystemRoleName(
       user.roleName ??
-      (await this.authorizationService.getRoleName(user.roleId));
+        (await this.authorizationService.getRoleName(user.roleId)),
+    );
 
     this.assertEmployeeRestrictions(context, requiredPermissions, roleName);
 
@@ -113,7 +140,7 @@ export class PermissionsGuard implements CanActivate {
   }
 
   private builtInRoleHasPermissions(
-    roleName: string | null,
+    roleName: SystemRole | null,
     requiredPermissions: readonly string[],
   ): boolean {
     if (!roleName) {
@@ -121,7 +148,7 @@ export class PermissionsGuard implements CanActivate {
     }
 
     const rolePermissions =
-      BUILT_IN_ROLE_PERMISSIONS[roleName as SystemRole] ?? [];
+      BUILT_IN_ROLE_PERMISSIONS[roleName] ?? [];
 
     return requiredPermissions.every((permission) =>
       rolePermissions.includes(permission),
@@ -131,16 +158,14 @@ export class PermissionsGuard implements CanActivate {
   private assertEmployeeRestrictions(
     context: ExecutionContext,
     requiredPermissions: readonly string[],
-    roleName: string | null,
+    roleName: SystemRole | null,
   ): void {
     const routeRoles =
       this.reflector.getAllAndOverride<SystemRole[]>(ROLES_KEY, [
         context.getHandler(),
         context.getClass(),
       ]) ?? [];
-    const isAdminRole = roleName
-      ? ADMIN_ROLE_NAMES.includes(roleName as SystemRole)
-      : false;
+    const isAdminRole = roleName ? ADMIN_ROLE_NAMES.includes(roleName) : false;
 
     if (
       !isAdminRole &&
@@ -162,7 +187,7 @@ export class PermissionsGuard implements CanActivate {
 
     const salespersonBlockedPermission = requiredPermissions.find(
       (permission) =>
-        roleName === 'Salesperson' &&
+        roleName === SYSTEM_ROLES.SALESPERSON &&
         SALESPERSON_RESTRICTED_PERMISSIONS.has(permission),
     );
 

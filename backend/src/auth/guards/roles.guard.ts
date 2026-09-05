@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY, ROLES_KEY } from '../constants/auth-metadata.constant';
-import type { SystemRole } from '../constants/roles.constant';
+import {
+  normalizeSystemRoleName,
+  type SystemRole,
+} from '../constants/roles.constant';
 import { AuthorizationService } from '../services/authorization.service';
 import type { RequestUserInterface } from '../interfaces/request-user.interface';
 
@@ -43,11 +46,12 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Authenticated user is required');
     }
 
-    const roleName =
+    const roleName = normalizeSystemRoleName(
       user.roleName ??
-      (await this.authorizationService.getRoleName(user.roleId));
+        (await this.authorizationService.getRoleName(user.roleId)),
+    );
 
-    if (!roleName || !requiredRoles.includes(roleName as SystemRole)) {
+    if (!roleName || !requiredRoles.includes(roleName)) {
       throw new ForbiddenException('Insufficient role');
     }
 

@@ -59,12 +59,13 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'inventory.manage',
     'customers.manage',
     'reports.view',
+    'receipt.manage',
   ],
   Cashier: ['sales.manage', 'receipt.manage', 'customers.manage'],
   Salesperson: ['sales.manage', 'receipt.manage'],
   'Inventory Officer': ['inventory.manage', 'goods-supplied.manage', 'goods-disbursement.manage'],
   Accountant: ['expenses.manage', 'reports.view', 'credit-sales.manage'],
-  Supervisor: ['reports.view', 'inventory.manage', 'sales.manage'],
+  Supervisor: ['reports.view', 'inventory.manage', 'sales.manage', 'receipt.manage'],
 };
 
 const ADMIN_EMAIL = 'admin@smartpos.com';
