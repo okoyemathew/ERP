@@ -736,9 +736,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
                       setQuantityInputs((current) => ({ ...current, [item.id]: "" }));
                     }
                   }}
-                  onBlur={() => submitQuantityInput(item, quantityValue)}
-                  onSubmitEditing={() => submitQuantityInput(item, quantityValue)}
+                  onEndEditing={(event) => submitQuantityInput(item, event.nativeEvent.text)}
+                  onSubmitEditing={(event) => submitQuantityInput(item, event.nativeEvent.text)}
                   keyboardType="number-pad"
+                  returnKeyType="done"
                   placeholder="0"
                   placeholderTextColor={colors.textPlaceholder}
                   selectTextOnFocus
