@@ -2,7 +2,7 @@ import * as SQLite from "expo-sqlite";
 import type { ApiCustomer } from "@/types/customer";
 import type { ApiExpense, CreateExpensePayload, ExpenseCategory } from "@/types/expense";
 import type { ApiProduct } from "@/types/product";
-import type { SyncPayload, SyncQueueItem, SyncOperationType, SyncQueueStatus } from "@/types/sync";
+import type { ApiMutationPayload, SyncPayload, SyncQueueItem, SyncOperationType, SyncQueueStatus } from "@/types/sync";
 import type { CreateSalePayload } from "@/types/sales";
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -66,6 +66,10 @@ export const offlineDbService = {
     }
   },
 
+  async cacheProduct(businessId: string, product: ApiProduct) {
+    await this.cacheProducts(businessId, [product]);
+  },
+
   async getCachedProducts(businessId: string): Promise<ApiProduct[]> {
     const db = await getDb();
     const rows = await db.getAllAsync<{ payload: string }>(
@@ -73,6 +77,21 @@ export const offlineDbService = {
       businessId
     );
     return rows.map((row) => JSON.parse(row.payload) as ApiProduct);
+  },
+
+  async getCachedProduct(businessId: string, productId: string): Promise<ApiProduct | null> {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ payload: string }>(
+      "SELECT payload FROM product_cache WHERE businessId = ? AND id = ?",
+      businessId,
+      productId
+    );
+    return row ? (JSON.parse(row.payload) as ApiProduct) : null;
+  },
+
+  async removeCachedProduct(businessId: string, productId: string) {
+    const db = await getDb();
+    await db.runAsync("DELETE FROM product_cache WHERE businessId = ? AND id = ?", businessId, productId);
   },
 
   async cacheCustomers(businessId: string, customers: ApiCustomer[]) {
@@ -96,6 +115,15 @@ export const offlineDbService = {
       businessId
     );
     return rows.map((row) => JSON.parse(row.payload) as ApiCustomer);
+  },
+
+  async cacheCustomer(businessId: string, customer: ApiCustomer) {
+    await this.cacheCustomers(businessId, [customer]);
+  },
+
+  async removeCachedCustomer(businessId: string, customerId: string) {
+    const db = await getDb();
+    await db.runAsync("DELETE FROM customer_cache WHERE businessId = ? AND id = ?", businessId, customerId);
   },
 
   async cacheExpenses(businessId: string, expenses: ApiExpense[]) {
@@ -123,6 +151,11 @@ export const offlineDbService = {
       businessId
     );
     return rows.map((row) => JSON.parse(row.payload) as ApiExpense);
+  },
+
+  async removeCachedExpense(businessId: string, expenseId: string) {
+    const db = await getDb();
+    await db.runAsync("DELETE FROM expense_cache WHERE businessId = ? AND id = ?", businessId, expenseId);
   },
 
   async cacheExpenseCategories(businessId: string, categories: ExpenseCategory[]) {
@@ -212,6 +245,23 @@ export const offlineDbService = {
       now
     );
     return { id, type: "EXPENSE_CREATE", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
+  },
+
+  async enqueueApiMutation(id: string, payload: ApiMutationPayload): Promise<SyncQueueItem> {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    await db.runAsync(
+      "INSERT OR REPLACE INTO sync_queue (id, type, payload, status, attempts, lastError, createdAt, updatedAt) VALUES (?, ?, ?, ?, COALESCE((SELECT attempts FROM sync_queue WHERE id = ?), 0), NULL, COALESCE((SELECT createdAt FROM sync_queue WHERE id = ?), ?), ?)",
+      id,
+      "API_MUTATION",
+      JSON.stringify(payload),
+      "PENDING",
+      id,
+      id,
+      now,
+      now
+    );
+    return { id, type: "API_MUTATION", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
   },
 
   async pendingOperations(): Promise<SyncQueueItem[]> {

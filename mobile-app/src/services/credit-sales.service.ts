@@ -1,6 +1,52 @@
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
+import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import type { ApiCreditSale, CreditPaymentPayload, CreditSaleActionRequest, CreditSaleEmployeeAction, CreditSaleListResponse } from "@/types/creditSale";
+
+function fallbackCreditSale(id: string): ApiCreditSale {
+  const now = new Date().toISOString();
+  return {
+    id,
+    saleId: id,
+    customerId: "offline-customer",
+    totalCredit: 0,
+    amountPaid: 0,
+    balance: 0,
+    dueDate: null,
+    status: "ACTIVE",
+    isOverdue: false,
+    createdAt: now,
+    updatedAt: now,
+    customer: { id: "offline-customer", name: "Customer", phone: "", status: "ACTIVE", creditLimit: 0, outstandingBalance: 0 },
+    sale: {
+      id,
+      saleNumber: id,
+      saleDate: now,
+      subtotal: 0,
+      discountAmount: 0,
+      taxAmount: 0,
+      totalAmount: 0,
+      paymentStatus: "PENDING",
+      status: "PENDING",
+      salesperson: { id: "offline-user", name: "Current User", username: "offline" },
+      items: []
+    },
+    payments: []
+  };
+}
+
+function fallbackActionRequest(id: string, action: CreditSaleEmployeeAction, reason?: string): CreditSaleActionRequest {
+  const now = new Date().toISOString();
+  return {
+    id: `request-${Date.now().toString(36)}`,
+    creditSaleId: id,
+    action,
+    status: "PENDING",
+    reason: reason ?? null,
+    createdAt: now,
+    updatedAt: now
+  };
+}
 
 export const creditSalesService = {
   async list(params: Record<string, string | number | boolean | undefined> = {}): Promise<CreditSaleListResponse> {
@@ -29,18 +75,30 @@ export const creditSalesService = {
   },
 
   async collectPayment(id: string, payload: CreditPaymentPayload): Promise<ApiCreditSale> {
-    const { data } = await api.post<ApiCreditSale>(endpoints.creditSales.payment(id), payload);
-    return data;
+    try {
+      const { data } = await api.post<ApiCreditSale>(endpoints.creditSales.payment(id), payload);
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "POST", url: endpoints.creditSales.payment(id), data: payload }, fallbackCreditSale(id));
+    }
   },
 
   async collectPosPayment(id: string, payload: CreditPaymentPayload): Promise<ApiCreditSale> {
-    const { data } = await api.post<ApiCreditSale>(`/credit-sales/${id}/pos-payments`, payload);
-    return data;
+    try {
+      const { data } = await api.post<ApiCreditSale>(`/credit-sales/${id}/pos-payments`, payload);
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "POST", url: `/credit-sales/${id}/pos-payments`, data: payload }, fallbackCreditSale(id));
+    }
   },
 
   async requestAction(id: string, action: CreditSaleEmployeeAction, reason?: string): Promise<CreditSaleActionRequest> {
-    const { data } = await api.post<CreditSaleActionRequest>(`/credit-sales/${id}/action-requests`, { action, reason });
-    return data;
+    try {
+      const { data } = await api.post<CreditSaleActionRequest>(`/credit-sales/${id}/action-requests`, { action, reason });
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "POST", url: `/credit-sales/${id}/action-requests`, data: { action, reason } }, fallbackActionRequest(id, action, reason));
+    }
   },
 
   async actionRequests(): Promise<{ data: CreditSaleActionRequest[] }> {
@@ -49,22 +107,50 @@ export const creditSalesService = {
   },
 
   async approveActionRequest(requestId: string, note?: string): Promise<CreditSaleActionRequest> {
-    const { data } = await api.post<CreditSaleActionRequest>(`/credit-sales/action-requests/${requestId}/approve`, { note });
-    return data;
+    try {
+      const { data } = await api.post<CreditSaleActionRequest>(`/credit-sales/action-requests/${requestId}/approve`, { note });
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "POST", url: `/credit-sales/action-requests/${requestId}/approve`, data: { note } }, {
+        id: requestId,
+        action: "EDIT",
+        status: "APPROVED",
+        decisionNote: note ?? null,
+        createdAt: new Date().toISOString()
+      });
+    }
   },
 
   async rejectActionRequest(requestId: string, note?: string): Promise<CreditSaleActionRequest> {
-    const { data } = await api.post<CreditSaleActionRequest>(`/credit-sales/action-requests/${requestId}/reject`, { note });
-    return data;
+    try {
+      const { data } = await api.post<CreditSaleActionRequest>(`/credit-sales/action-requests/${requestId}/reject`, { note });
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "POST", url: `/credit-sales/action-requests/${requestId}/reject`, data: { note } }, {
+        id: requestId,
+        action: "EDIT",
+        status: "REJECTED",
+        decisionNote: note ?? null,
+        createdAt: new Date().toISOString()
+      });
+    }
   },
 
   async employeeEdit(id: string, payload: { dueDate?: string; remarks?: string }): Promise<ApiCreditSale> {
-    const { data } = await api.patch<ApiCreditSale>(`/credit-sales/${id}/employee-edit`, payload);
-    return data;
+    try {
+      const { data } = await api.patch<ApiCreditSale>(`/credit-sales/${id}/employee-edit`, payload);
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "PATCH", url: `/credit-sales/${id}/employee-edit`, data: payload }, fallbackCreditSale(id));
+    }
   },
 
   async employeeDelete(id: string): Promise<{ success: boolean; id: string; saleId: string }> {
-    const { data } = await api.delete<{ success: boolean; id: string; saleId: string }>(`/credit-sales/${id}/employee-delete`);
-    return data;
+    try {
+      const { data } = await api.delete<{ success: boolean; id: string; saleId: string }>(`/credit-sales/${id}/employee-delete`);
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "DELETE", url: `/credit-sales/${id}/employee-delete` }, { success: true, id, saleId: id });
+    }
   }
 };

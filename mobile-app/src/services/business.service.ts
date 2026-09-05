@@ -1,5 +1,6 @@
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
+import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import type { AuthBusiness } from "@/types/auth";
 import type { BusinessConfig, BusinessProfile } from "@/types/business";
 import type { ApiRole } from "@/types/employee";
@@ -28,28 +29,54 @@ export const businessService = {
   },
 
   async updateBusiness(businessId: string, payload: Partial<BusinessConfig["business"]>): Promise<AuthBusiness> {
-    const { data } = await api.patch<BusinessProfile>(endpoints.businesses.update(businessId), payload);
-    return toAuthBusiness(data);
+    try {
+      const { data } = await api.patch<BusinessProfile>(endpoints.businesses.update(businessId), payload);
+      return toAuthBusiness(data);
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "PATCH", url: endpoints.businesses.update(businessId), data: payload }, {
+        id: businessId,
+        name: payload.name ?? "Business",
+        about: payload.about,
+        currency: payload.currency,
+        timezone: payload.timezone
+      });
+    }
   },
 
   async updateSettings(businessId: string, payload: Partial<NonNullable<BusinessConfig["settings"]>>) {
-    const { data } = await api.patch(endpoints.businesses.settings(businessId), payload);
-    return data;
+    try {
+      const { data } = await api.patch(endpoints.businesses.settings(businessId), payload);
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "PATCH", url: endpoints.businesses.settings(businessId), data: payload }, payload);
+    }
   },
 
   async updateReceiptSettings(businessId: string, payload: Partial<NonNullable<BusinessConfig["receiptSettings"]>>) {
-    const { data } = await api.patch(endpoints.businesses.receiptSettings(businessId), payload);
-    return data;
+    try {
+      const { data } = await api.patch(endpoints.businesses.receiptSettings(businessId), payload);
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "PATCH", url: endpoints.businesses.receiptSettings(businessId), data: payload }, payload);
+    }
   },
 
   async updateTaxSettings(businessId: string, payload: Partial<NonNullable<BusinessConfig["taxSettings"]>>) {
-    const { data } = await api.patch(endpoints.businesses.taxSettings(businessId), payload);
-    return data;
+    try {
+      const { data } = await api.patch(endpoints.businesses.taxSettings(businessId), payload);
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "PATCH", url: endpoints.businesses.taxSettings(businessId), data: payload }, payload);
+    }
   },
 
   async updateNotificationSettings(businessId: string, payload: Partial<NonNullable<BusinessConfig["notificationSettings"]>>) {
-    const { data } = await api.patch(endpoints.businesses.notificationSettings(businessId), payload);
-    return data;
+    try {
+      const { data } = await api.patch(endpoints.businesses.notificationSettings(businessId), payload);
+      return data;
+    } catch (error) {
+      return queueOfflineMutation(error, { method: "PATCH", url: endpoints.businesses.notificationSettings(businessId), data: payload }, payload);
+    }
   },
 
   async roles(businessId: string): Promise<ApiRole[]> {

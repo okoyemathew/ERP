@@ -1,12 +1,20 @@
 import type { CreateSalePayload } from "./sales";
 import type { CreateExpensePayload } from "./expense";
 
-export type SyncOperationType = "SALE_CREATE" | "EXPENSE_CREATE";
+export type SyncOperationType = "SALE_CREATE" | "EXPENSE_CREATE" | "API_MUTATION";
 export type SyncQueueStatus = "PENDING" | "SYNCING" | "SYNCED" | "FAILED";
+export interface ApiMutationPayload {
+  method: "POST" | "PATCH" | "PUT" | "DELETE";
+  url: string;
+  data?: unknown;
+  params?: unknown;
+  deviceId?: string;
+}
+
 export type SyncPayload = (CreateSalePayload | CreateExpensePayload) & {
   deviceId?: string;
   idempotencyKey?: string;
-};
+} | ApiMutationPayload;
 
 export interface SyncQueueItem {
   id: string;

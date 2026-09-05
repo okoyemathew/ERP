@@ -3,6 +3,7 @@ import { api } from "./api";
 import { AppApiError } from "@/api/errors";
 import { getRequiredBusinessId } from "@/api/session";
 import { offlineDbService } from "@/services/offline-db.service";
+import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import { offlineSyncService } from "@/services/offline-sync.service";
 import { useAuthStore } from "@/store/authStore";
 import type { ApiExpense, CreateExpensePayload, ExpenseCategory, ExpenseListResponse, ExpenseSummary, UpdateExpensePayload } from "@/types/expense";
@@ -195,22 +196,65 @@ export const expensesService = {
   },
 
   async update(id: string, payload: UpdateExpensePayload): Promise<ApiExpense> {
-    const { data } = await api.patch<ApiExpense>(endpoints.expenses.update(id), payload);
-    return data;
+    const businessId = await getRequiredBusinessId();
+    try {
+      const { data } = await api.patch<ApiExpense>(endpoints.expenses.update(id), payload);
+      await offlineDbService.cacheExpense(businessId, data);
+      return data;
+    } catch (error) {
+      const current = (await offlineDbService.getCachedExpenses(businessId)).find((expense) => expense.id === id);
+      const fallback = {
+        ...(current ?? buildOfflineExpense(id, { title: payload.title ?? "Expense", amount: payload.amount ?? 0, paymentMethod: payload.paymentMethod ?? "CASH" }, [])),
+        ...payload,
+        updatedAt: new Date().toISOString()
+      } as ApiExpense;
+      await offlineDbService.cacheExpense(businessId, fallback);
+      return queueOfflineMutation(error, { method: "PATCH", url: endpoints.expenses.update(id), data: payload }, fallback);
+    }
   },
 
   async remove(id: string): Promise<{ id: string; deleted: true }> {
-    const { data } = await api.delete<{ id: string; deleted: true }>(endpoints.expenses.delete(id));
-    return data;
+    const businessId = await getRequiredBusinessId();
+    try {
+      const { data } = await api.delete<{ id: string; deleted: true }>(endpoints.expenses.delete(id));
+      await offlineDbService.removeCachedExpense(businessId, id);
+      return data;
+    } catch (error) {
+      await offlineDbService.removeCachedExpense(businessId, id);
+      return queueOfflineMutation(error, { method: "DELETE", url: endpoints.expenses.delete(id) }, { id, deleted: true });
+    }
   },
 
   async createCategory(payload: { name: string; description?: string }) {
-    const { data } = await api.post<ExpenseCategory>(endpoints.expenses.createCategory, payload);
-    return data;
+    const businessId = await getRequiredBusinessId();
+    try {
+      const { data } = await api.post<ExpenseCategory>(endpoints.expenses.createCategory, payload);
+      await offlineDbService.cacheExpenseCategories(businessId, [data]);
+      return data;
+    } catch (error) {
+      const fallback: ExpenseCategory = {
+        id: `expense-category-${Date.now().toString(36)}`,
+        name: payload.name,
+        description: payload.description ?? null,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await offlineDbService.cacheExpenseCategories(businessId, [fallback]);
+      return queueOfflineMutation(error, { method: "POST", url: endpoints.expenses.createCategory, data: payload }, fallback);
+    }
   },
 
   async summary(params?: Record<string, string | number | boolean | undefined>): Promise<ExpenseSummary> {
-    const { data } = await api.get<ExpenseSummary>(endpoints.expenses.summary, { params });
-    return data;
+    const businessId = await getRequiredBusinessId();
+    try {
+      const { data } = await api.get<ExpenseSummary>(endpoints.expenses.summary, { params });
+      return data;
+    } catch (error) {
+      if (isOfflineError(error)) {
+        return buildSummary(filterCachedExpenses(await offlineDbService.getCachedExpenses(businessId), params));
+      }
+      throw error;
+    }
   }
 };

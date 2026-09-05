@@ -1,8 +1,9 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { apiConfig, assertApiConfigured } from "./config";
 import { endpoints } from "./endpoints";
 import { clearAuthStorage, getAccessToken, getRefreshToken, saveAccessToken, saveRefreshToken } from "./tokenStorage";
 import { normalizeApiError } from "./errors";
+import { apiCacheKey, offlineApiCacheService } from "@/services/offline-api-cache.service";
 import type { RefreshTokenResponse } from "@/types/auth";
 
 type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
@@ -76,7 +77,13 @@ api.interceptors.request.use(async (config) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (response.config.method?.toUpperCase() === "GET") {
+      const cacheKey = apiCacheKey(response.config.method, response.config.url, response.config.params);
+      void offlineApiCacheService.set(cacheKey, response.data).catch(() => undefined);
+    }
+    return response;
+  },
   async (error: AxiosError) => {
     const original = error.config as RetriableConfig | undefined;
     const publicAuthEndpoint = isPublicAuthEndpoint(original?.url);
@@ -95,6 +102,22 @@ api.interceptors.response.use(
       unauthorizedHandler?.();
     }
 
-    return Promise.reject(normalizeApiError(error));
+    const apiError = normalizeApiError(error);
+    if (original?.method?.toUpperCase() === "GET" && (apiError.code === "NETWORK" || apiError.code === "TIMEOUT")) {
+      const cacheKey = apiCacheKey(original.method, original.url, original.params);
+      const cached = await offlineApiCacheService.get(cacheKey);
+      if (cached !== null) {
+        return {
+          data: cached,
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          config: original,
+          request: error.request
+        } satisfies AxiosResponse;
+      }
+    }
+
+    return Promise.reject(apiError);
   }
 );
