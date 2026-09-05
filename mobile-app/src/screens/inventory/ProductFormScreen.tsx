@@ -94,6 +94,14 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
     setInitialStockEdited(true);
     setForm((current) => ({ ...current, actualNewStock: value, initialStock: value }));
   };
+  const setActualNewStock = (value: string) => {
+    if (productId) {
+      setField("actualNewStock", value);
+      return;
+    }
+
+    setCreatedStock(value);
+  };
 
   const generateBarcode = async () => {
     try {
@@ -144,7 +152,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
       Alert.alert("Invalid stock limits", "Maximum stock cannot be lower than minimum stock.");
       return;
     }
-    if (!productId && actualNewStock !== undefined && (!Number.isInteger(actualNewStock) || actualNewStock < 0)) {
+    if (actualNewStock !== undefined && (!Number.isInteger(actualNewStock) || actualNewStock < 0)) {
       Alert.alert("Invalid stock", "Actual new stock must be a whole number greater than or equal to zero when entered.");
       return;
     }
@@ -174,8 +182,14 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         imageUrl: form.imageUrl?.trim() || undefined,
         isActive: form.isActive
       };
-      if (productId) await productsService.update(productId, payload);
-      else await productsService.create(payload);
+      if (productId) {
+        await productsService.update(productId, payload);
+        if (actualNewStock && actualNewStock > 0) {
+          await productsService.stockIn(productId, actualNewStock, purchasePrice);
+        }
+      } else {
+        await productsService.create(payload);
+      }
       navigation.goBack();
     } catch (saveError) {
       const message = saveError instanceof Error ? saveError.message : "Unable to save product.";
@@ -208,7 +222,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         <Input label="Wholesale Price" value={form.wholesalePrice} onChangeText={(value) => setField("wholesalePrice", value)} keyboardType="decimal-pad" />
         <Input label="Minimum Stock" value={form.minimumStock} onChangeText={(value) => setField("minimumStock", value)} keyboardType="number-pad" />
         <Input label="Maximum Stock" value={form.maximumStock} onChangeText={(value) => setField("maximumStock", value)} keyboardType="number-pad" />
-        {!productId ? <Input label="Actual New Stock" value={form.actualNewStock} onChangeText={setCreatedStock} keyboardType="number-pad" /> : null}
+        <Input label="Actual New Stock" value={form.actualNewStock} onChangeText={setActualNewStock} keyboardType="number-pad" />
         {!productId ? <Input label="Initial Stock" value={form.initialStock} onChangeText={setCreatedStock} keyboardType="number-pad" /> : null}
       </Card>
 

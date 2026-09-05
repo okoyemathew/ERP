@@ -71,6 +71,17 @@ export const productsService = {
     return data;
   },
 
+  async stockIn(productId: string, quantity: number, unitCost?: number): Promise<void> {
+    const businessId = await getRequiredBusinessId();
+    await api.post(endpoints.inventory.stockIn(businessId), {
+      productId,
+      quantity,
+      transactionType: "STOCK_IN",
+      unitCost,
+      remarks: "Actual new stock"
+    });
+  },
+
   async deactivate(id: string): Promise<ApiProduct> {
     const businessId = await getRequiredBusinessId();
     const { data } = await api.delete<ApiProduct>(endpoints.products.detail(businessId, id));

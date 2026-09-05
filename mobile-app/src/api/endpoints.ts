@@ -123,6 +123,9 @@ export const endpoints = {
     addImage: (businessId: string, productId: string) => `/businesses/${businessId}/products/${productId}/images`,
     addBarcode: (businessId: string, productId: string) => `/businesses/${businessId}/products/${productId}/barcodes`
   },
+  inventory: {
+    stockIn: (businessId: string) => `/businesses/${businessId}/inventory/stock-in`
+  },
   categories: {
     list: (businessId: string) => `/businesses/${businessId}/categories`,
     create: (businessId: string) => `/businesses/${businessId}/categories`,
