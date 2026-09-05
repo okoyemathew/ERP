@@ -1,7 +1,8 @@
 import * as SQLite from "expo-sqlite";
 import type { ApiCustomer } from "@/types/customer";
+import type { ApiExpense, CreateExpensePayload, ExpenseCategory } from "@/types/expense";
 import type { ApiProduct } from "@/types/product";
-import type { SyncQueueItem, SyncOperationType, SyncQueueStatus } from "@/types/sync";
+import type { SyncPayload, SyncQueueItem, SyncOperationType, SyncQueueStatus } from "@/types/sync";
 import type { CreateSalePayload } from "@/types/sales";
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -19,6 +20,18 @@ async function getDb() {
       updatedAt TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS customer_cache (
+      id TEXT PRIMARY KEY NOT NULL,
+      businessId TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS expense_cache (
+      id TEXT PRIMARY KEY NOT NULL,
+      businessId TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS expense_category_cache (
       id TEXT PRIMARY KEY NOT NULL,
       businessId TEXT NOT NULL,
       payload TEXT NOT NULL,
@@ -85,6 +98,56 @@ export const offlineDbService = {
     return rows.map((row) => JSON.parse(row.payload) as ApiCustomer);
   },
 
+  async cacheExpenses(businessId: string, expenses: ApiExpense[]) {
+    const db = await getDb();
+    const updatedAt = new Date().toISOString();
+    for (const expense of expenses) {
+      await db.runAsync(
+        "INSERT OR REPLACE INTO expense_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+        expense.id,
+        businessId,
+        JSON.stringify(expense),
+        updatedAt
+      );
+    }
+  },
+
+  async cacheExpense(businessId: string, expense: ApiExpense) {
+    await this.cacheExpenses(businessId, [expense]);
+  },
+
+  async getCachedExpenses(businessId: string): Promise<ApiExpense[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ payload: string }>(
+      "SELECT payload FROM expense_cache WHERE businessId = ? ORDER BY updatedAt DESC",
+      businessId
+    );
+    return rows.map((row) => JSON.parse(row.payload) as ApiExpense);
+  },
+
+  async cacheExpenseCategories(businessId: string, categories: ExpenseCategory[]) {
+    const db = await getDb();
+    const updatedAt = new Date().toISOString();
+    for (const category of categories) {
+      await db.runAsync(
+        "INSERT OR REPLACE INTO expense_category_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+        category.id,
+        businessId,
+        JSON.stringify(category),
+        updatedAt
+      );
+    }
+  },
+
+  async getCachedExpenseCategories(businessId: string): Promise<ExpenseCategory[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ payload: string }>(
+      "SELECT payload FROM expense_category_cache WHERE businessId = ? ORDER BY updatedAt DESC",
+      businessId
+    );
+    return rows.map((row) => JSON.parse(row.payload) as ExpenseCategory);
+  },
+
   async applySaleToCachedProducts(businessId: string, items: CreateSalePayload["items"]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
@@ -134,6 +197,23 @@ export const offlineDbService = {
     return { id, type: "SALE_CREATE", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
   },
 
+  async enqueueExpense(id: string, payload: CreateExpensePayload): Promise<SyncQueueItem> {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    await db.runAsync(
+      "INSERT OR REPLACE INTO sync_queue (id, type, payload, status, attempts, lastError, createdAt, updatedAt) VALUES (?, ?, ?, ?, COALESCE((SELECT attempts FROM sync_queue WHERE id = ?), 0), NULL, COALESCE((SELECT createdAt FROM sync_queue WHERE id = ?), ?), ?)",
+      id,
+      "EXPENSE_CREATE",
+      JSON.stringify(payload),
+      "PENDING",
+      id,
+      id,
+      now,
+      now
+    );
+    return { id, type: "EXPENSE_CREATE", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
+  },
+
   async pendingOperations(): Promise<SyncQueueItem[]> {
     const db = await getDb();
     const rows = await db.getAllAsync<{
@@ -146,7 +226,7 @@ export const offlineDbService = {
       createdAt: string;
       updatedAt: string;
     }>("SELECT * FROM sync_queue WHERE status IN ('PENDING', 'FAILED', 'SYNCING') ORDER BY createdAt ASC LIMIT 25");
-    return rows.map((row) => ({ ...row, payload: JSON.parse(row.payload) as CreateSalePayload }));
+    return rows.map((row) => ({ ...row, payload: JSON.parse(row.payload) as SyncPayload }));
   },
 
   async markSyncing(ids: string[]) {

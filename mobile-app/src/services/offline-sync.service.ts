@@ -4,6 +4,7 @@ import { endpoints } from "@/api/endpoints";
 import { AppApiError } from "@/api/errors";
 import { getRequiredBusinessId } from "@/api/session";
 import { deviceService } from "@/services/device.service";
+import type { CreateExpensePayload } from "@/types/expense";
 import type { CreateSalePayload } from "@/types/sales";
 import type { SyncResult } from "@/types/sync";
 import { offlineDbService } from "./offline-db.service";
@@ -26,6 +27,17 @@ export const offlineSyncService = {
     const queued = await offlineDbService.enqueueSale(operationId, queuedPayload);
     await offlineDbService.applySaleToCachedProducts(businessId, payload.items);
     return queued;
+  },
+
+  async enqueueExpense(payload: CreateExpensePayload) {
+    const { deviceId } = await deviceService.getDeviceInfo();
+    const operationId = `expense-${createOperationId(deviceId)}`;
+    const queuedPayload = {
+      ...payload,
+      deviceId,
+      receiptNumber: payload.receiptNumber ?? operationId
+    };
+    return offlineDbService.enqueueExpense(operationId, queuedPayload);
   },
 
   async syncPending() {

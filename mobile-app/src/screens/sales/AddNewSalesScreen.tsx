@@ -432,6 +432,25 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return;
     }
 
+    const buildOfflineReceipt = (operationId: string): ReceiptDocument => ({
+      id: `OFF-${operationId.slice(-8).toUpperCase()}`,
+      kind: creditBalance > 0 ? "credit" : "sale",
+      businessName: "EST JP MOTORS",
+      title: "Sales Receipt",
+      orderNumber: `OFF-${operationId.slice(-8).toUpperCase()}`,
+      customerName: selectedCustomer ? customerDisplayName(selectedCustomer) : "Walk-in Customer",
+      employeeName: user?.name ?? ([user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.username),
+      items: cartItems,
+      subtotal: cartSubtotal,
+      tax: taxAmount,
+      total: grandTotal,
+      paid: paymentMethod === "credit" ? 0 : paidAmount,
+      balance: creditBalance,
+      method: paymentMethod,
+      createdAt: new Date().toISOString(),
+      printed: false
+    });
+
     setProcessingSale(true);
     try {
       const saleItems = cartItems.map((item) => {
@@ -483,9 +502,12 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       };
 
       const queueOfflineSale = async () => {
-        await offlineSyncService.enqueueSale(salePayload);
+        const queued = await offlineSyncService.enqueueSale(salePayload);
+        const offlineReceipt = buildOfflineReceipt(queued.id);
         await clearCheckout(false);
         await loadProducts();
+        setPrintText(null);
+        openReceipt(offlineReceipt);
         Alert.alert("Sale queued", "The sale was saved offline and will sync when the network is available.");
       };
 
@@ -530,12 +552,13 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               amount: Number(creditBalance.toFixed(2))
             });
           }
-          await offlineSyncService.enqueueSale({
+          const queued = await offlineSyncService.enqueueSale({
             customerId: selectedCustomer?.id,
             items: saleItems,
             payments,
             remarks: paymentMethod === "credit" ? "Credit sale" : undefined
           });
+          const offlineReceipt = buildOfflineReceipt(queued.id);
           if (role === "owner") ownerCart.clearCart();
           else employeeCart.clearCart();
           setPaidInput("");
@@ -545,6 +568,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           checkoutRef.current?.close();
           setCheckoutVisible(false);
           await loadProducts();
+          setPrintText(null);
+          openReceipt(offlineReceipt);
           Alert.alert("Sale queued", "The sale was saved offline and will sync when the network is available.");
           return;
         } catch {

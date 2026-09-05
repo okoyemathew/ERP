@@ -10,8 +10,9 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { CreateSaleDto } from '../../sales/dto/create-sale.dto';
+import { CreateExpenseDto } from '../../expenses/dto/create-expense.dto';
 
-export const SYNC_OPERATION_TYPES = ['SALE_CREATE'] as const;
+export const SYNC_OPERATION_TYPES = ['SALE_CREATE', 'EXPENSE_CREATE'] as const;
 export type SyncOperationType = (typeof SYNC_OPERATION_TYPES)[number];
 
 export class SyncOperationDto {
@@ -32,9 +33,7 @@ export class SyncOperationDto {
 
   @ApiProperty({ description: 'Operation payload' })
   @IsObject()
-  @ValidateNested()
-  @Type(() => CreateSaleDto)
-  payload!: CreateSaleDto;
+  payload!: CreateSaleDto | CreateExpenseDto;
 }
 
 export class SyncBatchDto {
