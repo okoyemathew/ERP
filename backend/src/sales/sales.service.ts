@@ -43,6 +43,8 @@ type ReceiptLine = {
   right?: string;
 };
 
+const RECEIPT_BUSINESS_NAME = 'EST JP MOTORS';
+
 @Injectable()
 export class SalesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -1238,7 +1240,7 @@ export class SalesService {
       immutable: true,
       business: {
         id: business.id,
-        name: settings?.businessName ?? business.name,
+        name: RECEIPT_BUSINESS_NAME,
         address: settings?.businessAddress ?? business.address,
         phone: settings?.businessPhone ?? business.phone,
         currency: business.currency,

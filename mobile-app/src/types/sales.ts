@@ -1,5 +1,7 @@
 import type { ReceiptDocument, SaleItem } from "./domain.types";
 
+const RECEIPT_BUSINESS_NAME = "EST JP MOTORS";
+
 export type ApiPaymentMethod = "CASH" | "CREDIT" | "BANK_TRANSFER" | "MOBILE_MONEY" | "CARD";
 export type PosPaymentMethod = "cash" | "card" | "mobile" | "bank" | "credit";
 
@@ -157,7 +159,7 @@ export function mapReceiptToDocument(receipt: ApiReceipt): ReceiptDocument {
   return {
     id: receipt.receiptNumber,
     kind: Number(receipt.sale.balanceDue) > 0 ? "credit" : "sale",
-    businessName: receipt.business.name,
+    businessName: RECEIPT_BUSINESS_NAME,
     title: "Sales Receipt",
     orderNumber: receipt.sale.saleNumber,
     customerName: receipt.customer.name,
