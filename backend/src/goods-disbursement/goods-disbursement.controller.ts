@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Get,
   Param,
+  Patch,
   ParseUUIDPipe,
   Post,
   Query,
@@ -16,6 +17,7 @@ import { SYSTEM_ROLES } from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { CreateGoodsDisbursementDto } from './dto/create-goods-disbursement.dto';
 import { GoodsDisbursementQueryDto } from './dto/goods-disbursement-query.dto';
+import { UpdateGoodsDisbursementDto } from './dto/update-goods-disbursement.dto';
 import { GoodsDisbursementService } from './goods-disbursement.service';
 
 const DISBURSEMENT_ROLES = [
@@ -93,6 +95,18 @@ export class GoodsDisbursementController {
   ) {
     this.assertBusinessAccess(businessId, user);
     return this.goodsDisbursementService.findOne(businessId, id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update goods disbursement' })
+  update(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateGoodsDisbursementDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    this.assertBusinessAccess(businessId, user);
+    return this.goodsDisbursementService.update(businessId, id, dto, user);
   }
 
   private assertBusinessAccess(businessId: string, user: AuthenticatedUser) {

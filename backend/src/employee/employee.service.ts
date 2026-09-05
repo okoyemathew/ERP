@@ -762,6 +762,7 @@ export class EmployeeService {
                     sku: true,
                     barcode: true,
                     sellingPrice: true,
+                    isActive: true,
                   },
                 },
               },
@@ -792,43 +793,51 @@ export class EmployeeService {
       ]);
 
     const suppliedByProduct = new Map<string, number>();
-    const supplyRecords = disbursements.map((run) => {
-      let totalQuantity = 0;
-      let totalValue = new Prisma.Decimal(0);
+    const supplyRecords = disbursements
+      .map((run) => {
+        let totalQuantity = 0;
+        let totalValue = new Prisma.Decimal(0);
 
-      for (const item of run.items) {
-        totalQuantity += item.quantity;
-        totalValue = totalValue.add(
-          new Prisma.Decimal(item.product.sellingPrice).mul(item.quantity),
-        );
-        suppliedByProduct.set(
-          item.productId,
-          (suppliedByProduct.get(item.productId) ?? 0) + item.quantity,
-        );
-      }
+        for (const item of run.items) {
+          if (!item.product.isActive) {
+            continue;
+          }
 
-      return {
-        id: run.id,
-        employeeId: run.employeeId,
-        disbursementNumber: run.disbursementNumber,
-        disbursementDate: run.disbursementDate,
-        destination: run.destination,
-        remarks: run.remarks,
-        totalQuantity,
-        totalValue,
-        items: run.items.map((item) => ({
-          id: item.id,
-          productId: item.productId,
-          productName: item.product.name,
-          sku: item.product.sku,
-          barcode: item.product.barcode,
-          quantity: item.quantity,
-          value: new Prisma.Decimal(item.product.sellingPrice).mul(
-            item.quantity,
-          ),
-        })),
-      };
-    });
+          totalQuantity += item.quantity;
+          totalValue = totalValue.add(
+            new Prisma.Decimal(item.product.sellingPrice).mul(item.quantity),
+          );
+          suppliedByProduct.set(
+            item.productId,
+            (suppliedByProduct.get(item.productId) ?? 0) + item.quantity,
+          );
+        }
+
+        return {
+          id: run.id,
+          employeeId: run.employeeId,
+          disbursementNumber: run.disbursementNumber,
+          disbursementDate: run.disbursementDate,
+          destination: run.destination,
+          remarks: run.remarks,
+          totalQuantity,
+          totalValue,
+          items: run.items
+            .filter((item) => item.product.isActive)
+            .map((item) => ({
+              id: item.id,
+              productId: item.productId,
+              productName: item.product.name,
+              sku: item.product.sku,
+              barcode: item.product.barcode,
+              quantity: item.quantity,
+              value: new Prisma.Decimal(item.product.sellingPrice).mul(
+                item.quantity,
+              ),
+            })),
+        };
+      })
+      .filter((run) => run.items.length > 0);
 
     const stockByProduct = new Map<
       string,

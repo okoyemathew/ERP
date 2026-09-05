@@ -4,7 +4,8 @@ import { getRequiredBusinessId } from "@/api/session";
 import type {
   ApiGoodsDisbursement,
   CreateGoodsDisbursementPayload,
-  GoodsDisbursementListResponse
+  GoodsDisbursementListResponse,
+  UpdateGoodsDisbursementPayload
 } from "@/types/goodsDisbursement";
 
 export const goodsDisbursementService = {
@@ -29,6 +30,12 @@ export const goodsDisbursementService = {
   async create(payload: CreateGoodsDisbursementPayload): Promise<ApiGoodsDisbursement> {
     const businessId = await getRequiredBusinessId();
     const { data } = await api.post<ApiGoodsDisbursement>(endpoints.goodsDisbursements.create(businessId), payload);
+    return data;
+  },
+
+  async update(id: string, payload: UpdateGoodsDisbursementPayload): Promise<ApiGoodsDisbursement> {
+    const businessId = await getRequiredBusinessId();
+    const { data } = await api.patch<ApiGoodsDisbursement>(endpoints.goodsDisbursements.update(businessId, id), payload);
     return data;
   }
 };

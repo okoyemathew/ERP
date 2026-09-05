@@ -11,6 +11,7 @@ export interface ApiGoodsDisbursementItem {
     sku: string;
     barcode?: string | null;
     sellingPrice?: string | number;
+    isActive?: boolean;
   };
 }
 
@@ -52,3 +53,5 @@ export interface CreateGoodsDisbursementPayload {
     remarks?: string;
   }>;
 }
+
+export type UpdateGoodsDisbursementPayload = Partial<CreateGoodsDisbursementPayload>;

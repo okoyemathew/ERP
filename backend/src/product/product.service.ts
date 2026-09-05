@@ -434,6 +434,34 @@ export class ProductService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      const disbursementItems = await tx.goodsDisbursementItem.findMany({
+        where: {
+          productId: id,
+          goodsDisbursement: { businessId },
+        },
+        select: { goodsDisbursementId: true },
+      });
+      const disbursementIds = Array.from(
+        new Set(disbursementItems.map((item) => item.goodsDisbursementId)),
+      );
+
+      await tx.goodsDisbursementItem.deleteMany({
+        where: {
+          productId: id,
+          goodsDisbursement: { businessId },
+        },
+      });
+
+      for (const disbursementId of disbursementIds) {
+        const remainingItems = await tx.goodsDisbursementItem.count({
+          where: { goodsDisbursementId: disbursementId },
+        });
+
+        if (remainingItems === 0) {
+          await tx.goodsDisbursement.delete({ where: { id: disbursementId } });
+        }
+      }
+
       const product = await tx.product.update({
         where: { id },
         data: { isActive: false },

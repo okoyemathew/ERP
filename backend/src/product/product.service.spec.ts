@@ -81,6 +81,14 @@ function createPrismaMock() {
       create: jest.fn(),
       findMany: jest.fn(),
     },
+    goodsDisbursementItem: {
+      count: jest.fn(),
+      deleteMany: jest.fn(),
+      findMany: jest.fn(),
+    },
+    goodsDisbursement: {
+      delete: jest.fn(),
+    },
     auditLog: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -115,6 +123,8 @@ describe('ProductService base selling price', () => {
     prisma.product.findFirst.mockResolvedValue(null);
     prisma.auditLog.findMany.mockResolvedValue([]);
     prisma.inventoryTransaction.findMany.mockResolvedValue([]);
+    prisma.goodsDisbursementItem.findMany.mockResolvedValue([]);
+    prisma.goodsDisbursementItem.count.mockResolvedValue(1);
   });
 
   it('allows the owner to create a product with base selling price', async () => {
@@ -305,15 +315,29 @@ describe('ProductService base selling price', () => {
 
   it('allows the owner to delete a product with remaining stock', async () => {
     const ownerWithNormalizedRole = { ...owner, roleName: ' owner ' };
+    const goodsDisbursementId = '66666666-6666-6666-6666-666666666666';
     prisma.product.findFirst.mockResolvedValue(product());
     prisma.inventory.findFirst.mockResolvedValue({
       id: '55555555-5555-5555-5555-555555555555',
       quantityAvailable: 8,
     });
+    prisma.goodsDisbursementItem.findMany.mockResolvedValue([
+      { goodsDisbursementId },
+    ]);
+    prisma.goodsDisbursementItem.count.mockResolvedValue(0);
     prisma.product.update.mockResolvedValue(product({ isActive: false }));
 
     await service.remove(businessId, productId, ownerWithNormalizedRole);
 
+    expect(prisma.goodsDisbursementItem.deleteMany).toHaveBeenCalledWith({
+      where: {
+        productId,
+        goodsDisbursement: { businessId },
+      },
+    });
+    expect(prisma.goodsDisbursement.delete).toHaveBeenCalledWith({
+      where: { id: goodsDisbursementId },
+    });
     expect(prisma.product.update).toHaveBeenCalledWith({
       where: { id: productId },
       data: { isActive: false },

@@ -35,6 +35,7 @@ function aggregateEmployeeProducts(disbursements: ApiGoodsDisbursement[]) {
   for (const run of disbursements) {
     for (const item of run.items) {
       if (!item.product) continue;
+      if (item.product.isActive === false) continue;
 
       const current = byProduct.get(item.productId);
       const nextQuantity = (current?.suppliedQuantity ?? 0) + item.quantity;

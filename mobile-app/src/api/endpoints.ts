@@ -153,6 +153,7 @@ export const endpoints = {
     list: (businessId: string) => `/businesses/${businessId}/goods-disbursements`,
     mine: (businessId: string) => `/businesses/${businessId}/goods-disbursements/me`,
     create: (businessId: string) => `/businesses/${businessId}/goods-disbursements`,
-    detail: (businessId: string, disbursementId: string) => `/businesses/${businessId}/goods-disbursements/${disbursementId}`
+    detail: (businessId: string, disbursementId: string) => `/businesses/${businessId}/goods-disbursements/${disbursementId}`,
+    update: (businessId: string, disbursementId: string) => `/businesses/${businessId}/goods-disbursements/${disbursementId}`
   }
 } as const;
