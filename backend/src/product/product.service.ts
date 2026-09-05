@@ -54,7 +54,7 @@ export class ProductService {
     }
     this.assertCanSetBaseSellingPrice(dto, user);
 
-    const initialStock = dto.initialStock ?? 0;
+    const initialStock = dto.initialStock ?? dto.minimumStock;
     const baseSellingPrice = dto.baseSellingPrice ?? sellingPrice;
 
     const createdProduct = await this.prisma.$transaction(async (tx) => {

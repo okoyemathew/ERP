@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { InventoryTransactionType, Prisma } from '@prisma/client';
 import { ProductService } from './product.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 
@@ -75,6 +75,7 @@ function createPrismaMock() {
     inventory: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
     },
     inventoryTransaction: {
       create: jest.fn(),
@@ -183,6 +184,9 @@ describe('ProductService base selling price', () => {
     prisma.product.create.mockResolvedValue(created);
     prisma.product.findUnique.mockResolvedValue(created);
     prisma.inventory.create.mockResolvedValue({});
+    prisma.inventory.findUniqueOrThrow.mockResolvedValue({
+      id: '55555555-5555-5555-5555-555555555555',
+    });
 
     await service.create(
       businessId,
@@ -222,6 +226,18 @@ describe('ProductService base selling price', () => {
         data: expect.objectContaining({
           reorderLevel: 12,
           reorderQuantity: 12,
+          quantityOnHand: 12,
+          quantityAvailable: 12,
+        }),
+      }),
+    );
+    expect(prisma.inventoryTransaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          transactionType: InventoryTransactionType.STOCK_IN,
+          quantity: 12,
+          quantityBefore: 0,
+          quantityAfter: 12,
         }),
       }),
     );

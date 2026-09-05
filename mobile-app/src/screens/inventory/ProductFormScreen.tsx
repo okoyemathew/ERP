@@ -41,6 +41,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
   const user = useAuthStore((state) => state.user);
   const isOwner = user?.role === "owner" || user?.roleName === "Owner";
   const [form, setForm] = useState<FormState>(defaults);
+  const [initialStockEdited, setInitialStockEdited] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
@@ -157,7 +158,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         wholesalePrice,
         minimumStock,
         maximumStock,
-        initialStock: productId ? undefined : initialStock,
+        initialStock: productId ? undefined : initialStockEdited ? initialStock : undefined,
         imageUrl: form.imageUrl?.trim() || undefined,
         isActive: form.isActive
       };
@@ -195,7 +196,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         <Input label="Wholesale Price" value={form.wholesalePrice} onChangeText={(value) => setField("wholesalePrice", value)} keyboardType="decimal-pad" />
         <Input label="Minimum Stock" value={form.minimumStock} onChangeText={(value) => setField("minimumStock", value)} keyboardType="number-pad" />
         <Input label="Maximum Stock" value={form.maximumStock} onChangeText={(value) => setField("maximumStock", value)} keyboardType="number-pad" />
-        {!productId ? <Input label="Initial Stock" value={form.initialStock} onChangeText={(value) => setField("initialStock", value)} keyboardType="number-pad" /> : null}
+        {!productId ? <Input label="Initial Stock" value={form.initialStock} onChangeText={(value) => { setInitialStockEdited(true); setField("initialStock", value); }} keyboardType="number-pad" /> : null}
       </Card>
 
       <Button label="Save Product" loading={saving} onPress={save} />
