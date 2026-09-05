@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, FlatList, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { CreditCard, Grid2X2, HandCoins, List, Minus, Package, Plus, Printer, Search, Wallet } from "lucide-react-native";
@@ -78,6 +78,7 @@ const stockStatus = (stock: number) => {
 
 export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, Platform.OS === "android" ? 24 : 0);
   const user = useAuthStore((state) => state.user);
   const normalizedRoleName = user?.roleName?.trim().toLowerCase();
   const role = normalizedRoleName ? (normalizedRoleName === "owner" ? "owner" : "employee") : user?.role ?? "owner";
@@ -653,7 +654,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         showsVerticalScrollIndicator
         persistentScrollbar
         indicatorStyle="black"
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: 150 + bottomInset }]}
         columnWrapperStyle={grid ? styles.columns : undefined}
         renderItem={({ item }) => {
           const qty = cartQty(item.id);
@@ -715,7 +716,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       />
 
       {cartCount > 0 ? (
-        <Pressable style={styles.cartFab} accessibilityLabel="Open cart" onPress={openCheckout}>
+        <Pressable style={[styles.cartFab, { bottom: spacing.cartFABBottom + bottomInset }]} accessibilityLabel="Open cart" onPress={openCheckout}>
           <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.cartFabGradient}>
             <Wallet size={18} color={colors.surface} />
             <Text style={styles.cartText}>{cartCount} items</Text>

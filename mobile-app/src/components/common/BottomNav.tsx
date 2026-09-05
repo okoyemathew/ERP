@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { LayoutDashboard, Menu, Plus, ShoppingBag, Users } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
@@ -31,8 +31,9 @@ export function BottomNav({
   fabIndex?: number | null;
 }) {
   const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, Platform.OS === "android" ? 24 : 12);
   return (
-    <View style={[styles.wrap, { height: spacing.bottomNavHeight + insets.bottom, paddingBottom: insets.bottom || 12 }]}>
+    <View style={[styles.wrap, { height: spacing.bottomNavHeight + bottomInset, paddingBottom: bottomInset }]}>
       {tabs.map((tab, index) => {
         const Icon = tab.icon;
         const selected = active === tab.name;
