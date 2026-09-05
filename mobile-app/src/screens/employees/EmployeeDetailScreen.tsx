@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import type GorhomBottomSheet from "@gorhom/bottom-sheet";
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
+import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Archive, DollarSign, Package, PackagePlus, Printer, Search, ShoppingBag } from "lucide-react-native";
 import { AppBottomSheet, Avatar, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
@@ -10,6 +11,7 @@ import { goodsDisbursementService } from "@/services/goods-disbursement.service"
 import { printingService } from "@/services/printing.service";
 import { productsService } from "@/services/products.service";
 import { salesService } from "@/services/sales.service";
+import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
 import type { ApiEmployee, EmployeeProfileResponse, EmployeeSalesResponse } from "@/types/employee";
 import type { ApiProduct } from "@/types/product";
@@ -17,6 +19,7 @@ import type { ApiSale } from "@/types/sales";
 import { formatCurrency } from "@/utils/format";
 
 type ProfileTab = "stock" | "supplies" | "sales";
+type EmployeeStockProduct = NonNullable<EmployeeProfileResponse["profileActivity"]>["stock"][number];
 
 function customerName(sale: ApiSale) {
   return sale.customer
@@ -53,6 +56,7 @@ function employeeName(employee: ApiEmployee) {
 export function EmployeeDetailScreen({ route, navigation }: { route: any; navigation: any }) {
   const employeeId = route.params?.employeeId as string;
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((state) => state.user);
   const saleSheetRef = useRef<GorhomBottomSheet>(null);
   const supplySheetRef = useRef<GorhomBottomSheet>(null);
   const [profile, setProfile] = useState<EmployeeProfileResponse | null>(null);
@@ -111,9 +115,11 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     }
   }, [employeeId, salesQuery]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load])
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -139,6 +145,39 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
 
   const openSale = (sale: ApiSale) => {
     setSelectedSale(sale);
+  };
+
+  const editProduct = (productId: string) => {
+    const parent = navigation.getParent?.();
+    if (parent) parent.navigate("ProductForm" as never, { productId } as never);
+    else navigation.navigate("ProductForm", { productId });
+  };
+
+  const deleteProduct = (item: EmployeeStockProduct) => {
+    Alert.alert("Delete product?", `${item.productName} will be removed from inventory.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await productsService.deactivate(item.productId);
+            await load();
+          } catch (deleteError) {
+            const message = deleteError instanceof Error ? deleteError.message : "Unable to delete product.";
+            Alert.alert("Unable to delete", message);
+          }
+        }
+      }
+    ]);
+  };
+
+  const openProductActions = (item: EmployeeStockProduct) => {
+    Alert.alert(item.productName, "Choose an action for this product.", [
+      { text: "Edit", onPress: () => editProduct(item.productId) },
+      { text: "Delete", style: "destructive", onPress: () => deleteProduct(item) },
+      { text: "Cancel", style: "cancel" }
+    ]);
   };
 
   const openSupplySheet = async () => {
@@ -240,6 +279,8 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const latestSession = profile.recentSessions[0];
   const activity = profile.profileActivity;
   const displayStatus = employee.canLogin ? employee.status : "DISABLED";
+  const normalizedUserRole = user?.roleName?.trim().toLowerCase();
+  const isOwner = normalizedUserRole ? normalizedUserRole === "owner" : user?.role === "owner";
   const salesToday = activity?.stats.salesToday ?? 0;
   const totalSupplied = activity?.stats.totalSupplied ?? 0;
   const stockItems = activity?.stock ?? [];
@@ -260,26 +301,34 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
             </View>
           </View>
           {stockItems.length ? stockItems.map((item) => (
-            <Card key={item.productId} style={styles.productCard}>
-              <View style={styles.productHead}>
-                <View style={styles.productIcon}><Package size={16} color={colors.primary} /></View>
-                <View style={styles.productBody}>
-                  <Text style={styles.productTitle}>{item.productName}</Text>
-                  <Text style={styles.productMeta}>{item.sku ?? item.barcode ?? item.productId.slice(0, 8)}</Text>
+            <Pressable
+              key={item.productId}
+              disabled={!isOwner}
+              onPress={() => openProductActions(item)}
+              accessibilityRole={isOwner ? "button" : undefined}
+              accessibilityLabel={isOwner ? `Manage ${item.productName}` : undefined}
+            >
+              <Card style={styles.productCard}>
+                <View style={styles.productHead}>
+                  <View style={styles.productIcon}><Package size={16} color={colors.primary} /></View>
+                  <View style={styles.productBody}>
+                    <Text style={styles.productTitle}>{item.productName}</Text>
+                    <Text style={styles.productMeta}>{item.sku ?? item.barcode ?? item.productId.slice(0, 8)}</Text>
+                  </View>
+                  <View style={styles.quantityBlock}>
+                    <Text style={styles.quantity}>{item.quantityInHand}</Text>
+                    <Text style={styles.productMeta}>In hand</Text>
+                  </View>
                 </View>
-                <View style={styles.quantityBlock}>
-                  <Text style={styles.quantity}>{item.quantityInHand}</Text>
-                  <Text style={styles.productMeta}>In hand</Text>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${Math.min(100, Math.max(6, item.quantitySold ? (item.quantitySold / Math.max(item.quantitySold + item.quantityInHand, 1)) * 100 : 6))}%` }]} />
                 </View>
-              </View>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${Math.min(100, Math.max(6, item.quantitySold ? (item.quantitySold / Math.max(item.quantitySold + item.quantityInHand, 1)) * 100 : 6))}%` }]} />
-              </View>
-              <View style={styles.productFoot}>
-                <Text style={styles.productMeta}>Supplied: {item.suppliedQuantity} | Sold: {item.quantitySold}</Text>
-                <Text style={styles.productMeta}>{formatCurrency(Number(item.unitValue))}/unit | Last: {compactDate(item.lastActivityAt)}</Text>
-              </View>
-            </Card>
+                <View style={styles.productFoot}>
+                  <Text style={styles.productMeta}>Supplied: {item.suppliedQuantity} | Sold: {item.quantitySold}</Text>
+                  <Text style={styles.productMeta}>{formatCurrency(Number(item.unitValue))}/unit | Last: {compactDate(item.lastActivityAt)}</Text>
+                </View>
+              </Card>
+            </Pressable>
           )) : (
             <EmptyState icon={<Package size={28} color={colors.textPlaceholder} />} title="No stock activity yet" />
           )}
