@@ -735,7 +735,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         }}
       />
 
-      {cartCount > 0 ? (
+      {cartCount > 0 && !checkoutVisible && !collectVisible && !receiptVisible ? (
         <Pressable style={[styles.cartFab, { bottom: spacing.cartFABBottom + bottomInset }]} accessibilityLabel="Open cart" onPress={openCheckout}>
           <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.cartFabGradient}>
             <Wallet size={18} color={colors.surface} />
