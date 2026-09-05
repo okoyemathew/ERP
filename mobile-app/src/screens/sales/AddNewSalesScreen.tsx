@@ -168,6 +168,24 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     void loadCreditInvoices().catch(() => undefined);
   }, [loadCreditInvoices, loadCustomers, loadProducts]);
 
+  useEffect(() => {
+    if (!checkoutVisible) return;
+    const timer = setTimeout(() => checkoutRef.current?.snapToIndex(0), 0);
+    return () => clearTimeout(timer);
+  }, [checkoutVisible]);
+
+  useEffect(() => {
+    if (!collectVisible) return;
+    const timer = setTimeout(() => collectRef.current?.snapToIndex(0), 0);
+    return () => clearTimeout(timer);
+  }, [collectVisible]);
+
+  useEffect(() => {
+    if (!receiptVisible) return;
+    const timer = setTimeout(() => receiptRef.current?.snapToIndex(0), 0);
+    return () => clearTimeout(timer);
+  }, [receiptVisible]);
+
   const productTiles: ProductTile[] = useMemo(() => {
     if (role === "owner") {
       return products.map((product) => ({
@@ -244,17 +262,14 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const openReceipt = (receipt: ReceiptDocument) => {
     setActiveReceipt(receipt);
     setReceiptVisible(true);
-    requestAnimationFrame(() => receiptRef.current?.snapToIndex(0));
   };
 
   const openCheckout = () => {
     setCheckoutVisible(true);
-    requestAnimationFrame(() => checkoutRef.current?.snapToIndex(0));
   };
 
   const openCollectSheet = () => {
     setCollectVisible(true);
-    requestAnimationFrame(() => collectRef.current?.snapToIndex(0));
   };
 
   const distributeAmount = (amount: number, lineSubtotal: number) => {
@@ -266,23 +281,24 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     const currentQty = cartQty(product.id);
     if (currentQty >= product.stock) {
       Alert.alert("Stock limit", "You cannot add more than the available stock.");
-      return;
+      return false;
     }
 
     const sellingPrice = parsePositiveMoney(productPriceInput(product));
     if (!sellingPrice) {
       Alert.alert("Selling price", "Enter the selling price before adding this product.");
-      return;
+      return false;
     }
 
     if (role === "owner") {
       ownerCart.addItem(product.source as Product, sellingPrice);
       setQuantityInputs((current) => ({ ...current, [product.id]: String(currentQty + 1) }));
-      return;
+      return true;
     }
 
     employeeCart.addItem(product.source as EmployeeStockItem, sellingPrice);
     setQuantityInputs((current) => ({ ...current, [product.id]: String(currentQty + 1) }));
+    return true;
   };
 
   const handleBarcodeLookup = async () => {
@@ -318,7 +334,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           iconColor: matchedProduct.iconColor
         }
       };
-      addProduct(tile);
+      if (addProduct(tile)) {
+        openCheckout();
+      }
     } catch (barcodeError) {
       const message = barcodeError instanceof Error ? barcodeError.message : "Unable to look up barcode.";
       Alert.alert("Barcode", message);
@@ -581,7 +599,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     }
 
     if (filteredProducts.length === 1) {
-      addProduct(filteredProducts[0]);
+      if (addProduct(filteredProducts[0])) {
+        openCheckout();
+      }
       return;
     }
 
