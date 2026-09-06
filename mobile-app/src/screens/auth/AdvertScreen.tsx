@@ -1,14 +1,22 @@
 import React from "react";
-import { StyleSheet, View } from "react-native";
+import { ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { ArrowUpRight } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Card } from "@/components/common";
 import { colors } from "@/theme";
 import { formatCurrency } from "@/utils/format";
 
 export function AdvertScreen({ navigation }: { navigation: any }) {
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.screen}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 24), paddingBottom: Math.max(insets.bottom, 24) + 28 }]}
+      showsVerticalScrollIndicator
+      persistentScrollbar
+    >
       <View style={styles.preview}>
         <Card style={styles.card}>
           <View style={styles.cardHeader}>
@@ -37,14 +45,17 @@ export function AdvertScreen({ navigation }: { navigation: any }) {
         <Button label="Get Started" onPress={() => navigation.navigate("Language")} />
         <Button label="Learn More" variant="ghost" onPress={() => navigation.navigate("Onboarding")} style={styles.ghost} />
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.darkBg,
+    backgroundColor: colors.darkBg
+  },
+  content: {
+    flexGrow: 1,
     justifyContent: "space-between",
     padding: 24
   },

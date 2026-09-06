@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Package, Shield, TrendingUp, Users } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markOnboardingCompleted } from "@/api/authFlowStorage";
 import { Button } from "@/components/common";
 import { colors } from "@/theme";
@@ -15,6 +16,7 @@ const slides = [
 ];
 
 export function OnboardingScreen({ navigation }: { navigation: any }) {
+  const insets = useSafeAreaInsets();
   const [page, setPage] = useState(0);
   const slide = slides[page];
   const Icon = slide.icon;
@@ -25,29 +27,36 @@ export function OnboardingScreen({ navigation }: { navigation: any }) {
   const next = () => (page < slides.length - 1 ? setPage(page + 1) : void goToLogin());
   return (
     <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.screen}>
-      <Pressable onPress={() => void goToLogin()} style={styles.skip} accessibilityLabel="Skip onboarding">
-        <Text style={styles.skipText}>Skip</Text>
-      </Pressable>
-      <View style={styles.center}>
-        <View style={styles.icon}>
-          <Icon size={60} color={colors.primary} strokeWidth={1.5} />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 24), paddingBottom: Math.max(insets.bottom, 24) + 24 }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
+      >
+        <Pressable onPress={() => void goToLogin()} style={styles.skip} accessibilityLabel="Skip onboarding">
+          <Text style={styles.skipText}>Skip</Text>
+        </Pressable>
+        <View style={styles.center}>
+          <View style={styles.icon}>
+            <Icon size={60} color={colors.primary} strokeWidth={1.5} />
+          </View>
+          <Text style={styles.title}>{slide.title}</Text>
+          <Text style={styles.subtitle}>{slide.subtitle}</Text>
         </View>
-        <Text style={styles.title}>{slide.title}</Text>
-        <Text style={styles.subtitle}>{slide.subtitle}</Text>
-      </View>
-      <View style={styles.footer}>
-        <View style={styles.dots}>
-          {slides.map((_, index) => <View key={index} style={[styles.dot, index === page && styles.activeDot]} />)}
+        <View style={styles.footer}>
+          <View style={styles.dots}>
+            {slides.map((_, index) => <View key={index} style={[styles.dot, index === page && styles.activeDot]} />)}
+          </View>
+          <Button label={page === slides.length - 1 ? "Get Started" : "Next"} variant="ghost" onPress={next} style={styles.button} />
         </View>
-        <Button label={page === slides.length - 1 ? "Get Started" : "Next"} variant="ghost" onPress={next} style={styles.button} />
-      </View>
+      </ScrollView>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, padding: 24 },
-  skip: { alignSelf: "flex-end", paddingTop: 48, minWidth: 44, minHeight: 44 },
+  screen: { flex: 1 },
+  content: { flexGrow: 1, paddingHorizontal: 24 },
+  skip: { alignSelf: "flex-end", minWidth: 44, minHeight: 44 },
   skipText: { color: "rgba(255,255,255,0.75)", fontWeight: "700" },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   icon: { width: 144, height: 144, borderRadius: 36, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center", marginBottom: 32 },

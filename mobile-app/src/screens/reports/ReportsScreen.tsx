@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
-import { Button, Card, ScreenHeader } from "@/components/common";
+import { Button, Card } from "@/components/common";
 import { ErrorState, LoadingState } from "@/components/common/StateViews";
 import { AreaChart, PieChart } from "@/components/charts";
+import { ScrollScreen } from "@/screens/shared/ScreenKit";
 import { reportsService } from "@/services/reports.service";
 import { useAuth } from "@/hooks/useAuth";
-import { colors, spacing } from "@/theme";
+import { colors } from "@/theme";
 import type { DashboardStatistics, ReportResponse } from "@/types/report";
 import { formatCurrency } from "@/utils/format";
 
@@ -82,50 +83,43 @@ export function ReportsScreen() {
 
   if (loading) {
     return (
-      <View style={styles.screen}>
-        <ScreenHeader title="Reports" />
+      <ScrollScreen title="Reports">
         <LoadingState label="Loading reports" />
-      </View>
+      </ScrollScreen>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.screen}>
-        <ScreenHeader title="Reports" />
+      <ScrollScreen title="Reports">
         <ErrorState onRetry={() => void load()} />
-      </View>
+      </ScrollScreen>
     );
   }
 
   return (
-    <View style={styles.screen}>
-      <ScreenHeader title="Reports" />
-      <View style={styles.content}>
-        <View style={styles.tabs}>
-          {tabs.map((tab) => (
-            <Pressable key={tab.value} onPress={() => setPeriod(tab.value)}>
-              <Text style={[styles.tab, period === tab.value && styles.activeTab]}>{tab.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.grid}>
-          <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(summary.totalSales))}</Text><Text style={styles.label}>Revenue</Text></Card>
-          <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(profitSummary.netProfit))}</Text><Text style={styles.label}>Profit</Text></Card>
-          <Card style={styles.stat}><Text style={styles.value}>{numberValue(summary.transactionCount)}</Text><Text style={styles.label}>Orders</Text></Card>
-          <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(expenseSummary.totalExpenses))}</Text><Text style={styles.label}>Expenses</Text></Card>
-        </View>
-        <Card><Text style={styles.title}>Revenue vs Profit</Text><AreaChart data={chartData.length ? chartData : [{ label: "Today", revenue: 0 }]} /></Card>
-        <Card><Text style={styles.title}>Sales by Payment</Text><PieChart data={pieData.length ? pieData : [{ name: "No Sales", value: 1, color: colors.borderLight }]} /></Card>
-        <Button label="Export Report" />
+    <ScrollScreen title="Reports">
+      <View style={styles.tabs}>
+        {tabs.map((tab) => (
+          <Pressable key={tab.value} onPress={() => setPeriod(tab.value)}>
+            <Text style={[styles.tab, period === tab.value && styles.activeTab]}>{tab.label}</Text>
+          </Pressable>
+        ))}
       </View>
-    </View>
+      <View style={styles.grid}>
+        <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(summary.totalSales))}</Text><Text style={styles.label}>Revenue</Text></Card>
+        <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(profitSummary.netProfit))}</Text><Text style={styles.label}>Profit</Text></Card>
+        <Card style={styles.stat}><Text style={styles.value}>{numberValue(summary.transactionCount)}</Text><Text style={styles.label}>Orders</Text></Card>
+        <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(expenseSummary.totalExpenses))}</Text><Text style={styles.label}>Expenses</Text></Card>
+      </View>
+      <Card><Text style={styles.title}>Revenue vs Profit</Text><AreaChart data={chartData.length ? chartData : [{ label: "Today", revenue: 0 }]} /></Card>
+      <Card><Text style={styles.title}>Sales by Payment</Text><PieChart data={pieData.length ? pieData : [{ name: "No Sales", value: 1, color: colors.borderLight }]} /></Card>
+      <Button label="Export Report" />
+    </ScrollScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.screenHorizontal, paddingBottom: 110, gap: 12 },
   tabs: { flexDirection: "row", gap: 8 },
   tab: { color: colors.primary, backgroundColor: colors.secondaryBg, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, fontSize: 11, fontWeight: "800" },
   activeTab: { color: colors.surface, backgroundColor: colors.primary },

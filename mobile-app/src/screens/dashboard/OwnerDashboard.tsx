@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Bell, DollarSign, Package, ShoppingBag, ShoppingCart, TrendingUp, Users } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, EmptyState, StatCard } from "@/components/common";
 import { ErrorState, LoadingState } from "@/components/common/StateViews";
 import { AreaChart } from "@/components/charts";
@@ -21,6 +22,7 @@ const quickActions = [
 const tabRoutes = new Set(["Dashboard", "SalesRecords", "AddNewSales", "Customers", "More"]);
 
 export function OwnerDashboard({ navigation }: { navigation: any }) {
+  const insets = useSafeAreaInsets();
   const user = useAuth((state) => state.user);
   const businessId = useAuth((state) => state.business?.id);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -59,6 +61,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
     [statistics]
   );
   const recentSales = summary?.recentSales ?? [];
+  const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
   const navigateApp = (route: string) => {
     if (tabRoutes.has(route)) {
@@ -73,7 +76,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
   if (loading) {
     return (
       <View style={styles.screen}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, spacing.statusBarTop) }]}>
           <View>
             <Text style={styles.greeting}>Good morning</Text>
             <Text style={styles.name}>{user?.firstName ?? "Owner"}</Text>
@@ -87,7 +90,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
   if (error) {
     return (
       <View style={styles.screen}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, spacing.statusBarTop) }]}>
           <View>
             <Text style={styles.greeting}>Good morning</Text>
             <Text style={styles.name}>{user?.firstName ?? "Owner"}</Text>
@@ -100,7 +103,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, spacing.statusBarTop) }]}>
         <View>
           <Text style={styles.greeting}>Good morning</Text>
           <Text style={styles.name}>{[user?.firstName, user?.lastName].filter(Boolean).join(" ") || "Owner"}</Text>
@@ -112,7 +115,8 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
       <FlatList
         data={recentSales}
         keyExtractor={(item) => item.id}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
+        persistentScrollbar
         ListHeaderComponent={
           <View style={styles.headerContent}>
             <View style={styles.grid}>
@@ -161,7 +165,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
           </Card>
         )}
         ListEmptyComponent={<EmptyState icon={<ShoppingBag size={28} color={colors.textPlaceholder} />} title="No recent sales" />}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
       />
     </View>
   );
@@ -169,7 +173,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  header: { paddingTop: 58, paddingHorizontal: 16, paddingBottom: 14, backgroundColor: colors.surface, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  header: { paddingHorizontal: 16, paddingBottom: 14, backgroundColor: colors.surface, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   greeting: { color: colors.textPlaceholder, fontSize: 14, fontWeight: "600" },
   name: { color: colors.foreground, fontSize: 20, fontWeight: "800", marginTop: 2 },
   bell: { width: 44, height: 44, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: "center", justifyContent: "center" },

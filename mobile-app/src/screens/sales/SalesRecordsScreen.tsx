@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Clock, CreditCard, Search, ShoppingBag } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
 import { salesService } from "@/services/sales.service";
 import { colors, spacing } from "@/theme";
@@ -20,6 +21,7 @@ function paymentMethod(sale: ApiSale) {
 }
 
 export function SalesRecordsScreen() {
+  const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
   const [sales, setSales] = useState<ApiSale[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +48,7 @@ export function SalesRecordsScreen() {
     }, 350);
     return () => clearTimeout(timer);
   }, [loadSales]);
+  const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
   useEffect(() => {
     void loadSales();
@@ -96,7 +99,9 @@ export function SalesRecordsScreen() {
             <EmptyState icon={<Search size={28} color={colors.textPlaceholder} />} title="No sales found" />
           )
         }
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
       />
     </View>
   );

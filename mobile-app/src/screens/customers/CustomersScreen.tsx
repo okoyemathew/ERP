@@ -3,6 +3,7 @@ import { FlatList, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import { Plus, Users } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar, Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
 import { customersService } from "@/services/customers.service";
 import { colors, spacing } from "@/theme";
@@ -21,6 +22,7 @@ function lastPurchase(customer: ApiCustomer): string {
 }
 
 export function CustomersScreen({ navigation }: { navigation: any }) {
+  const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
   const [customers, setCustomers] = useState<ApiCustomer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +77,7 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
     setRefreshing(true);
     void loadCustomers(query, false);
   };
+  const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
   if (loading && customers.length === 0) {
     return (
@@ -129,7 +132,9 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
           );
         }}
         ListEmptyComponent={<EmptyState icon={<Users size={28} color={colors.textPlaceholder} />} title="No customers yet" />}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
       />
     </View>
   );

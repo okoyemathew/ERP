@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
-import BottomSheet from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { CreditCard, Grid2X2, HandCoins, List, Minus, Package, Plus, Printer, Search, Trash2, Wallet } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -62,6 +62,10 @@ type CreditInvoiceView = {
   items: SaleItem[];
 };
 
+type SalePriceResult =
+  | { price: number; reason: null }
+  | { price: null; reason: "missing" | "belowMinimum" };
+
 const alphaColor = (hex: string, opacity: number) => {
   const clean = hex.replace("#", "");
   const r = parseInt(clean.slice(0, 2), 16);
@@ -79,6 +83,7 @@ const stockStatus = (stock: number) => {
 export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const bottomInset = Math.max(insets.bottom, Platform.OS === "android" ? 24 : 0);
+  const sheetBottomPadding = spacing.bottomNavHeight + bottomInset + (Platform.OS === "android" ? 180 : 96);
   const user = useAuthStore((state) => state.user);
   const normalizedRoleName = user?.roleName?.trim().toLowerCase();
   const role = normalizedRoleName ? (normalizedRoleName === "owner" ? "owner" : "employee") : user?.role ?? "owner";
@@ -250,13 +255,30 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     ? ownerCart.items.find((item) => item.product.id === productId)?.qty ?? 0
     : employeeCart.items.find((item) => item.stockItem.productId === productId)?.qty ?? 0;
 
-  const productPriceInput = (product: ProductTile) => prices[product.id] ?? String(product.price || "");
+  const productPriceInput = (product: ProductTile) => prices[product.id] ?? "";
+  const minimumSellingPrice = (product: ProductTile) => Math.max(0, Number(product.price || 0));
 
   const parsePositiveMoney = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed || !/^\d+(\.\d{0,2})?$/.test(trimmed)) return null;
     const parsed = Number(trimmed);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  };
+
+  const parseSalePrice = (product: ProductTile): SalePriceResult => {
+    const sellingPrice = parsePositiveMoney(productPriceInput(product));
+    if (!sellingPrice) return { price: null, reason: "missing" as const };
+    if (sellingPrice < minimumSellingPrice(product)) return { price: null, reason: "belowMinimum" as const };
+    return { price: sellingPrice, reason: null };
+  };
+
+  const alertInvalidSalePrice = (reason: "missing" | "belowMinimum") => {
+    Alert.alert(
+      "Selling price",
+      reason === "missing"
+        ? "Enter the selling price before adding this product."
+        : "Selling price cannot be below the owner-set selling price."
+    );
   };
 
   const openReceipt = (receipt: ReceiptDocument) => {
@@ -297,19 +319,19 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return false;
     }
 
-    const sellingPrice = parsePositiveMoney(productPriceInput(product));
-    if (!sellingPrice) {
-      Alert.alert("Selling price", "Enter the selling price before adding this product.");
+    const salePrice = parseSalePrice(product);
+    if (salePrice.reason !== null) {
+      alertInvalidSalePrice(salePrice.reason);
       return false;
     }
 
     if (role === "owner") {
-      ownerCart.addItem(product.source as Product, sellingPrice);
+      ownerCart.addItem(product.source as Product, salePrice.price);
       setQuantityInputs((current) => ({ ...current, [product.id]: String(currentQty + 1) }));
       return true;
     }
 
-    employeeCart.addItem(product.source as EmployeeStockItem, sellingPrice);
+    employeeCart.addItem(product.source as EmployeeStockItem, salePrice.price);
     setQuantityInputs((current) => ({ ...current, [product.id]: String(currentQty + 1) }));
     return true;
   };
@@ -368,15 +390,15 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return;
     }
     if (cartQty(product.id) === 0) {
-      const sellingPrice = parsePositiveMoney(productPriceInput(product));
-      if (!sellingPrice) {
-        Alert.alert("Selling price", "Enter the selling price before adding this product.");
+      const salePrice = parseSalePrice(product);
+      if (salePrice.reason !== null) {
+        alertInvalidSalePrice(salePrice.reason);
         setQuantityInputs((current) => ({ ...current, [product.id]: "0" }));
         return;
       }
 
-      if (role === "owner") ownerCart.addItem(product.source as Product, sellingPrice);
-      else employeeCart.addItem(product.source as EmployeeStockItem, sellingPrice);
+      if (role === "owner") ownerCart.addItem(product.source as Product, salePrice.price);
+      else employeeCart.addItem(product.source as EmployeeStockItem, salePrice.price);
     }
 
     if (role === "owner") ownerCart.updateQty(product.id, nextQty);
@@ -388,6 +410,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     setPrices((prev) => ({ ...prev, [product.id]: value }));
     const sellingPrice = parsePositiveMoney(value);
     if (!sellingPrice) return;
+    if (sellingPrice < minimumSellingPrice(product)) return;
     if (role === "owner") ownerCart.updateSellingPrice(product.id, sellingPrice);
     else employeeCart.updateSellingPrice(product.id, sellingPrice);
   };
@@ -735,7 +758,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           const qty = cartQty(item.id);
           const status = stockStatus(item.stock);
           const priceInput = productPriceInput(item);
-          const invalidPrice = Boolean(priceInput) && !parsePositiveMoney(priceInput);
+          const enteredPrice = parsePositiveMoney(priceInput);
+          const invalidPrice = Boolean(priceInput) && (!enteredPrice || enteredPrice < minimumSellingPrice(item));
           const quantityValue = quantityInputs[item.id] ?? String(qty);
 
           return (
@@ -751,7 +775,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
                   value={priceInput}
                   onChangeText={(value) => updateProductPrice(item, value)}
                   keyboardType="decimal-pad"
-                  placeholder="Sale price"
+                  placeholder="Add Selling Price"
                   placeholderTextColor={colors.textPlaceholder}
                   style={[styles.employeePrice, invalidPrice && styles.invalidPrice]}
                   accessibilityLabel={`Selling price for ${item.name}`}
@@ -806,10 +830,17 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         </Pressable>
       ) : null}
 
-      {checkoutVisible ? <AppBottomSheet ref={checkoutRef} snapPoints={["88%"]} initialIndex={0} onClose={() => setCheckoutVisible(false)}>
+      {checkoutVisible ? <AppBottomSheet ref={checkoutRef} snapPoints={["96%"]} initialIndex={0} onClose={() => setCheckoutVisible(false)}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Complete sale</Text>
-          <ScrollView contentContainerStyle={[styles.sheetScroll, { paddingBottom: 80 + bottomInset }]} showsVerticalScrollIndicator persistentScrollbar>
+          <BottomSheetScrollView
+            style={styles.sheetScroller}
+            contentContainerStyle={[styles.sheetScroll, { paddingBottom: sheetBottomPadding }]}
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
             {cartItems.map((item) => (
               <Card key={item.productId} style={styles.cartRow}>
                 <View style={styles.cartBody}>
@@ -871,16 +902,23 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               <View style={styles.totalRow}><Text style={styles.grandLabel}>Total</Text><Text style={styles.grandValue}>{formatCurrency(grandTotal)}</Text></View>
               {(paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0) ? <View style={styles.totalRow}><Text style={styles.meta}>Credit Balance</Text><Text style={styles.totalValue}>{formatCurrency(paymentMethod === "credit" ? grandTotal : Math.max(0, grandTotal - paidAmount))}</Text></View> : null}
             </Card>
-            <Button label="Clear Cart" variant="danger" icon={<Trash2 size={16} color={colors.error} />} onPress={clearCart} />
             <Button label={paymentMethod === "credit" ? "Confirm Credit Sale" : "Confirm Payment"} loading={processingSale} onPress={() => void handleCheckout()} />
-          </ScrollView>
+            <Button label="Clear Cart" variant="danger" icon={<Trash2 size={16} color={colors.error} />} onPress={clearCart} />
+          </BottomSheetScrollView>
         </View>
       </AppBottomSheet> : null}
 
-      {collectVisible ? <AppBottomSheet ref={collectRef} snapPoints={["88%"]} initialIndex={0} onClose={() => setCollectVisible(false)}>
+      {collectVisible ? <AppBottomSheet ref={collectRef} snapPoints={["96%"]} initialIndex={0} onClose={() => setCollectVisible(false)}>
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Collect Credit</Text>
-          <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator persistentScrollbar>
+          <BottomSheetScrollView
+            style={styles.sheetScroller}
+            contentContainerStyle={[styles.sheetScroll, { paddingBottom: sheetBottomPadding }]}
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Open invoices</Text>
               {openCreditInvoices.map((invoice) => (
@@ -929,8 +967,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
                 </View>
               </>
             ) : null}
-          </ScrollView>
-          <Button label="Confirm Payment" variant="success" loading={collectingPayment} onPress={() => void handleCollectPayment()} />
+            <Button label="Confirm Payment" variant="success" loading={collectingPayment} onPress={() => void handleCollectPayment()} />
+          </BottomSheetScrollView>
         </View>
       </AppBottomSheet> : null}
 
@@ -940,7 +978,15 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
             <Text style={styles.sheetTitle}>Receipt Preview</Text>
             <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={handlePrint} style={styles.printButton} />
           </View>
-          <ScrollView showsVerticalScrollIndicator persistentScrollbar>{activeReceipt ? <ReceiptTicket receipt={activeReceipt} /> : null}</ScrollView>
+          <BottomSheetScrollView
+            style={styles.sheetScroller}
+            contentContainerStyle={{ paddingBottom: sheetBottomPadding }}
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            nestedScrollEnabled
+          >
+            {activeReceipt ? <ReceiptTicket receipt={activeReceipt} /> : null}
+          </BottomSheetScrollView>
         </View>
       </AppBottomSheet> : null}
     </View>
@@ -1048,7 +1094,8 @@ const styles = StyleSheet.create({
   cartFabGradient: { height: 56, borderRadius: 18, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, gap: 10 },
   cartText: { color: colors.surface, fontSize: 14, fontWeight: "800", flex: 1 },
   cartTotal: { color: colors.surface, fontSize: 14, fontWeight: "800" },
-  sheet: { flex: 1, padding: 16, gap: 12 },
+  sheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
+  sheetScroller: { flex: 1 },
   sheetScroll: { gap: 12, paddingBottom: 16 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "800" },
   cartRow: { flexDirection: "row", alignItems: "center", gap: 12 },

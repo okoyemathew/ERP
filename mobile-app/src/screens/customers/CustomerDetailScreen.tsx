@@ -2,9 +2,10 @@ import React, { useCallback, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
-import BottomSheet from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
 import { Banknote, CreditCard, Pencil, Smartphone } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Avatar, Badge, Button, Card, ErrorState, LoadingState, ScreenHeader } from "@/components/common";
 import { customersService } from "@/services/customers.service";
 import { colors } from "@/theme";
@@ -31,6 +32,7 @@ function paymentAmount(item: CustomerPaymentHistoryItem): number {
 }
 
 export function CustomerDetailScreen({ route, navigation }: { route: any; navigation: any }) {
+  const insets = useSafeAreaInsets();
   const customerId = route.params?.customerId as string;
   const [profile, setProfile] = useState<CustomerProfileResponse | null>(null);
   const [purchases, setPurchases] = useState<CustomerSale[]>([]);
@@ -138,7 +140,11 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
           <Text style={styles.stat}>Owes {formatCurrency(money(summary.outstandingBalance))}</Text>
         </View>
       </LinearGradient>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) + 96 }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
+      >
         <Text style={styles.sectionTitle}>Credit Invoices</Text>
         {credits.length === 0 ? (
           <Card><Text style={styles.meta}>No credit invoices for this customer.</Text></Card>
@@ -190,7 +196,13 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
         ))}
       </ScrollView>
       <AppBottomSheet ref={paymentRef} snapPoints={["64%"]}>
-        <View style={styles.sheet}>
+        <BottomSheetScrollView
+          contentContainerStyle={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
+          showsVerticalScrollIndicator
+          persistentScrollbar
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
           <Text style={styles.sheetTitle}>Confirm Payment</Text>
           {selectedCredit ? (
             <>
@@ -211,7 +223,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
               <Button label="Confirm Payment" variant="success" loading={processing} onPress={handlePayment} />
             </>
           ) : null}
-        </View>
+        </BottomSheetScrollView>
       </AppBottomSheet>
     </View>
   );
@@ -233,7 +245,7 @@ const styles = StyleSheet.create({
   balanceRow: { flexDirection: "row", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: colors.borderLighter, paddingTop: 10 },
   balance: { color: colors.foreground, fontSize: 14, fontWeight: "900" },
   paymentRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  sheet: { flex: 1, padding: 16, gap: 12 },
+  sheet: { padding: 16, gap: 12 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "900" },
   totalCard: { alignItems: "center" },
   largeAmount: { color: colors.primary, fontSize: 28, fontWeight: "900", marginTop: 4 },

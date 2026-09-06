@@ -3,6 +3,7 @@ import { FlatList, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Package, Plus, Search, X } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
 import { productsService } from "@/services/products.service";
 import { useAuthStore } from "@/store/authStore";
@@ -35,6 +36,7 @@ function addedByName(product: ApiProduct) {
 }
 
 export function InventoryScreen({ navigation }: { navigation: any }) {
+  const insets = useSafeAreaInsets();
   const canManage = useAuthStore((state) => state.can("products.manage"));
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState<ApiProduct[]>([]);
@@ -106,6 +108,7 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     setRefreshing(true);
     void load(queryRef.current, false);
   };
+  const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
   if (loading) return <LoadingState label="Loading products" />;
   if (error) return <ErrorState onRetry={() => void load()} />;
@@ -178,7 +181,9 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
           );
         }}
         ListEmptyComponent={<EmptyState icon={<Search size={28} color={colors.textPlaceholder} />} title={query.trim() ? "No products found" : "No products yet"} />}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
       />
     </View>
   );

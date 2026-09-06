@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, FlatList, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import type GorhomBottomSheet from "@gorhom/bottom-sheet";
+import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Edit3, Plus, Printer, Receipt, Trash2, X } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Button, Card, Input, ScreenHeader, SearchBar } from "@/components/common";
 import { EmptyState, ErrorState, LoadingState } from "@/components/common/StateViews";
 import { SimpleRow } from "@/screens/shared/ScreenKit";
@@ -44,6 +46,7 @@ function expensePrintText(expense: ApiExpense) {
 }
 
 export function ExpensesScreen() {
+  const insets = useSafeAreaInsets();
   const sheetRef = useRef<GorhomBottomSheet>(null);
   const hasLoadedRef = useRef(false);
   const user = useAuthStore((state) => state.user);
@@ -211,6 +214,8 @@ export function ExpensesScreen() {
     setRefreshing(true);
     void load(false);
   };
+  const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
+  const sheetBottomPadding = Math.max(insets.bottom, 24) + 48;
 
   const renderExpense = ({ item }: { item: ApiExpense }) => (
     <SimpleRow
@@ -298,11 +303,18 @@ export function ExpensesScreen() {
           </View>
         }
         ListEmptyComponent={<EmptyState icon={<Receipt size={22} color={colors.textMuted} />} title="No expenses found" />}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
       />
       {sheetMode ? <AppBottomSheet ref={sheetRef} snapPoints={["84%"]} initialIndex={0} onClose={() => setSheetMode(null)}>
-        <ScrollView contentContainerStyle={styles.sheet} showsVerticalScrollIndicator={false}>
+        <BottomSheetScrollView
+          contentContainerStyle={[styles.sheet, { paddingBottom: sheetBottomPadding }]}
+          showsVerticalScrollIndicator
+          persistentScrollbar
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
           {sheetMode === "detail" && selectedExpense && !canMutateSelectedExpense ? (
             <>
               <View style={styles.sheetHeader}>
@@ -360,7 +372,7 @@ export function ExpensesScreen() {
               <Button label={selectedExpense ? "Save Changes" : "Save Expense"} loading={processing} icon={selectedExpense ? <Edit3 size={18} color={colors.surface} /> : undefined} onPress={() => void saveExpense()} />
             </>
           )}
-        </ScrollView>
+        </BottomSheetScrollView>
       </AppBottomSheet> : null}
     </View>
   );

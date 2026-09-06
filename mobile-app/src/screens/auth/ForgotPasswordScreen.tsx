@@ -1,12 +1,14 @@
 import React, { useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from "react-native";
 import { Text } from "@/i18n";
 import { Mail, Phone } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Input, ScreenHeader } from "@/components/common";
 import { authService } from "@/services/auth.service";
 import { colors } from "@/theme";
 
 export function ForgotPasswordScreen({ navigation }: { navigation: any }) {
+  const insets = useSafeAreaInsets();
   const [emailOrPhone, setEmailOrPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,12 @@ export function ForgotPasswordScreen({ navigation }: { navigation: any }) {
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScreenHeader title="Forgot Password" onBack={() => navigation.goBack()} />
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) + 24 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+        persistentScrollbar
+      >
         <Input
           label="Email or Mobile Number"
           value={emailOrPhone}
@@ -58,14 +65,14 @@ export function ForgotPasswordScreen({ navigation }: { navigation: any }) {
         />
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Button label="Send Token" onPress={loading ? undefined : submit} loading={loading} style={styles.button} />
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface },
-  content: { flex: 1, padding: 20, gap: 14 },
+  content: { flexGrow: 1, padding: 20, gap: 14 },
   error: { color: colors.error, fontSize: 12, fontWeight: "700" },
   button: { marginTop: "auto" }
 });

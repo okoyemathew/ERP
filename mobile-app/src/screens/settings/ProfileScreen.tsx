@@ -2,11 +2,13 @@ import React, { useEffect, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Lock, Mail, MapPin, Phone, User } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar, Button, Input, ScreenHeader } from "@/components/common";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
 
 export function ProfileScreen() {
+  const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
   const business = useAuthStore((state) => state.business);
   const logout = useAuthStore((state) => state.logout);
@@ -58,7 +60,12 @@ export function ProfileScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Profile" />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+        persistentScrollbar
+      >
         <View style={styles.hero}>
           <Avatar name={name} size={80} />
           <Text style={styles.name}>{name}</Text>

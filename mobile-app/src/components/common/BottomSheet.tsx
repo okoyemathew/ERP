@@ -17,6 +17,7 @@ export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>
       ref={ref}
       index={initialIndex}
       snapPoints={points}
+      containerStyle={styles.container}
       enablePanDownToClose
       onClose={onClose}
       handleIndicatorStyle={styles.handle}
@@ -29,6 +30,10 @@ export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>
 });
 
 const styles = StyleSheet.create({
+  container: {
+    zIndex: 100,
+    elevation: 100
+  },
   background: {
     borderTopLeftRadius: borderRadius.bottomSheet,
     borderTopRightRadius: borderRadius.bottomSheet,

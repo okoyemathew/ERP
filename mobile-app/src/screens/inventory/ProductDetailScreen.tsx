@@ -71,7 +71,11 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Product Details" onBack={() => navigation.goBack()} />
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 24 }]} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
+      >
         <Card style={styles.hero}>
           {primaryImage ? <Image source={{ uri: primaryImage }} style={styles.image} /> : <View style={styles.icon}><Package size={34} color={colors.primary} /></View>}
           <Text style={styles.name}>{product.name}</Text>

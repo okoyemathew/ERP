@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Check } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, ScreenHeader } from "@/components/common";
 import { languageOptions, Text, useTranslation, type SupportedLocale } from "@/i18n";
 import { colors } from "@/theme";
 
 export function LanguageScreen({ navigation }: { navigation: any }) {
+  const insets = useSafeAreaInsets();
   const { locale, setLocale } = useTranslation();
   const [selected, setSelected] = useState<SupportedLocale>(locale);
 
@@ -26,7 +28,11 @@ export function LanguageScreen({ navigation }: { navigation: any }) {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Choose Language" onBack={() => navigation.goBack()} />
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) + 24 }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
+      >
         <Text style={styles.subtitle}>Select your preferred language to continue</Text>
         <View style={styles.grid}>
           {languageOptions.map((language) => (
@@ -43,14 +49,14 @@ export function LanguageScreen({ navigation }: { navigation: any }) {
           ))}
         </View>
         <Button label="Continue" onPress={continueToOnboarding} style={styles.button} />
-      </View>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface },
-  content: { flex: 1, padding: 20 },
+  content: { flexGrow: 1, padding: 20 },
   subtitle: { color: colors.textMuted, fontSize: 13, marginBottom: 22 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   card: {

@@ -1,11 +1,13 @@
 import React, { useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Input, ScreenHeader, StepProgressBar } from "@/components/common";
 import { authService } from "@/services/auth.service";
 import { colors } from "@/theme";
 
 export function RegisterScreen({ navigation }: { navigation: any }) {
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
   const [businessName, setBusinessName] = useState("");
   const [businessType, setBusinessType] = useState("");
@@ -79,7 +81,12 @@ export function RegisterScreen({ navigation }: { navigation: any }) {
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScreenHeader title="Register Business" onBack={() => (step > 0 ? setStep(step - 1) : navigation.goBack())} />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) + 24 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+        persistentScrollbar
+      >
         <StepProgressBar step={step} />
         {step === 0 ? (
           <>

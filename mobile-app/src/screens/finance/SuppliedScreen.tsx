@@ -3,6 +3,7 @@ import { FlatList, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import { Plus, Truck } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
 import { goodsDisbursementService } from "@/services/goods-disbursement.service";
 import { suppliersService } from "@/services/suppliers.service";
@@ -58,6 +59,7 @@ function aggregateEmployeeProducts(disbursements: ApiGoodsDisbursement[]) {
 }
 
 export function SuppliedScreen({ navigation }: { navigation: any }) {
+  const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
   const normalizedRoleName = user?.roleName?.trim().toLowerCase();
   const isBusinessOwner = normalizedRoleName ? normalizedRoleName === "owner" : user?.role === "owner" && !user?.employeeId;
@@ -133,6 +135,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
     setRefreshing(true);
     void loadSupplied(query, false);
   };
+  const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
   if (loading && dataIsEmpty) {
     return (
@@ -194,7 +197,9 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
           )
         )}
         ListEmptyComponent={<EmptyState icon={<Truck size={28} color={colors.textPlaceholder} />} title={isEmployeeView ? "No supplied products yet" : "No suppliers yet"} />}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
       />
     </View>
   );

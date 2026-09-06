@@ -15,7 +15,8 @@ export function ScrollScreen({ title, children, right, onBack }: { title: string
       <ScreenHeader title={title} right={right} onBack={onBack} />
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
+        persistentScrollbar
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
       >
@@ -82,6 +83,9 @@ export function ListScreen<T>({
   keyExtractor: (item: T) => string;
   empty?: React.ReactElement;
 }) {
+  const insets = useSafeAreaInsets();
+  const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
+
   return (
     <View style={styles.screen}>
       <ScreenHeader title={title} right={right} />
@@ -90,8 +94,10 @@ export function ListScreen<T>({
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         ListEmptyComponent={empty}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
+        keyboardShouldPersistTaps="handled"
       />
     </View>
   );

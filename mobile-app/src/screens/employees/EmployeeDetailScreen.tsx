@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type GorhomBottomSheet from "@gorhom/bottom-sheet";
+import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
@@ -444,7 +445,8 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       <ScrollView
         style={styles.scroller}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: spacing.bottomNavHeight + Math.max(insets.bottom, 32) + 64 }]}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
+        persistentScrollbar
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.profileCard}>
@@ -485,7 +487,13 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
 
       {selectedSale ? (
         <AppBottomSheet ref={saleSheetRef} snapPoints={["82%"]} onClose={() => setSelectedSale(null)}>
-          <ScrollView contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <BottomSheetScrollView
+            contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
             <View style={styles.sectionHeader}>
               <View>
                 <Text style={styles.sectionTitle}>{selectedSale.saleNumber}</Text>
@@ -527,13 +535,19 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                 </View>
               )) : <Text style={styles.label}>No payments recorded</Text>}
             </Card>
-          </ScrollView>
+          </BottomSheetScrollView>
         </AppBottomSheet>
       ) : null}
 
       {supplySheetVisible ? (
         <AppBottomSheet ref={supplySheetRef} snapPoints={["82%"]} onClose={() => setSupplySheetVisible(false)}>
-          <ScrollView contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, 16) }]} keyboardShouldPersistTaps="handled">
+          <BottomSheetScrollView
+            contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
             <View>
               <Text style={styles.sectionTitle}>Supply Products</Text>
               <Text style={styles.sectionMeta}>{name}</Text>
@@ -589,7 +603,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               />
             </View>
             <Button label="Record Supply" loading={supplying} disabled={!supplyProducts.length || supplying} onPress={() => void submitSupply()} />
-          </ScrollView>
+          </BottomSheetScrollView>
         </AppBottomSheet>
       ) : null}
     </View>

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
-import BottomSheet from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Check, CreditCard, Edit3, HandCoins, Search, Trash2, X } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
 import { creditSalesService } from "@/services/credit-sales.service";
 import { useAuth } from "@/hooks/useAuth";
@@ -41,6 +42,7 @@ function actionText(action: CreditSaleEmployeeAction) {
 }
 
 export function CreditSalesScreen() {
+  const insets = useSafeAreaInsets();
   const user = useAuth((state) => state.user);
   const roleName = user?.roleName?.trim();
   const isBusinessOwner = Boolean(roleName === "Owner" || (!roleName && user?.role === "owner"));
@@ -118,6 +120,8 @@ export function CreditSalesScreen() {
   const summary = response?.summary;
 
   const selectedPayments = useMemo(() => selected?.payments ?? [], [selected]);
+  const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
+  const sheetBottomPadding = Math.max(insets.bottom, 24) + 48;
 
   const refresh = () => {
     setRefreshing(true);
@@ -392,7 +396,9 @@ export function CreditSalesScreen() {
           </Pressable>
         )}
         ListEmptyComponent={<EmptyState icon={<Search size={28} color={colors.textPlaceholder} />} title="No credit sales found" />}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
       />
 
       <AppBottomSheet ref={paymentRef} snapPoints={["88%"]}>
@@ -400,7 +406,14 @@ export function CreditSalesScreen() {
           <Text style={styles.sheetTitle}>Credit Payment</Text>
           {selected ? (
             <>
-              <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator persistentScrollbar>
+              <BottomSheetScrollView
+                style={styles.sheetScroller}
+                contentContainerStyle={styles.sheetScroll}
+                showsVerticalScrollIndicator
+                persistentScrollbar
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+              >
                 <Card style={styles.totalCard}>
                   <Text style={styles.meta}>{selected.customer.name}</Text>
                   <Text style={styles.largeAmount}>{formatCurrency(money(selected.balance))}</Text>
@@ -435,15 +448,23 @@ export function CreditSalesScreen() {
                     <Text style={styles.amount}>{formatCurrency(money(payment.amount))}</Text>
                   </Card>
                 ))}
-              </ScrollView>
-              <Button label="Record Payment" variant="success" loading={processing} onPress={() => void collectPayment()} />
+              </BottomSheetScrollView>
+              <View style={[styles.sheetFooter, { paddingBottom: sheetBottomPadding }]}>
+                <Button label="Record Payment" variant="success" loading={processing} onPress={() => void collectPayment()} />
+              </View>
             </>
           ) : null}
         </View>
       </AppBottomSheet>
 
       <AppBottomSheet ref={editRef} snapPoints={["55%"]}>
-        <View style={styles.sheet}>
+        <BottomSheetScrollView
+          contentContainerStyle={[styles.sheetFormContent, { paddingBottom: sheetBottomPadding }]}
+          showsVerticalScrollIndicator
+          persistentScrollbar
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
           <Text style={styles.sheetTitle}>Edit Credit Sale</Text>
           {editing ? (
             <>
@@ -453,7 +474,7 @@ export function CreditSalesScreen() {
               <Button label="Save Approved Edit" loading={editingProcessing} onPress={() => void saveEdit()} />
             </>
           ) : null}
-        </View>
+        </BottomSheetScrollView>
       </AppBottomSheet>
     </View>
   );
@@ -483,8 +504,11 @@ const styles = StyleSheet.create({
   deleteButton: { backgroundColor: colors.errorBg, borderColor: colors.errorBorder },
   disabledAction: { opacity: 0.55 },
   amount: { color: colors.foreground, fontSize: 13, fontWeight: "800" },
-  sheet: { flex: 1, padding: 16, gap: 12 },
+  sheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 16, gap: 12 },
+  sheetScroller: { flex: 1 },
   sheetScroll: { gap: 12, paddingBottom: 16 },
+  sheetFooter: { paddingTop: 2 },
+  sheetFormContent: { padding: 16, gap: 12 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "800" },
   totalCard: { alignItems: "center" },
   largeAmount: { color: colors.primary, fontSize: 28, fontWeight: "900", marginTop: 4 },

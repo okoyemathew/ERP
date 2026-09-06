@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
+import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Archive, Search } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Button, Card, EmptyState, ErrorState, LoadingState } from "@/components/common";
 import { SimpleRow, ListScreen } from "@/screens/shared/ScreenKit";
 import { goodsDisbursementService } from "@/services/goods-disbursement.service";
@@ -9,6 +11,7 @@ import { colors, spacing } from "@/theme";
 import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
 
 export function DisbursedScreen() {
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<ApiGoodsDisbursement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -81,6 +84,7 @@ export function DisbursedScreen() {
       setSaving(false);
     }
   };
+  const sheetBottomPadding = Math.max(insets.bottom, 24) + 48;
 
   return (
     <>
@@ -112,7 +116,14 @@ export function DisbursedScreen() {
         <AppBottomSheet snapPoints={["84%"]} initialIndex={0} onClose={closeEdit}>
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>Edit Disbursement</Text>
-            <ScrollView contentContainerStyle={styles.sheetScroll} showsVerticalScrollIndicator>
+            <BottomSheetScrollView
+              style={styles.sheetScroller}
+              contentContainerStyle={styles.sheetScroll}
+              showsVerticalScrollIndicator
+              persistentScrollbar
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
               {selected.items.map((item) => (
                 <Card key={item.id} style={styles.itemCard}>
                   <View style={styles.itemHead}>
@@ -139,8 +150,10 @@ export function DisbursedScreen() {
                   />
                 </Card>
               ))}
-            </ScrollView>
-            <Button label="Save Changes" loading={saving} onPress={() => void saveEdit()} />
+            </BottomSheetScrollView>
+            <View style={[styles.sheetFooter, { paddingBottom: sheetBottomPadding }]}>
+              <Button label="Save Changes" loading={saving} onPress={() => void saveEdit()} />
+            </View>
           </View>
         </AppBottomSheet>
       ) : null}
@@ -149,7 +162,9 @@ export function DisbursedScreen() {
 }
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, padding: 16, gap: 12 },
+  sheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
+  sheetScroller: { flex: 1 },
+  sheetFooter: { paddingTop: 2 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "800" },
   sheetScroll: { gap: 12, paddingBottom: spacing.sectionGap },
   itemCard: { gap: 10 },

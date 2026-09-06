@@ -2,8 +2,9 @@ import React, { useCallback, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
-import BottomSheet from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Banknote, Pencil, Truck } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Badge, Button, Card, ErrorState, LoadingState, ScreenHeader } from "@/components/common";
 import { suppliersService } from "@/services/suppliers.service";
 import { colors } from "@/theme";
@@ -15,6 +16,7 @@ function money(value: string | number | null | undefined): number {
 }
 
 export function SupplierDetailScreen({ route, navigation }: { route: any; navigation: any }) {
+  const insets = useSafeAreaInsets();
   const supplierId = route.params?.supplierId as string;
   const [supplier, setSupplier] = useState<ApiSupplier | null>(null);
   const [history, setHistory] = useState<SupplierPaymentHistoryResponse | null>(null);
@@ -102,7 +104,11 @@ export function SupplierDetailScreen({ route, navigation }: { route: any; naviga
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Supplier Detail" onBack={() => navigation.goBack()} right={<Pressable onPress={() => navigation.navigate("SupplierForm", { supplierId })}><Pencil size={18} color={colors.primary} /></Pressable>} />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) + 96 }]}
+        showsVerticalScrollIndicator
+        persistentScrollbar
+      >
         <Card style={styles.hero}>
           <View style={styles.icon}><Truck size={22} color={colors.primary} /></View>
           <View style={styles.heroBody}>
@@ -165,7 +171,13 @@ export function SupplierDetailScreen({ route, navigation }: { route: any; naviga
       </ScrollView>
 
       <AppBottomSheet ref={paymentRef} snapPoints={["52%"]}>
-        <View style={styles.sheet}>
+        <BottomSheetScrollView
+          contentContainerStyle={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
+          showsVerticalScrollIndicator
+          persistentScrollbar
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
           <Text style={styles.sheetTitle}>Record Supplier Payment</Text>
           <Card style={styles.totalCard}>
             <Text style={styles.meta}>{supplier.companyName}</Text>
@@ -175,7 +187,7 @@ export function SupplierDetailScreen({ route, navigation }: { route: any; naviga
           <TextInput value={amount} onChangeText={setAmount} keyboardType="numeric" style={styles.amountInput} accessibilityLabel="Supplier payment amount" />
           <TextInput value={reference} onChangeText={setReference} style={styles.amountInput} accessibilityLabel="Supplier payment reference" />
           <Button label="Record Payment" variant="success" loading={processing} onPress={recordPayment} />
-        </View>
+        </BottomSheetScrollView>
       </AppBottomSheet>
     </View>
   );
@@ -197,7 +209,7 @@ const styles = StyleSheet.create({
   rowRight: { alignItems: "flex-end", gap: 5 },
   historyBody: { flex: 1 },
   balance: { color: colors.foreground, fontSize: 14, fontWeight: "900" },
-  sheet: { flex: 1, padding: 16, gap: 12 },
+  sheet: { padding: 16, gap: 12 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "900" },
   totalCard: { alignItems: "center" },
   amountInput: { minHeight: 52, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, paddingHorizontal: 14, color: colors.foreground, fontSize: 16, fontWeight: "800" }

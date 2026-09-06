@@ -267,7 +267,8 @@ export function EmployeesScreen({ navigation }: { navigation: any }) {
         keyExtractor={(item) => item.id}
         refreshing={refreshing}
         onRefresh={refresh}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
+        persistentScrollbar
         contentContainerStyle={[styles.listContent, { paddingBottom: spacing.bottomNavHeight + Math.max(insets.bottom, 16) + 28 }]}
         ListHeaderComponent={
           <View style={styles.summaryRow}>
