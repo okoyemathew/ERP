@@ -59,7 +59,7 @@ export class SalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: SaleQueryDto,
   ) {
-    return this.salesService.findAll(user.businessId, query);
+    return this.salesService.findAll(user.businessId, query, user);
   }
 
   @Get('products/lookup')
@@ -85,7 +85,7 @@ export class SalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.salesService.findOne(user.businessId, id);
+    return this.salesService.findOne(user.businessId, id, user);
   }
 
   @Get(':id/receipt')
@@ -98,7 +98,7 @@ export class SalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.salesService.getSaleReceipt(user.businessId, id);
+    return this.salesService.getSaleReceipt(user.businessId, id, user);
   }
 
   @Patch(':id/customer')
@@ -117,7 +117,7 @@ export class SalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.salesService.validateCart(user.businessId, id);
+    return this.salesService.validateCart(user.businessId, id, user);
   }
 
   @Post(':id/items')

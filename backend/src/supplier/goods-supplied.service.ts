@@ -3,8 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, InventoryTransactionType } from '@prisma/client';
+import { AuditAction, Prisma, InventoryTransactionType } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { CreateGoodsSuppliedDto } from './dto/create-goods-supplied.dto';
@@ -153,7 +154,7 @@ export class GoodsSuppliedService {
         data: {
           businessId,
           userId: user?.id ?? null,
-          action: 'CREATE',
+          action: AuditAction.CREATE,
           entity: 'GoodsSupplied',
           entityId: newGoodsSupplied.id,
           description: `Created goods supply ${supplyNumber} from supplier ${supplier.companyName}`,
@@ -167,9 +168,13 @@ export class GoodsSuppliedService {
     return goodsSupplied;
   }
 
-  async findOne(businessId: string, id: string) {
+  async findOne(businessId: string, id: string, user?: AuthenticatedUser) {
     const goodsSupplied = await this.prisma.goodsSupplied.findFirst({
-      where: { id, businessId },
+      where: {
+        id,
+        businessId,
+        ...(await this.goodsSuppliedActivityScope(businessId, user)),
+      },
       include: {
         items: {
           include: {
@@ -187,29 +192,23 @@ export class GoodsSuppliedService {
     return goodsSupplied;
   }
 
-  async findAll(businessId: string, query: GoodsSuppliedQueryDto = {}) {
+  async findAll(
+    businessId: string,
+    query: GoodsSuppliedQueryDto = {},
+    user?: AuthenticatedUser,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'suppliedDate';
     const sortOrder = query.sortOrder ?? 'desc';
     const search = query.search?.trim();
 
-    const where: Prisma.GoodsSuppliedWhereInput = {
+    const where = await this.buildGoodsSuppliedWhere(
       businessId,
-      ...(query.supplierId ? { supplierId: query.supplierId } : {}),
-      ...(search
-        ? {
-            OR: [
-              { supplyNumber: { contains: search, mode: 'insensitive' } },
-              {
-                supplier: {
-                  companyName: { contains: search, mode: 'insensitive' },
-                },
-              },
-            ],
-          }
-        : {}),
-    };
+      query,
+      user,
+      search,
+    );
 
     const [total, items] = await Promise.all([
       this.prisma.goodsSupplied.count({ where }),
@@ -244,41 +243,26 @@ export class GoodsSuppliedService {
     businessId: string,
     term: string,
     query: GoodsSuppliedQueryDto = {},
+    user?: AuthenticatedUser,
   ) {
     const search = term.trim();
     if (!search) {
-      return this.findAll(businessId, query);
+      return this.findAll(businessId, query, user);
     }
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    const where = await this.buildGoodsSuppliedWhere(
+      businessId,
+      query,
+      user,
+      search,
+    );
 
     const [total, items] = await Promise.all([
-      this.prisma.goodsSupplied.count({
-        where: {
-          businessId,
-          OR: [
-            { supplyNumber: { contains: search, mode: 'insensitive' } },
-            {
-              supplier: {
-                companyName: { contains: search, mode: 'insensitive' },
-              },
-            },
-          ],
-        },
-      }),
+      this.prisma.goodsSupplied.count({ where }),
       this.prisma.goodsSupplied.findMany({
-        where: {
-          businessId,
-          OR: [
-            { supplyNumber: { contains: search, mode: 'insensitive' } },
-            {
-              supplier: {
-                companyName: { contains: search, mode: 'insensitive' },
-              },
-            },
-          ],
-        },
+        where,
         include: {
           items: {
             include: {
@@ -308,6 +292,7 @@ export class GoodsSuppliedService {
     businessId: string,
     supplierId: string,
     query: GoodsSuppliedQueryDto = {},
+    user?: AuthenticatedUser,
   ) {
     const supplier = await this.prisma.supplier.findFirst({
       where: { id: supplierId, businessId, deletedAt: null },
@@ -317,12 +302,13 @@ export class GoodsSuppliedService {
       throw new NotFoundException('Supplier not found');
     }
 
-    return this.findAll(businessId, { ...query, supplierId });
+    return this.findAll(businessId, { ...query, supplierId }, user);
   }
 
   async getSupplierStatistics(
     businessId: string,
     supplierId: string,
+    user?: AuthenticatedUser,
   ): Promise<SupplierStatisticsDto> {
     const supplier = await this.prisma.supplier.findFirst({
       where: { id: supplierId, businessId, deletedAt: null },
@@ -332,6 +318,16 @@ export class GoodsSuppliedService {
       throw new NotFoundException('Supplier not found');
     }
 
+    const activityScope = await this.goodsSuppliedActivityScope(
+      businessId,
+      user,
+    );
+    const goodsWhere: Prisma.GoodsSuppliedWhereInput = {
+      supplierId,
+      businessId,
+      ...activityScope,
+    };
+
     const [
       totalPurchaseOrders,
       completedPurchaseOrders,
@@ -340,23 +336,33 @@ export class GoodsSuppliedService {
       lastSupply,
     ] = await Promise.all([
       this.prisma.purchaseOrder.count({
-        where: { supplierId, businessId },
+        where: {
+          supplierId,
+          businessId,
+          ...this.userActivityScope(user),
+        },
       }),
       this.prisma.purchaseOrder.count({
-        where: { supplierId, businessId, status: 'RECEIVED' },
+        where: {
+          supplierId,
+          businessId,
+          status: 'RECEIVED',
+          ...this.userActivityScope(user),
+        },
       }),
       this.prisma.purchaseOrder.count({
         where: {
           supplierId,
           businessId,
           status: { in: ['PENDING', 'APPROVED'] },
+          ...this.userActivityScope(user),
         },
       }),
       this.prisma.goodsSupplied.count({
-        where: { supplierId, businessId },
+        where: goodsWhere,
       }),
       this.prisma.goodsSupplied.findFirst({
-        where: { supplierId, businessId },
+        where: goodsWhere,
         orderBy: { suppliedDate: 'desc' },
         select: { suppliedDate: true },
       }),
@@ -364,7 +370,7 @@ export class GoodsSuppliedService {
 
     // Calculate totals
     const goodsSupplies = await this.prisma.goodsSupplied.findMany({
-      where: { supplierId, businessId },
+      where: goodsWhere,
       include: {
         items: true,
       },
@@ -398,9 +404,76 @@ export class GoodsSuppliedService {
       totalGoodsSupplied,
       totalItemsReceived,
       totalAmountSpent: totalAmountSpent.toNumber(),
-      outstandingBalance: supplier.outstandingBalance.toNumber(),
+      outstandingBalance: this.canViewAllUserActivity(user)
+        ? supplier.outstandingBalance.toNumber()
+        : totalAmountSpent.toNumber(),
       productsSupplied: uniqueProducts.size,
       lastSupplyDate: lastSupply?.suppliedDate,
     };
+  }
+
+  private async buildGoodsSuppliedWhere(
+    businessId: string,
+    query: GoodsSuppliedQueryDto,
+    user?: AuthenticatedUser,
+    search?: string,
+  ): Promise<Prisma.GoodsSuppliedWhereInput> {
+    return {
+      businessId,
+      ...(await this.goodsSuppliedActivityScope(businessId, user)),
+      ...(query.supplierId ? { supplierId: query.supplierId } : {}),
+      ...(search
+        ? {
+            OR: [
+              { supplyNumber: { contains: search, mode: 'insensitive' } },
+              {
+                supplier: {
+                  companyName: { contains: search, mode: 'insensitive' },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  private async goodsSuppliedActivityScope(
+    businessId: string,
+    user?: AuthenticatedUser,
+  ): Promise<Prisma.GoodsSuppliedWhereInput> {
+    if (this.canViewAllUserActivity(user) || !user) {
+      return {};
+    }
+
+    const createdLogs = await this.prisma.auditLog.findMany({
+      where: {
+        businessId,
+        userId: user.id,
+        action: AuditAction.CREATE,
+        entity: 'GoodsSupplied',
+        entityId: { not: null },
+      },
+      select: { entityId: true },
+    });
+
+    return {
+      id: {
+        in: createdLogs
+          .map((log) => log.entityId)
+          .filter((entityId): entityId is string => Boolean(entityId)),
+      },
+    };
+  }
+
+  private userActivityScope(user?: AuthenticatedUser) {
+    return this.canViewAllUserActivity(user) || !user
+      ? {}
+      : { userId: user.id };
+  }
+
+  private canViewAllUserActivity(user?: AuthenticatedUser) {
+    return Boolean(
+      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
   }
 }

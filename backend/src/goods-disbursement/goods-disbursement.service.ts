@@ -1,10 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { AuditAction, InventoryTransactionType, Prisma } from '@prisma/client';
+import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateGoodsDisbursementDto } from './dto/create-goods-disbursement.dto';
@@ -127,13 +129,21 @@ export class GoodsDisbursementService {
     });
   }
 
-  async findAll(businessId: string, query: GoodsDisbursementQueryDto = {}) {
+  async findAll(
+    businessId: string,
+    query: GoodsDisbursementQueryDto = {},
+    user?: AuthenticatedUser,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'disbursementDate';
     const sortOrder = query.sortOrder ?? 'desc';
     const search = query.search?.trim();
-    const where = this.buildWhere(businessId, query, search);
+    const where = this.buildWhere(
+      businessId,
+      this.scopeQueryToEmployee(query, user),
+      search,
+    );
 
     const [total, data] = await Promise.all([
       this.prisma.goodsDisbursement.count({ where }),
@@ -152,9 +162,14 @@ export class GoodsDisbursementService {
     };
   }
 
-  async findOne(businessId: string, id: string) {
+  async findOne(businessId: string, id: string, user?: AuthenticatedUser) {
     const disbursement = await this.prisma.goodsDisbursement.findFirst({
-      where: { id, businessId, items: { some: { product: { isActive: true } } } },
+      where: {
+        id,
+        businessId,
+        ...this.employeeActivityScope(user),
+        items: { some: { product: { isActive: true } } },
+      },
       include: this.include(),
     });
 
@@ -172,7 +187,7 @@ export class GoodsDisbursementService {
     user: AuthenticatedUser,
   ) {
     const current = await this.prisma.goodsDisbursement.findFirst({
-      where: { id, businessId },
+      where: { id, businessId, ...this.employeeActivityScope(user) },
       include: { items: { where: { product: { isActive: true } } } },
     });
 
@@ -283,7 +298,12 @@ export class GoodsDisbursementService {
       });
 
       const updated = await tx.goodsDisbursement.findFirst({
-        where: { id, businessId, items: { some: { product: { isActive: true } } } },
+        where: {
+          id,
+          businessId,
+          ...this.employeeActivityScope(user),
+          items: { some: { product: { isActive: true } } },
+        },
         include: this.include(),
       });
 
@@ -527,6 +547,40 @@ export class GoodsDisbursementService {
         'One or more products were not found in this business',
       );
     }
+  }
+
+  private canViewAllEmployeeActivity(user?: AuthenticatedUser) {
+    return Boolean(
+      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
+  }
+
+  private employeeActivityScope(
+    user?: AuthenticatedUser,
+  ): Prisma.GoodsDisbursementWhereInput {
+    if (this.canViewAllEmployeeActivity(user) || !user) {
+      return {};
+    }
+    if (!user.employeeId) {
+      throw new ForbiddenException('Employee profile is required');
+    }
+    return { employeeId: user.employeeId };
+  }
+
+  private scopeQueryToEmployee(
+    query: GoodsDisbursementQueryDto,
+    user?: AuthenticatedUser,
+  ): GoodsDisbursementQueryDto {
+    if (this.canViewAllEmployeeActivity(user) || !user) {
+      return query;
+    }
+    if (!user.employeeId) {
+      throw new ForbiddenException('Employee profile is required');
+    }
+    return {
+      ...query,
+      employeeId: user.employeeId,
+    };
   }
 
   private include() {

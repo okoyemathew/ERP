@@ -59,8 +59,6 @@ const EXPENSE_MODIFY_ROLES: readonly SystemRole[] = [
 const EXPENSE_REPORT_ROLES: readonly SystemRole[] = [
   SYSTEM_ROLES.OWNER,
   SYSTEM_ROLES.ADMIN,
-  SYSTEM_ROLES.MANAGER,
-  SYSTEM_ROLES.ACCOUNTANT,
 ];
 
 const DEFAULT_EXPENSE_CATEGORY_NAME = 'Miscellaneous';

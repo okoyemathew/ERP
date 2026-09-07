@@ -8,6 +8,7 @@ import {
   PurchaseOrderStatus,
   SaleStatus,
 } from '@prisma/client';
+import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreditReportQueryDto } from './dto/credit-report-query.dto';
@@ -162,25 +163,27 @@ export class ReportsService {
       ...this.resolveDateRange(query, period, timezone),
     };
 
+    const scopedQuery = this.scopeUserQuery(normalizedQuery, user);
+
     const [summary, paymentBreakdown, data] = await Promise.all([
-      this.salesSummary(businessId, normalizedQuery),
-      this.paymentBreakdown(businessId, normalizedQuery),
-      this.periodSalesData(businessId, period, timezone, normalizedQuery),
+      this.salesSummary(businessId, scopedQuery),
+      this.paymentBreakdown(businessId, scopedQuery),
+      this.periodSalesData(businessId, period, timezone, scopedQuery),
     ]);
 
     await this.auditReportAccess(
       businessId,
       user.id,
       `${period.toUpperCase()} Sales Report`,
-      normalizedQuery,
+      scopedQuery,
     );
 
     return {
       reportType: `${period}_sales`,
       period,
       timezone,
-      range: this.responseRange(normalizedQuery),
-      filters: this.responseFilters(normalizedQuery),
+      range: this.responseRange(scopedQuery),
+      filters: this.responseFilters(scopedQuery),
       summary,
       paymentBreakdown,
       data,
@@ -201,23 +204,25 @@ export class ReportsService {
     this.assertValidRange(query.startDate, query.endDate);
     const timezone = await this.getBusinessTimezone(businessId);
 
+    const scopedQuery = this.scopeUserQuery(query, user);
+
     const [summary, paymentBreakdown] = await Promise.all([
-      this.salesSummary(businessId, query),
-      this.paymentBreakdown(businessId, query),
+      this.salesSummary(businessId, scopedQuery),
+      this.paymentBreakdown(businessId, scopedQuery),
     ]);
 
     await this.auditReportAccess(
       businessId,
       user.id,
       'Custom Sales Report',
-      query,
+      scopedQuery,
     );
 
     return {
       reportType: 'custom_sales',
       timezone,
-      range: this.responseRange(query),
-      filters: this.responseFilters(query),
+      range: this.responseRange(scopedQuery),
+      filters: this.responseFilters(scopedQuery),
       summary,
       paymentBreakdown,
     };
@@ -228,7 +233,8 @@ export class ReportsService {
     query: PaymentReportQueryDto,
     user: AuthenticatedUser,
   ) {
-    const where = this.buildPaymentWhere(businessId, query);
+    const scopedQuery = this.scopeUserQuery(query, user);
+    const where = this.buildPaymentWhere(businessId, scopedQuery);
 
     const grouped = await this.prisma.payment.groupBy({
       by: ['paymentMethod'],
@@ -262,13 +268,13 @@ export class ReportsService {
       businessId,
       user.id,
       'Payment Method Report',
-      query,
+      scopedQuery,
     );
 
     return {
       reportType: 'payment_method',
-      range: this.responseRange(query),
-      filters: this.responseFilters(query),
+      range: this.responseRange(scopedQuery),
+      filters: this.responseFilters(scopedQuery),
       summary: {
         transactionCount: data.reduce(
           (total, row) => total + row.transactionCount,
@@ -297,14 +303,16 @@ export class ReportsService {
       ...this.resolveDateRange(query, period, timezone),
     };
 
+    const scopedQuery = this.scopeUserQuery(normalizedQuery, user);
+
     const [summary, data, periodData] = await Promise.all([
-      this.salesSummary(businessId, normalizedQuery),
-      this.employeeSalesData(businessId, normalizedQuery),
+      this.salesSummary(businessId, scopedQuery),
+      this.employeeSalesData(businessId, scopedQuery),
       this.employeeSalesPeriodData(
         businessId,
         period,
         timezone,
-        normalizedQuery,
+        scopedQuery,
       ),
     ]);
 
@@ -312,15 +320,15 @@ export class ReportsService {
       businessId,
       user.id,
       `${period.toUpperCase()} Employee Sales Report`,
-      normalizedQuery,
+      scopedQuery,
     );
 
     return {
       reportType: `${period}_employee_sales`,
       period,
       timezone,
-      range: this.responseRange(normalizedQuery),
-      filters: this.responseFilters(normalizedQuery),
+      range: this.responseRange(scopedQuery),
+      filters: this.responseFilters(scopedQuery),
       summary,
       data,
       periodData,
@@ -339,7 +347,7 @@ export class ReportsService {
       'day',
       timezone,
     );
-    const todayQuery = { ...query, ...todayRange };
+    const todayQuery = this.scopeUserQuery({ ...query, ...todayRange }, user);
 
     const [
       todaySales,
@@ -356,7 +364,11 @@ export class ReportsService {
       this.historicalCostOfGoodsSold(businessId, todayQuery),
       this.prisma.creditSale.aggregate({
         where: {
-          sale: { businessId, deletedAt: null },
+          sale: {
+            businessId,
+            deletedAt: null,
+            ...this.saleUserActivityScope(user),
+          },
           balance: { gt: 0 },
           status: { not: CreditSaleStatus.PAID },
         },
@@ -413,20 +425,23 @@ export class ReportsService {
       query.startDate || query.endDate
         ? query
         : { ...query, ...this.resolveDateRange(query, 'day', timezone) };
+    const scopedQuery = this.scopeUserQuery(normalizedQuery, user);
 
     const [sales, costOfGoodsSold, expenses] = await Promise.all([
       this.prisma.sale.aggregate({
-        where: this.buildSaleWhere(businessId, normalizedQuery),
+        where: this.buildSaleWhere(businessId, scopedQuery),
         _sum: {
           subtotal: true,
           discountAmount: true,
         },
       }),
-      this.historicalCostOfGoodsSold(businessId, normalizedQuery),
+      this.historicalCostOfGoodsSold(businessId, scopedQuery),
       this.prisma.expense.aggregate({
         where: this.buildExpenseWhere(businessId, {
-          startDate: normalizedQuery.startDate,
-          endDate: normalizedQuery.endDate,
+          startDate: scopedQuery.startDate,
+          endDate: scopedQuery.endDate,
+          userId: scopedQuery.userId,
+          employeeId: scopedQuery.employeeId,
         }),
         _sum: { amount: true },
       }),
@@ -447,14 +462,14 @@ export class ReportsService {
       businessId,
       user.id,
       'Profit Report',
-      normalizedQuery,
+      scopedQuery,
     );
 
     return {
       reportType: 'profit',
       timezone,
-      range: this.responseRange(normalizedQuery),
-      filters: this.responseFilters(normalizedQuery),
+      range: this.responseRange(scopedQuery),
+      filters: this.responseFilters(scopedQuery),
       summary: {
         grossRevenue: this.money(grossRevenue),
         costOfGoodsSold: this.money(cogs),
@@ -481,26 +496,27 @@ export class ReportsService {
       ...query,
       ...this.resolveDateRange(query, period, timezone),
     };
-    const where = this.buildExpenseWhere(businessId, normalizedQuery);
+    const scopedQuery = this.scopeUserQuery(normalizedQuery, user);
+    const where = this.buildExpenseWhere(businessId, scopedQuery);
 
     const [summary, data] = await Promise.all([
       this.expenseSummary(where),
-      this.periodExpenseData(businessId, period, timezone, normalizedQuery),
+      this.periodExpenseData(businessId, period, timezone, scopedQuery),
     ]);
 
     await this.auditReportAccess(
       businessId,
       user.id,
       `${period.toUpperCase()} Expense Report`,
-      normalizedQuery,
+      scopedQuery,
     );
 
     return {
       reportType: `${period}_expenses`,
       period,
       timezone,
-      range: this.responseRange(normalizedQuery),
-      filters: this.responseFilters(normalizedQuery),
+      range: this.responseRange(scopedQuery),
+      filters: this.responseFilters(scopedQuery),
       summary,
       data,
     };
@@ -520,22 +536,23 @@ export class ReportsService {
     this.assertValidRange(query.startDate, query.endDate);
     const timezone = await this.getBusinessTimezone(businessId);
 
+    const scopedQuery = this.scopeUserQuery(query, user);
     const summary = await this.expenseSummary(
-      this.buildExpenseWhere(businessId, query),
+      this.buildExpenseWhere(businessId, scopedQuery),
     );
 
     await this.auditReportAccess(
       businessId,
       user.id,
       'Custom Expense Report',
-      query,
+      scopedQuery,
     );
 
     return {
       reportType: 'custom_expenses',
       timezone,
-      range: this.responseRange(query),
-      filters: this.responseFilters(query),
+      range: this.responseRange(scopedQuery),
+      filters: this.responseFilters(scopedQuery),
       summary,
     };
   }
@@ -692,7 +709,7 @@ export class ReportsService {
     query: CreditReportQueryDto,
     user: AuthenticatedUser,
   ) {
-    const where = this.buildCreditWhere(businessId, query);
+    const where = this.buildCreditWhere(businessId, query, user);
     const outstandingWhere: Prisma.CreditSaleWhereInput = {
       AND: [
         where,
@@ -804,7 +821,7 @@ export class ReportsService {
       FROM "CreditSale" cs
       JOIN "Sale" s ON s.id = cs."saleId"
       JOIN "Customer" c ON c.id = cs."customerId"
-      WHERE ${this.buildRawCreditWhere(businessId, query, 'cs', 's', 'c')}
+      WHERE ${this.buildRawCreditWhere(businessId, query, 'cs', 's', 'c', user)}
       GROUP BY cs."customerId", c."companyName", c."firstName", c."lastName", c."phone"
       ORDER BY "outstandingBalance" DESC
     `;
@@ -840,7 +857,7 @@ export class ReportsService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const where = this.buildCreditPaymentWhere(businessId, query);
+    const where = this.buildCreditPaymentWhere(businessId, query, user);
 
     const [summary, total, payments] = await Promise.all([
       this.prisma.creditPayment.aggregate({
@@ -910,8 +927,16 @@ export class ReportsService {
     user: AuthenticatedUser,
   ) {
     const supplierWhere = this.buildSupplierWhere(businessId, query);
-    const purchaseWhere = this.buildPurchaseOrderWhere(businessId, query);
-    const goodsWhere = this.buildGoodsSuppliedWhere(businessId, query);
+    const purchaseWhere = await this.buildPurchaseOrderWhere(
+      businessId,
+      query,
+      user,
+    );
+    const goodsWhere = await this.buildGoodsSuppliedWhere(
+      businessId,
+      query,
+      user,
+    );
 
     const [
       supplierTotals,
@@ -970,18 +995,20 @@ export class ReportsService {
           quantity: goodsAmount._sum.quantity ?? 0,
           amount: this.money(goodsAmount._sum.totalCost),
         },
-        supplierOutstandingBalances: this.money(
-          supplierTotals._sum.outstandingBalance,
-        ),
+        supplierOutstandingBalances: this.canViewAllUserActivity(user)
+          ? this.money(supplierTotals._sum.outstandingBalance)
+          : this.money(0),
       },
-      outstandingSuppliers: outstandingSuppliers.map((supplier) => ({
-        id: supplier.id,
-        supplierCode: supplier.supplierCode,
-        companyName: supplier.companyName,
-        phone: supplier.phone,
-        outstandingBalance: this.money(supplier.outstandingBalance),
-        status: supplier.status,
-      })),
+      outstandingSuppliers: this.canViewAllUserActivity(user)
+        ? outstandingSuppliers.map((supplier) => ({
+            id: supplier.id,
+            supplierCode: supplier.supplierCode,
+            companyName: supplier.companyName,
+            phone: supplier.phone,
+            outstandingBalance: this.money(supplier.outstandingBalance),
+            status: supplier.status,
+          }))
+        : [],
     };
   }
 
@@ -992,7 +1019,11 @@ export class ReportsService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const purchaseWhere = this.buildPurchaseOrderWhere(businessId, query);
+    const purchaseWhere = await this.buildPurchaseOrderWhere(
+      businessId,
+      query,
+      user,
+    );
 
     const [summary, total, rows] = await Promise.all([
       this.prisma.purchaseOrder.aggregate({
@@ -1085,6 +1116,7 @@ export class ReportsService {
       businessId,
       entity: 'SupplierPayment',
       action: AuditAction.UPDATE,
+      ...this.auditLogUserActivityScope(user),
       ...(query.supplierId ? { entityId: query.supplierId } : {}),
       ...(query.startDate || query.endDate
         ? {
@@ -2069,12 +2101,17 @@ export class ReportsService {
   private buildCreditWhere(
     businessId: string,
     query: CreditReportQueryDto,
+    user?: AuthenticatedUser,
   ): Prisma.CreditSaleWhereInput {
     const search = query.search?.trim();
     const now = new Date();
 
     return {
-      sale: { businessId, deletedAt: null },
+      sale: {
+        businessId,
+        deletedAt: null,
+        ...this.saleUserActivityScope(user),
+      },
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.overdue
@@ -2152,12 +2189,17 @@ export class ReportsService {
   private buildCreditPaymentWhere(
     businessId: string,
     query: CreditReportQueryDto,
+    user?: AuthenticatedUser,
   ): Prisma.CreditPaymentWhereInput {
     const search = query.search?.trim();
 
     return {
       creditSale: {
-        sale: { businessId, deletedAt: null },
+        sale: {
+          businessId,
+          deletedAt: null,
+          ...this.saleUserActivityScope(user),
+        },
         ...(query.status ? { status: query.status } : {}),
       },
       ...(query.customerId ? { customerId: query.customerId } : {}),
@@ -2207,6 +2249,7 @@ export class ReportsService {
     creditAlias: string,
     saleAlias: string,
     customerAlias: string,
+    user?: AuthenticatedUser,
   ) {
     const cs = Prisma.raw(`"${creditAlias}"`);
     const s = Prisma.raw(`"${saleAlias}"`);
@@ -2221,6 +2264,9 @@ export class ReportsService {
       conditions.push(
         Prisma.sql`${cs}."customerId" = ${query.customerId}::uuid`,
       );
+    }
+    if (!this.canViewAllUserActivity(user) && user) {
+      conditions.push(Prisma.sql`${s}."userId" = ${user.id}::uuid`);
     }
     if (query.status) {
       conditions.push(
@@ -2304,10 +2350,11 @@ export class ReportsService {
     };
   }
 
-  private buildPurchaseOrderWhere(
+  private async buildPurchaseOrderWhere(
     businessId: string,
     query: SupplierReportQueryDto,
-  ): Prisma.PurchaseOrderWhereInput {
+    user?: AuthenticatedUser,
+  ): Promise<Prisma.PurchaseOrderWhereInput> {
     const search = query.search?.trim();
     const supplierFilter = this.buildSupplierWhere(businessId, {
       ...query,
@@ -2316,6 +2363,11 @@ export class ReportsService {
 
     return {
       businessId,
+      ...(await this.auditEntityActivityScope(
+        businessId,
+        'PurchaseOrder',
+        user,
+      )),
       ...(query.supplierId ? { supplierId: query.supplierId } : {}),
       ...(query.purchaseOrderStatus
         ? { status: query.purchaseOrderStatus }
@@ -2352,10 +2404,11 @@ export class ReportsService {
     };
   }
 
-  private buildGoodsSuppliedWhere(
+  private async buildGoodsSuppliedWhere(
     businessId: string,
     query: SupplierReportQueryDto,
-  ): Prisma.GoodsSuppliedWhereInput {
+    user?: AuthenticatedUser,
+  ): Promise<Prisma.GoodsSuppliedWhereInput> {
     const search = query.search?.trim();
     const supplierFilter = this.buildSupplierWhere(businessId, {
       ...query,
@@ -2364,6 +2417,11 @@ export class ReportsService {
 
     return {
       businessId,
+      ...(await this.auditEntityActivityScope(
+        businessId,
+        'GoodsSupplied',
+        user,
+      )),
       ...(query.supplierId ? { supplierId: query.supplierId } : {}),
       ...(query.startDate || query.endDate
         ? {
@@ -2917,6 +2975,72 @@ export class ReportsService {
     }
 
     return Prisma.sql`AND ${Prisma.join(conditions, ' AND ')}`;
+  }
+
+  private scopeUserQuery<
+    T extends { userId?: string; employeeId?: string; branchId?: string },
+  >(query: T, user: AuthenticatedUser): T {
+    if (this.canViewAllUserActivity(user)) {
+      return query;
+    }
+
+    return {
+      ...query,
+      userId: user.id,
+      employeeId: undefined,
+      branchId: undefined,
+    };
+  }
+
+  private saleUserActivityScope(
+    user?: AuthenticatedUser,
+  ): Prisma.SaleWhereInput {
+    return this.canViewAllUserActivity(user) || !user
+      ? {}
+      : { userId: user.id };
+  }
+
+  private auditLogUserActivityScope(
+    user?: AuthenticatedUser,
+  ): Prisma.AuditLogWhereInput {
+    return this.canViewAllUserActivity(user) || !user
+      ? {}
+      : { userId: user.id };
+  }
+
+  private async auditEntityActivityScope(
+    businessId: string,
+    entity: string,
+    user?: AuthenticatedUser,
+  ) {
+    if (this.canViewAllUserActivity(user) || !user) {
+      return {};
+    }
+
+    const logs = await this.prisma.auditLog.findMany({
+      where: {
+        businessId,
+        userId: user.id,
+        action: AuditAction.CREATE,
+        entity,
+        entityId: { not: null },
+      },
+      select: { entityId: true },
+    });
+
+    return {
+      id: {
+        in: logs
+          .map((log) => log.entityId)
+          .filter((entityId): entityId is string => Boolean(entityId)),
+      },
+    };
+  }
+
+  private canViewAllUserActivity(user?: AuthenticatedUser) {
+    return Boolean(
+      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
   }
 
   private resolveDateRange(

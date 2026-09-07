@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -16,8 +17,11 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { SYSTEM_ROLES } from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { AdjustInventoryDto } from './dto/adjust-inventory.dto';
+import { CreateProductReturnRequestDto } from './dto/create-product-return-request.dto';
 import { InventoryHistoryQueryDto } from './dto/inventory-history-query.dto';
 import { InventoryQueryDto } from './dto/inventory-query.dto';
+import { ProductReturnRequestDecisionDto } from './dto/product-return-request-decision.dto';
+import { ProductReturnRequestQueryDto } from './dto/product-return-request-query.dto';
 import { StockAdjustmentQueryDto } from './dto/stock-adjustment-query.dto';
 import { StockMutationDto } from './dto/stock-mutation.dto';
 import { StockAdjustmentRequestDto } from './dto/stock-adjustment-request.dto';
@@ -143,6 +147,79 @@ export class InventoryController {
     @Param('businessId', ParseUUIDPipe) businessId: string,
   ) {
     return this.inventoryService.getOutOfStockProducts(businessId);
+  }
+
+  @Get('return-requests')
+  @Roles(
+    SYSTEM_ROLES.OWNER,
+    SYSTEM_ROLES.ADMIN,
+    SYSTEM_ROLES.MANAGER,
+    SYSTEM_ROLES.INVENTORY_OFFICER,
+    SYSTEM_ROLES.SALESPERSON,
+    SYSTEM_ROLES.CASHIER,
+  )
+  @ApiOperation({ summary: 'List returned product approval requests' })
+  getReturnRequests(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @Query() query: ProductReturnRequestQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.inventoryService.findReturnRequests(businessId, query, user);
+  }
+
+  @Post('return-requests')
+  @Roles(
+    SYSTEM_ROLES.OWNER,
+    SYSTEM_ROLES.ADMIN,
+    SYSTEM_ROLES.MANAGER,
+    SYSTEM_ROLES.INVENTORY_OFFICER,
+    SYSTEM_ROLES.SALESPERSON,
+    SYSTEM_ROLES.CASHIER,
+  )
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Request returned product approval' })
+  createReturnRequest(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @Body() dto: CreateProductReturnRequestDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.inventoryService.createReturnRequest(businessId, dto, user);
+  }
+
+  @Patch('return-requests/:id/approve')
+  @Permissions('inventory.manage')
+  @Roles(SYSTEM_ROLES.OWNER, SYSTEM_ROLES.ADMIN)
+  @ApiOperation({ summary: 'Approve returned product request' })
+  approveReturnRequest(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ProductReturnRequestDecisionDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.inventoryService.approveReturnRequest(
+      businessId,
+      id,
+      dto,
+      user,
+    );
+  }
+
+  @Patch('return-requests/:id/reject')
+  @Permissions('inventory.manage')
+  @Roles(SYSTEM_ROLES.OWNER, SYSTEM_ROLES.ADMIN)
+  @ApiOperation({ summary: 'Reject returned product request' })
+  rejectReturnRequest(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ProductReturnRequestDecisionDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.inventoryService.rejectReturnRequest(
+      businessId,
+      id,
+      dto,
+      user,
+    );
   }
 
   @Get(':productId')
@@ -298,11 +375,9 @@ export class InventoryController {
   @Roles(
     SYSTEM_ROLES.OWNER,
     SYSTEM_ROLES.ADMIN,
-    SYSTEM_ROLES.MANAGER,
-    SYSTEM_ROLES.INVENTORY_OFFICER,
   )
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Record stock return' })
+  @ApiOperation({ summary: 'Record stock return directly as owner/admin' })
   stockReturn(
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Body() dto: StockMutationDto,

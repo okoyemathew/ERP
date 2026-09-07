@@ -17,6 +17,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { SYSTEM_ROLES } from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { AssignEmployeeRoleDto } from './dto/assign-employee-role.dto';
+import { CreditSalePermissionsDto } from './dto/credit-sale-permissions.dto';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { EmployeeActivityQueryDto } from './dto/employee-activity-query.dto';
 import { EmployeeLoginAccessDto } from './dto/employee-login-access.dto';
@@ -198,6 +199,22 @@ export class EmployeeController {
     @Body() dto: EmployeeLoginAccessDto,
   ) {
     return this.employeeService.setLoginAccess(user.businessId, id, dto, user);
+  }
+
+  @Patch(':id/credit-sale-permissions')
+  @Roles(SYSTEM_ROLES.OWNER)
+  @ApiOperation({ summary: 'Enable or disable employee credit-sale edit/delete permissions' })
+  setCreditSalePermissions(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreditSalePermissionsDto,
+  ) {
+    return this.employeeService.setCreditSalePermissions(
+      user.businessId,
+      id,
+      dto,
+      user,
+    );
   }
 
   @Post(':id/permissions/verify')

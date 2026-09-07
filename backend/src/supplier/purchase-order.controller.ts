@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   ParseUUIDPipe,
@@ -41,6 +42,7 @@ export class PurchaseOrderController {
     @Body() dto: CreatePurchaseOrderDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.purchaseOrderService.create(businessId, supplierId, dto, user);
   }
 
@@ -57,9 +59,11 @@ export class PurchaseOrderController {
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Param('supplierId', ParseUUIDPipe) supplierId: string,
     @Query() query: PurchaseOrderQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     const queryWithSupplier = { ...query, supplierId };
-    return this.purchaseOrderService.findAll(businessId, queryWithSupplier);
+    return this.purchaseOrderService.findAll(businessId, queryWithSupplier, user);
   }
 
   @Get('search')
@@ -76,12 +80,15 @@ export class PurchaseOrderController {
     @Param('supplierId', ParseUUIDPipe) supplierId: string,
     @Query('q') q: string,
     @Query() query: PurchaseOrderQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     const queryWithSupplier = { ...query, supplierId };
     return this.purchaseOrderService.search(
       businessId,
       q ?? '',
       queryWithSupplier,
+      user,
     );
   }
 
@@ -97,8 +104,10 @@ export class PurchaseOrderController {
   findOne(
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.purchaseOrderService.findOne(businessId, id);
+    this.assertBusinessAccess(businessId, user);
+    return this.purchaseOrderService.findOne(businessId, id, user);
   }
 
   @Patch(':id')
@@ -115,6 +124,7 @@ export class PurchaseOrderController {
     @Body() dto: UpdatePurchaseOrderDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.purchaseOrderService.update(businessId, id, dto, user);
   }
 
@@ -132,6 +142,7 @@ export class PurchaseOrderController {
     @Body() dto: AddPurchaseOrderItemDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.purchaseOrderService.addItem(
       businessId,
       purchaseOrderId,
@@ -154,6 +165,7 @@ export class PurchaseOrderController {
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.purchaseOrderService.removeItem(
       businessId,
       purchaseOrderId,
@@ -175,6 +187,7 @@ export class PurchaseOrderController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.purchaseOrderService.submit(businessId, id, user);
   }
 
@@ -186,6 +199,7 @@ export class PurchaseOrderController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.purchaseOrderService.approve(businessId, id, user);
   }
 
@@ -197,6 +211,7 @@ export class PurchaseOrderController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.purchaseOrderService.cancel(businessId, id, user);
   }
 
@@ -214,6 +229,13 @@ export class PurchaseOrderController {
     @Body() dto: ReceivePurchaseOrderDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.purchaseOrderService.receive(businessId, id, dto, user);
+  }
+
+  private assertBusinessAccess(businessId: string, user: AuthenticatedUser) {
+    if (businessId !== user.businessId) {
+      throw new ForbiddenException('Access denied to this business');
+    }
   }
 }

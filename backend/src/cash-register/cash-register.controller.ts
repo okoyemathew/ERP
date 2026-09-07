@@ -58,7 +58,7 @@ export class CashRegisterController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: CashRegisterQueryDto,
   ) {
-    return this.cashRegisterService.findAll(user.businessId, query);
+    return this.cashRegisterService.findAll(user.businessId, query, user);
   }
 
   @Get('daily-balance')
@@ -68,7 +68,7 @@ export class CashRegisterController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: DailyBalanceQueryDto,
   ) {
-    return this.cashRegisterService.dailyBalance(user.businessId, query);
+    return this.cashRegisterService.dailyBalance(user.businessId, query, user);
   }
 
   @Get(':id')
@@ -78,7 +78,7 @@ export class CashRegisterController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.cashRegisterService.findOne(user.businessId, id);
+    return this.cashRegisterService.findOne(user.businessId, id, user);
   }
 
   @Post('adjustment')

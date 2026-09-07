@@ -81,7 +81,7 @@ export class CreditSalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: CreditSaleQueryDto,
   ) {
-    return this.creditSalesService.findAll(user.businessId, query);
+    return this.creditSalesService.findAll(user.businessId, query, user);
   }
 
   @Get('search')
@@ -92,7 +92,7 @@ export class CreditSalesController {
     @Query('q') q: string,
     @Query() query: CreditSaleQueryDto,
   ) {
-    return this.creditSalesService.search(user.businessId, q ?? '', query);
+    return this.creditSalesService.search(user.businessId, q ?? '', query, user);
   }
 
   @Get('outstanding-balance')
@@ -115,7 +115,7 @@ export class CreditSalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: CreditSaleQueryDto,
   ) {
-    return this.creditSalesService.getOutstandingReport(user.businessId, query);
+    return this.creditSalesService.getOutstandingReport(user.businessId, query, user);
   }
 
   @Get('pos/outstanding')
@@ -203,7 +203,7 @@ export class CreditSalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: CreditSaleQueryDto,
   ) {
-    return this.creditSalesService.getOverdueReport(user.businessId, query);
+    return this.creditSalesService.getOverdueReport(user.businessId, query, user);
   }
 
   @Get('customers/:customerId')
@@ -248,6 +248,7 @@ export class CreditSalesController {
     return this.creditSalesService.getCustomerOutstandingBalance(
       user.businessId,
       customerId,
+      user,
     );
   }
 
@@ -263,6 +264,7 @@ export class CreditSalesController {
       user.businessId,
       customerId,
       query,
+      user,
     );
   }
 
@@ -278,6 +280,7 @@ export class CreditSalesController {
       user.businessId,
       customerId,
       query,
+      user,
     );
   }
 
@@ -293,6 +296,7 @@ export class CreditSalesController {
       user.businessId,
       customerId,
       query,
+      user,
     );
   }
 
@@ -353,7 +357,7 @@ export class CreditSalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.creditSalesService.findOne(user.businessId, id);
+    return this.creditSalesService.findOne(user.businessId, id, user);
   }
 
   @Get(':id/due-date')
@@ -363,7 +367,7 @@ export class CreditSalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.creditSalesService.getDueDate(user.businessId, id);
+    return this.creditSalesService.getDueDate(user.businessId, id, user);
   }
 
   @Get(':id/status')
@@ -373,7 +377,7 @@ export class CreditSalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.creditSalesService.getStatus(user.businessId, id);
+    return this.creditSalesService.getStatus(user.businessId, id, user);
   }
 
   @Get(':id/balance')
@@ -383,7 +387,7 @@ export class CreditSalesController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.creditSalesService.getRemainingBalance(user.businessId, id);
+    return this.creditSalesService.getRemainingBalance(user.businessId, id, user);
   }
 
   @Get(':id/payments')
@@ -398,6 +402,7 @@ export class CreditSalesController {
       user.businessId,
       id,
       query,
+      user,
     );
   }
 

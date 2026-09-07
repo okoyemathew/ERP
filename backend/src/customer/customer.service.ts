@@ -12,6 +12,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
 import { AuthorizationService } from '../auth/services/authorization.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -261,9 +262,13 @@ export class CustomerService {
     };
   }
 
-  async getProfile(businessId: string, id: string) {
+  async getProfile(
+    businessId: string,
+    id: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const customer = await this.findOne(businessId, id);
-    const balance = await this.calculateCustomerBalance(businessId, id);
+    const balance = await this.calculateCustomerBalance(businessId, id, viewer);
 
     const [
       salesTotal,
@@ -274,25 +279,53 @@ export class CustomerService {
       paymentCount,
     ] = await Promise.all([
       this.prisma.sale.aggregate({
-        where: { businessId, customerId: id, deletedAt: null },
+        where: {
+          businessId,
+          customerId: id,
+          deletedAt: null,
+          ...this.userActivityScope(viewer),
+        },
         _sum: { totalAmount: true, balanceDue: true },
       }),
       this.prisma.payment.aggregate({
-        where: { businessId, customerId: id },
+        where: {
+          businessId,
+          customerId: id,
+          ...this.userActivityScope(viewer),
+        },
         _sum: { amount: true },
       }),
       this.prisma.creditSale.aggregate({
-        where: { customerId: id, sale: { businessId } },
+        where: {
+          customerId: id,
+          sale: { businessId, ...this.userActivityScope(viewer) },
+        },
         _sum: { totalCredit: true, balance: true },
       }),
       this.prisma.creditPayment.aggregate({
-        where: { customerId: id, creditSale: { sale: { businessId } } },
+        where: {
+          customerId: id,
+          creditSale: {
+            sale: { businessId, ...this.userActivityScope(viewer) },
+          },
+        },
         _sum: { amount: true },
       }),
       this.prisma.sale.count({
-        where: { businessId, customerId: id, deletedAt: null },
+        where: {
+          businessId,
+          customerId: id,
+          deletedAt: null,
+          ...this.userActivityScope(viewer),
+        },
       }),
-      this.prisma.payment.count({ where: { businessId, customerId: id } }),
+      this.prisma.payment.count({
+        where: {
+          businessId,
+          customerId: id,
+          ...this.userActivityScope(viewer),
+        },
+      }),
     ]);
 
     return {
@@ -321,6 +354,7 @@ export class CustomerService {
     businessId: string,
     id: string,
     query: CustomerQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -330,6 +364,7 @@ export class CustomerService {
       businessId,
       customerId: id,
       deletedAt: null,
+      ...this.userActivityScope(viewer),
     };
     const [total, items] = await Promise.all([
       this.prisma.sale.count({ where }),
@@ -356,14 +391,16 @@ export class CustomerService {
     businessId: string,
     id: string,
     query: CustomerQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
-    return this.getPurchaseHistory(businessId, id, query);
+    return this.getPurchaseHistory(businessId, id, query, viewer);
   }
 
   async getPaymentHistory(
     businessId: string,
     id: string,
     query: CustomerQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -371,17 +408,37 @@ export class CustomerService {
 
     const [paymentTotal, creditPaymentTotal, payments, creditPayments] =
       await Promise.all([
-        this.prisma.payment.count({ where: { businessId, customerId: id } }),
+        this.prisma.payment.count({
+          where: {
+            businessId,
+            customerId: id,
+            ...this.userActivityScope(viewer),
+          },
+        }),
         this.prisma.creditPayment.count({
-          where: { customerId: id, creditSale: { sale: { businessId } } },
+          where: {
+            customerId: id,
+            creditSale: {
+              sale: { businessId, ...this.userActivityScope(viewer) },
+            },
+          },
         }),
         this.prisma.payment.findMany({
-          where: { businessId, customerId: id },
+          where: {
+            businessId,
+            customerId: id,
+            ...this.userActivityScope(viewer),
+          },
           include: { sale: true },
           orderBy: { paymentDate: 'desc' },
         }),
         this.prisma.creditPayment.findMany({
-          where: { customerId: id, creditSale: { sale: { businessId } } },
+          where: {
+            customerId: id,
+            creditSale: {
+              sale: { businessId, ...this.userActivityScope(viewer) },
+            },
+          },
           include: {
             user: {
               select: {
@@ -423,6 +480,7 @@ export class CustomerService {
     businessId: string,
     id: string,
     query: CustomerQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -430,7 +488,7 @@ export class CustomerService {
 
     const where: Prisma.CreditSaleWhereInput = {
       customerId: id,
-      sale: { businessId },
+      sale: { businessId, ...this.userActivityScope(viewer) },
     };
     const [total, items] = await Promise.all([
       this.prisma.creditSale.count({ where }),
@@ -453,25 +511,40 @@ export class CustomerService {
     businessId: string,
     id: string,
     query: CustomerQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
     const customer = await this.findOne(businessId, id);
     const [sales, payments, creditPayments, balance] = await Promise.all([
       this.prisma.sale.findMany({
-        where: { businessId, customerId: id, deletedAt: null },
+        where: {
+          businessId,
+          customerId: id,
+          deletedAt: null,
+          ...this.userActivityScope(viewer),
+        },
         orderBy: { saleDate: 'asc' },
       }),
       this.prisma.payment.findMany({
-        where: { businessId, customerId: id },
+        where: {
+          businessId,
+          customerId: id,
+          ...this.userActivityScope(viewer),
+        },
         orderBy: { paymentDate: 'asc' },
       }),
       this.prisma.creditPayment.findMany({
-        where: { customerId: id, creditSale: { sale: { businessId } } },
+        where: {
+          customerId: id,
+          creditSale: {
+            sale: { businessId, ...this.userActivityScope(viewer) },
+          },
+        },
         include: { creditSale: true },
         orderBy: { paymentDate: 'asc' },
       }),
-      this.calculateCustomerBalance(businessId, id),
+      this.calculateCustomerBalance(businessId, id, viewer),
     ]);
 
     let runningBalance = new Decimal(0);
@@ -529,7 +602,11 @@ export class CustomerService {
   ) {
     const customer = await this.findOne(businessId, customerId);
     const amount = new Decimal(creditAmount);
-    const balance = await this.calculateCustomerBalance(businessId, customerId);
+    const balance = await this.calculateCustomerBalance(
+      businessId,
+      customerId,
+      user,
+    );
     const projectedCreditBalance = balance.outstandingCreditBalance.add(amount);
 
     if (projectedCreditBalance.lte(customer.creditLimit)) {
@@ -579,7 +656,7 @@ export class CustomerService {
         where: {
           customerId: id,
           ...(dto.creditSaleId ? { id: dto.creditSaleId } : {}),
-          sale: { businessId },
+          sale: { businessId, ...this.userActivityScope(user) },
           balance: { gt: 0 },
           status: { not: CreditSaleStatus.PAID },
         },
@@ -652,13 +729,14 @@ export class CustomerService {
             customerId: id,
             deletedAt: null,
             balanceDue: { gt: 0 },
+            ...this.userActivityScope(user),
           },
           _sum: { balanceDue: true },
         }),
         tx.creditSale.aggregate({
           where: {
             customerId: id,
-            sale: { businessId },
+            sale: { businessId, ...this.userActivityScope(user) },
             balance: { gt: 0 },
             status: { not: CreditSaleStatus.PAID },
           },
@@ -825,6 +903,7 @@ export class CustomerService {
   private async calculateCustomerBalance(
     businessId: string,
     customerId: string,
+    viewer?: AuthenticatedUser,
   ) {
     const [saleBalance, creditBalance] = await Promise.all([
       this.prisma.sale.aggregate({
@@ -833,13 +912,14 @@ export class CustomerService {
           customerId,
           deletedAt: null,
           balanceDue: { gt: 0 },
+          ...this.userActivityScope(viewer),
         },
         _sum: { balanceDue: true },
       }),
       this.prisma.creditSale.aggregate({
         where: {
           customerId,
-          sale: { businessId },
+          sale: { businessId, ...this.userActivityScope(viewer) },
           balance: { gt: 0 },
           status: { not: CreditSaleStatus.PAID },
         },
@@ -856,6 +936,18 @@ export class CustomerService {
       outstandingCreditBalance,
       totalOutstanding: saleBalanceDue.add(outstandingCreditBalance),
     };
+  }
+
+  private canViewAllUserActivity(user?: AuthenticatedUser): boolean {
+    return Boolean(
+      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
+  }
+
+  private userActivityScope(user?: AuthenticatedUser) {
+    return this.canViewAllUserActivity(user) || !user
+      ? {}
+      : { userId: user.id };
   }
 
   private buildWhere(

@@ -158,11 +158,13 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
   );
 
   const openTransaction = (creditSale: ApiCreditSale) => {
+    console.log("CREDIT_CUSTOMER_TRANSACTION_PRESSED", creditSale.id, creditSale.sale.saleNumber);
     setSelectedCredit(creditSale);
     setDetailVisible(true);
   };
 
   const openPayment = (creditSale: ApiCreditSale) => {
+    console.log("CREDIT_CUSTOMER_PAYMENT_PRESSED", creditSale.id, creditSale.sale.saleNumber);
     setSelectedCredit(creditSale);
     setAmount(String(invoiceTotals(creditSale).balance));
     setReference(`CR-${Date.now()}`);
@@ -171,6 +173,7 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
   };
 
   const openInvoice = (creditSale: ApiCreditSale) => {
+    console.log("CREDIT_CUSTOMER_PRINT_INVOICE_PRESSED", creditSale.id, creditSale.sale.saleNumber);
     setActiveReceipt(buildCreditInvoiceReceipt(creditSale, customerName));
     setReceiptVisible(true);
   };
@@ -239,6 +242,8 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
         contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
         showsVerticalScrollIndicator
         persistentScrollbar
+        keyboardShouldPersistTaps="always"
+        keyboardDismissMode="on-drag"
       >
         <Card style={styles.customerCard}>
           <Text style={styles.customerName}>{response.customer.name}</Text>
@@ -307,7 +312,13 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
               </Pressable>
             </View>
             {selectedCredit ? (
-              <ScrollView contentContainerStyle={[styles.sheetContent, { paddingBottom: modalBottomPadding }]} showsVerticalScrollIndicator persistentScrollbar>
+              <ScrollView
+                contentContainerStyle={[styles.sheetContent, { paddingBottom: modalBottomPadding }]}
+                showsVerticalScrollIndicator
+                persistentScrollbar
+                keyboardShouldPersistTaps="always"
+                keyboardDismissMode="on-drag"
+              >
                 {(() => {
                   const totals = invoiceTotals(selectedCredit);
                   return (
@@ -379,7 +390,13 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
             <View style={styles.handle} />
             <Text style={styles.sheetTitle}>Record Payment</Text>
             {selectedCredit ? (
-              <ScrollView contentContainerStyle={[styles.sheetContent, { paddingBottom: modalBottomPadding }]} showsVerticalScrollIndicator persistentScrollbar keyboardShouldPersistTaps="handled">
+              <ScrollView
+                contentContainerStyle={[styles.sheetContent, { paddingBottom: modalBottomPadding }]}
+                showsVerticalScrollIndicator
+                persistentScrollbar
+                keyboardShouldPersistTaps="always"
+                keyboardDismissMode="on-drag"
+              >
                 <Card style={styles.summaryCard}>
                   <Text style={styles.meta}>{selectedCredit.sale.saleNumber}</Text>
                   <Text style={styles.largeAmount}>{formatCurrency(invoiceTotals(selectedCredit).balance)}</Text>
@@ -391,7 +408,10 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
                   {paymentMethods.map((item) => (
                     <Pressable
                       key={item.value}
-                      onPress={() => setMethod(item.value)}
+                      onPress={() => {
+                        console.log("CREDIT_CUSTOMER_PAYMENT_METHOD_PRESSED", item.value);
+                        setMethod(item.value);
+                      }}
                       style={[styles.methodChip, method === item.value && styles.methodChipActive]}
                       accessibilityRole="button"
                       accessibilityLabel={`Pay by ${item.label}`}
@@ -401,7 +421,15 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
                     </Pressable>
                   ))}
                 </View>
-                <Button label="Confirm Payment" variant="success" loading={processing} onPress={() => void collectPayment()} />
+                <Button
+                  label="Confirm Payment"
+                  variant="success"
+                  loading={processing}
+                  onPress={() => {
+                    console.log("CREDIT_CUSTOMER_CONFIRM_PAYMENT_PRESSED", selectedCredit.id);
+                    void collectPayment();
+                  }}
+                />
               </ScrollView>
             ) : null}
           </View>
@@ -417,7 +445,13 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
               <Text style={styles.sheetTitle}>Invoice Preview</Text>
               <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printInvoice()} style={styles.printButton} />
             </View>
-            <ScrollView contentContainerStyle={{ paddingBottom: modalBottomPadding }} showsVerticalScrollIndicator persistentScrollbar>
+            <ScrollView
+              contentContainerStyle={{ paddingBottom: modalBottomPadding }}
+              showsVerticalScrollIndicator
+              persistentScrollbar
+              keyboardShouldPersistTaps="always"
+              keyboardDismissMode="on-drag"
+            >
               {activeReceipt ? <ReceiptTicket receipt={activeReceipt} /> : null}
             </ScrollView>
           </View>

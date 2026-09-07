@@ -19,7 +19,10 @@ import {
   Prisma,
   SaleStatus,
 } from '@prisma/client';
-import { SYSTEM_ROLES } from '../auth/constants/roles.constant';
+import {
+  ADMIN_ROLE_NAMES,
+  SYSTEM_ROLES,
+} from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCreditPaymentDto } from './dto/create-credit-payment.dto';
@@ -47,6 +50,8 @@ const FINANCIAL_CREDIT_ROLES = [
 ] as const;
 
 const CREDIT_SALE_ACTION_APPROVAL_HOURS = 24;
+const CREDIT_SALE_EDIT_PERMISSION = 'credit-sales.edit';
+const CREDIT_SALE_DELETE_PERMISSION = 'credit-sales.delete';
 
 @Injectable()
 export class CreditSalesService {
@@ -182,14 +187,18 @@ export class CreditSalesService {
     });
   }
 
-  async findAll(businessId: string, query: CreditSaleQueryDto = {}) {
+  async findAll(
+    businessId: string,
+    query: CreditSaleQueryDto = {},
+    viewer?: AuthenticatedUser,
+  ) {
     await this.refreshDefaultedCredits(businessId, this.prisma);
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'createdAt';
     const sortOrder = query.sortOrder ?? 'desc';
-    const where = this.buildWhere(businessId, query);
+    const where = this.buildWhere(businessId, query, viewer);
 
     const [summary, total, data] = await Promise.all([
       this.creditReportSummary(where),
@@ -205,7 +214,7 @@ export class CreditSalesService {
 
     return {
       summary,
-      data: data.map((creditSale) => this.formatCreditSale(creditSale)),
+      data: data.map((creditSale) => this.formatCreditSale(creditSale, viewer)),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -214,18 +223,24 @@ export class CreditSalesService {
     businessId: string,
     term: string,
     query: CreditSaleQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
-    return this.findAll(businessId, { ...query, search: term || query.search });
+    return this.findAll(
+      businessId,
+      { ...query, search: term || query.search },
+      viewer,
+    );
   }
 
-  async findOne(businessId: string, id: string) {
+  async findOne(businessId: string, id: string, viewer?: AuthenticatedUser) {
     await this.refreshCreditStatus(businessId, id, this.prisma);
     const creditSale = await this.getCreditSaleOrThrow(
       businessId,
       id,
       this.prisma,
+      viewer,
     );
-    return this.formatCreditSale(creditSale);
+    return this.formatCreditSale(creditSale, viewer);
   }
 
   async requestEmployeeAction(
@@ -435,15 +450,30 @@ export class CreditSalesService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const creditSale = await this.getCreditSaleOrThrow(businessId, id, tx);
-      this.assertEmployeeOwnsCreditSale(creditSale, user);
-      const approval = await this.getUsableActionApproval(
+      const creditSale = await this.getCreditSaleOrThrow(
         businessId,
         id,
-        CreditSaleEmployeeAction.EDIT,
+        tx,
         user,
+      );
+      if (!this.canViewAllCreditActivity(user)) {
+        this.assertEmployeeOwnsCreditSale(creditSale, user);
+      }
+      const canEditDirectly = await this.userHasPermission(
+        user,
+        CREDIT_SALE_EDIT_PERMISSION,
         tx,
       );
+      const approval =
+        this.canViewAllCreditActivity(user) || canEditDirectly
+          ? null
+          : await this.getUsableActionApproval(
+              businessId,
+              id,
+              CreditSaleEmployeeAction.EDIT,
+              user,
+              tx,
+            );
 
       if (dto.dueDate !== undefined) {
         await tx.creditSale.update({
@@ -462,7 +492,9 @@ export class CreditSalesService {
         });
       }
 
-      await this.markActionApprovalUsed(approval.id, tx);
+      if (approval) {
+        await this.markActionApprovalUsed(approval.id, tx);
+      }
 
       await this.audit(tx, {
         businessId,
@@ -473,8 +505,8 @@ export class CreditSalesService {
         description: `Edited approved credit sale ${creditSale.sale.saleNumber}`,
       });
 
-      const updated = await this.getCreditSaleOrThrow(businessId, id, tx);
-      return this.formatCreditSale(updated);
+      const updated = await this.getCreditSaleOrThrow(businessId, id, tx, user);
+      return this.formatCreditSale(updated, user);
     });
   }
 
@@ -487,15 +519,30 @@ export class CreditSalesService {
     await this.refreshCreditStatus(businessId, id, this.prisma);
 
     return this.prisma.$transaction(async (tx) => {
-      const creditSale = await this.getCreditSaleOrThrow(businessId, id, tx);
-      this.assertEmployeeOwnsCreditSale(creditSale, user);
-      const approval = await this.getUsableActionApproval(
+      const creditSale = await this.getCreditSaleOrThrow(
         businessId,
         id,
-        CreditSaleEmployeeAction.DELETE,
+        tx,
         user,
+      );
+      if (!this.canViewAllCreditActivity(user)) {
+        this.assertEmployeeOwnsCreditSale(creditSale, user);
+      }
+      const canDeleteDirectly = await this.userHasPermission(
+        user,
+        CREDIT_SALE_DELETE_PERMISSION,
         tx,
       );
+      const approval =
+        this.canViewAllCreditActivity(user) || canDeleteDirectly
+          ? null
+          : await this.getUsableActionApproval(
+              businessId,
+              id,
+              CreditSaleEmployeeAction.DELETE,
+              user,
+              tx,
+            );
       const now = new Date();
 
       for (const item of creditSale.sale.items) {
@@ -576,7 +623,9 @@ export class CreditSalesService {
         },
       });
 
-      await this.markActionApprovalUsed(approval.id, tx);
+      if (approval) {
+        await this.markActionApprovalUsed(approval.id, tx);
+      }
 
       await this.audit(tx, {
         businessId,
@@ -608,13 +657,14 @@ export class CreditSalesService {
     const limit = query.limit ?? 20;
     const where: Prisma.CreditSaleWhereInput = {
       AND: [
-        this.buildWhere(businessId, {
-          ...query,
-          customerId,
-        }),
-        ...(viewer && !this.canViewFinancialCredit(viewer)
-          ? [{ sale: { userId: viewer.id } }]
-          : []),
+        this.buildWhere(
+          businessId,
+          {
+            ...query,
+            customerId,
+          },
+          viewer,
+        ),
       ],
     };
 
@@ -640,12 +690,16 @@ export class CreditSalesService {
         storedOutstandingBalance: customer.outstandingBalance,
       },
       summary,
-      data: creditSales.map((creditSale) => this.formatCreditSale(creditSale)),
+      data: creditSales.map((creditSale) => this.formatCreditSale(creditSale, viewer)),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
 
-  async getCustomerOutstandingBalance(businessId: string, customerId: string) {
+  async getCustomerOutstandingBalance(
+    businessId: string,
+    customerId: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const customer = await this.getCustomerOrThrow(
       businessId,
       customerId,
@@ -655,6 +709,7 @@ export class CreditSalesService {
       businessId,
       customerId,
       this.prisma,
+      viewer,
     );
 
     return {
@@ -732,11 +787,8 @@ export class CreditSalesService {
     const sortOrder = query.sortOrder ?? 'desc';
     const where: Prisma.CreditSaleWhereInput = {
       AND: [
-        this.buildWhere(businessId, query),
+        this.buildWhere(businessId, query, viewer),
         { balance: { gt: 0 }, status: { not: CreditSaleStatus.PAID } },
-        ...(viewer && !this.canViewFinancialCredit(viewer)
-          ? [{ sale: { userId: viewer.id } }]
-          : []),
       ],
     };
 
@@ -759,7 +811,11 @@ export class CreditSalesService {
     };
   }
 
-  async getOverdueReport(businessId: string, query: CreditSaleQueryDto = {}) {
+  async getOverdueReport(
+    businessId: string,
+    query: CreditSaleQueryDto = {},
+    viewer?: AuthenticatedUser,
+  ) {
     await this.refreshDefaultedCredits(businessId, this.prisma);
 
     const page = query.page ?? 1;
@@ -768,7 +824,7 @@ export class CreditSalesService {
     const sortOrder = query.sortOrder ?? 'asc';
     const where: Prisma.CreditSaleWhereInput = {
       AND: [
-        this.buildWhere(businessId, { ...query, overdue: undefined }),
+        this.buildWhere(businessId, { ...query, overdue: undefined }, viewer),
         {
           balance: { gt: 0 },
           dueDate: { lt: new Date() },
@@ -791,17 +847,22 @@ export class CreditSalesService {
 
     return {
       summary,
-      data: data.map((creditSale) => this.formatCreditSale(creditSale)),
+      data: data.map((creditSale) => this.formatCreditSale(creditSale, viewer)),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
 
-  async getDueDate(businessId: string, id: string) {
+  async getDueDate(
+    businessId: string,
+    id: string,
+    viewer?: AuthenticatedUser,
+  ) {
     await this.refreshCreditStatus(businessId, id, this.prisma);
     const creditSale = await this.getCreditSaleOrThrow(
       businessId,
       id,
       this.prisma,
+      viewer,
     );
 
     return {
@@ -815,12 +876,13 @@ export class CreditSalesService {
     };
   }
 
-  async getStatus(businessId: string, id: string) {
+  async getStatus(businessId: string, id: string, viewer?: AuthenticatedUser) {
     await this.refreshCreditStatus(businessId, id, this.prisma);
     const creditSale = await this.getCreditSaleOrThrow(
       businessId,
       id,
       this.prisma,
+      viewer,
     );
 
     return {
@@ -836,12 +898,17 @@ export class CreditSalesService {
     };
   }
 
-  async getRemainingBalance(businessId: string, id: string) {
+  async getRemainingBalance(
+    businessId: string,
+    id: string,
+    viewer?: AuthenticatedUser,
+  ) {
     await this.refreshCreditStatus(businessId, id, this.prisma);
     const creditSale = await this.getCreditSaleOrThrow(
       businessId,
       id,
       this.prisma,
+      viewer,
     );
 
     return this.formatCreditBalance(creditSale);
@@ -851,17 +918,19 @@ export class CreditSalesService {
     businessId: string,
     id: string,
     query: CreditPaymentQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
     const creditSale = await this.getCreditSaleOrThrow(
       businessId,
       id,
       this.prisma,
+      viewer,
     );
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const where = this.buildPaymentWhere(businessId, query, {
       creditSaleId: id,
-    });
+    }, viewer);
 
     const [total, payments] = await Promise.all([
       this.prisma.creditPayment.count({ where }),
@@ -885,6 +954,7 @@ export class CreditSalesService {
     businessId: string,
     customerId: string,
     query: CreditPaymentQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
     const customer = await this.getCustomerOrThrow(
       businessId,
@@ -893,10 +963,15 @@ export class CreditSalesService {
     );
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const where = this.buildPaymentWhere(businessId, query, { customerId });
+    const where = this.buildPaymentWhere(
+      businessId,
+      query,
+      { customerId },
+      viewer,
+    );
 
     const [summary, total, payments] = await Promise.all([
-      this.creditSummary(businessId, customerId, this.prisma),
+      this.creditSummary(businessId, customerId, this.prisma, viewer),
       this.prisma.creditPayment.count({ where }),
       this.prisma.creditPayment.findMany({
         where,
@@ -924,6 +999,7 @@ export class CreditSalesService {
     businessId: string,
     customerId: string,
     query: CreditPaymentQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
     const customer = await this.getCustomerOrThrow(
       businessId,
@@ -935,7 +1011,7 @@ export class CreditSalesService {
     const search = query.search?.trim();
 
     const [summary, creditSales, payments] = await Promise.all([
-      this.creditSummary(businessId, customerId, this.prisma),
+      this.creditSummary(businessId, customerId, this.prisma, viewer),
       this.prisma.creditSale.findMany({
         where: {
           customerId,
@@ -943,6 +1019,7 @@ export class CreditSalesService {
           sale: {
             businessId,
             deletedAt: null,
+            ...this.userActivityScope(viewer),
             ...(search
               ? {
                   saleNumber: {
@@ -964,7 +1041,7 @@ export class CreditSalesService {
         include: { sale: { select: { saleNumber: true, saleDate: true } } },
       }),
       this.prisma.creditPayment.findMany({
-        where: this.buildPaymentWhere(businessId, query, { customerId }),
+        where: this.buildPaymentWhere(businessId, query, { customerId }, viewer),
         include: this.creditPaymentInclude(),
       }),
     ]);
@@ -1042,14 +1119,24 @@ export class CreditSalesService {
             throw new BadRequestException('Idempotency key is already in use');
           }
 
-          const updated = await this.getCreditSaleOrThrow(businessId, id, tx);
-          return this.formatCreditSale(updated);
+          const updated = await this.getCreditSaleOrThrow(
+            businessId,
+            id,
+            tx,
+            user,
+          );
+          return this.formatCreditSale(updated, user);
         }
       }
 
       await this.refreshCreditStatus(businessId, id, tx);
 
-      const creditSale = await this.getCreditSaleOrThrow(businessId, id, tx);
+      const creditSale = await this.getCreditSaleOrThrow(
+        businessId,
+        id,
+        tx,
+        user,
+      );
       const amount = new Prisma.Decimal(dto.amount);
 
       if (creditSale.customer.status !== CustomerStatus.ACTIVE) {
@@ -1170,8 +1257,8 @@ export class CreditSalesService {
         deviceId: dto.deviceId,
       });
 
-      const updated = await this.getCreditSaleOrThrow(businessId, id, tx);
-      return this.formatCreditSale(updated);
+      const updated = await this.getCreditSaleOrThrow(businessId, id, tx, user);
+      return this.formatCreditSale(updated, user);
     });
   }
 
@@ -1590,7 +1677,7 @@ export class CreditSalesService {
       sale: {
         businessId,
         deletedAt: null,
-        ...(viewer && !this.canViewFinancialCredit(viewer)
+        ...(viewer && !this.canViewAllCreditActivity(viewer)
           ? { userId: viewer.id }
           : {}),
       },
@@ -1787,6 +1874,7 @@ export class CreditSalesService {
     businessId: string,
     query: CreditPaymentQueryDto,
     scope: { creditSaleId?: string; customerId?: string },
+    viewer?: AuthenticatedUser,
   ): Prisma.CreditPaymentWhereInput {
     const search = query.search?.trim();
 
@@ -1795,7 +1883,11 @@ export class CreditSalesService {
       ...(scope.customerId ? { customerId: scope.customerId } : {}),
       creditSale: {
         deletedAt: null,
-        sale: { businessId, deletedAt: null },
+        sale: {
+          businessId,
+          deletedAt: null,
+          ...this.userActivityScope(viewer),
+        },
       },
       ...(query.paymentMethod ? { paymentMethod: query.paymentMethod } : {}),
       ...(query.startDate || query.endDate
@@ -1871,9 +1963,18 @@ export class CreditSalesService {
     businessId: string,
     id: string,
     tx: Tx | PrismaService,
+    viewer?: AuthenticatedUser,
   ) {
     const creditSale = await tx.creditSale.findFirst({
-      where: { id, deletedAt: null, sale: { businessId, deletedAt: null } },
+      where: {
+        id,
+        deletedAt: null,
+        sale: {
+          businessId,
+          deletedAt: null,
+          ...this.userActivityScope(viewer),
+        },
+      },
       include: this.creditSaleInclude(),
     });
 
@@ -1887,13 +1988,18 @@ export class CreditSalesService {
   private buildWhere(
     businessId: string,
     query: CreditSaleQueryDto,
+    viewer?: AuthenticatedUser,
   ): Prisma.CreditSaleWhereInput {
     const search = query.search?.trim();
     const now = new Date();
 
     return {
       deletedAt: null,
-      sale: { businessId, deletedAt: null },
+      sale: {
+        businessId,
+        deletedAt: null,
+        ...this.userActivityScope(viewer),
+      },
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.overdue
@@ -1991,7 +2097,7 @@ export class CreditSalesService {
     viewer?: AuthenticatedUser,
   ) {
     const visibleActionRequests = viewer
-      ? this.canViewFinancialCredit(viewer)
+      ? this.canViewAllCreditActivity(viewer)
         ? creditSale.actionRequests
         : creditSale.actionRequests.filter(
             (request) => request.requestedById === viewer.id,
@@ -2497,8 +2603,47 @@ export class CreditSalesService {
     }
   }
 
+  private async userHasPermission(
+    user: AuthenticatedUser,
+    permissionName: string,
+    tx: Tx | PrismaService,
+  ) {
+    if (this.canViewAllCreditActivity(user)) {
+      return true;
+    }
+
+    if (!user.roleId) {
+      return false;
+    }
+
+    const permission = await tx.rolePermission.findFirst({
+      where: {
+        roleId: user.roleId,
+        permission: {
+          businessId: user.businessId,
+          name: permissionName,
+        },
+      },
+      select: { id: true },
+    });
+
+    return Boolean(permission);
+  }
+
   private canViewFinancialCredit(user: AuthenticatedUser) {
     return FINANCIAL_CREDIT_ROLES.includes(user.roleName as never);
+  }
+
+  private canViewAllCreditActivity(user?: AuthenticatedUser): boolean {
+    return Boolean(
+      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
+  }
+
+  private userActivityScope(user?: AuthenticatedUser) {
+    return this.canViewAllCreditActivity(user) || !user
+      ? {}
+      : { userId: user.id };
   }
 
   private assertAllowedCreditPaymentMethod(paymentMethod: PaymentMethod) {

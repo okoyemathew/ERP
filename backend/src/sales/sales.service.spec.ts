@@ -77,6 +77,7 @@ function createPrismaMock() {
       create: jest.fn(),
       update: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
     saleItem: {
       aggregate: jest.fn(),
@@ -141,6 +142,66 @@ describe('SalesService authenticated ownership', () => {
         data: expect.objectContaining({
           userId: employeeUserId,
           action: AuditAction.SALE_CREATED,
+        }),
+      }),
+    );
+  });
+
+  it('scopes employee sale lists to the authenticated user', async () => {
+    const prisma = createPrismaMock();
+    const service = new SalesService(prisma as never);
+
+    prisma.sale.count.mockResolvedValue(0);
+    prisma.sale.findMany.mockResolvedValue([]);
+
+    await service.findAll(
+      businessId,
+      { userId: spoofedUserId } as never,
+      authUser,
+    );
+
+    expect(prisma.sale.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessId,
+          userId: employeeUserId,
+        }),
+      }),
+    );
+    expect(prisma.sale.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessId,
+          userId: employeeUserId,
+        }),
+      }),
+    );
+  });
+
+  it('allows owners to view all sales or filter by a selected user', async () => {
+    const prisma = createPrismaMock();
+    const service = new SalesService(prisma as never);
+    const owner: AuthenticatedUser = {
+      ...authUser,
+      id: '77777777-7777-7777-7777-777777777777',
+      roleName: 'Owner',
+      employeeId: null,
+    };
+
+    prisma.sale.count.mockResolvedValue(0);
+    prisma.sale.findMany.mockResolvedValue([]);
+
+    await service.findAll(
+      businessId,
+      { userId: spoofedUserId } as never,
+      owner,
+    );
+
+    expect(prisma.sale.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessId,
+          userId: spoofedUserId,
         }),
       }),
     );

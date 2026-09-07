@@ -108,7 +108,7 @@ export class CustomerApiController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: CustomerQueryDto,
   ) {
-    return this.customerService.getSalesHistory(user.businessId, id, query);
+    return this.customerService.getSalesHistory(user.businessId, id, query, user);
   }
 
   @Get(':id/payments')
@@ -126,7 +126,7 @@ export class CustomerApiController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: CustomerQueryDto,
   ) {
-    return this.customerService.getPaymentHistory(user.businessId, id, query);
+    return this.customerService.getPaymentHistory(user.businessId, id, query, user);
   }
 
   @Get(':id/credit')
@@ -143,7 +143,7 @@ export class CustomerApiController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: CustomerQueryDto,
   ) {
-    return this.customerService.getCreditHistory(user.businessId, id, query);
+    return this.customerService.getCreditHistory(user.businessId, id, query, user);
   }
 
   @Get(':id/statement')
@@ -159,6 +159,6 @@ export class CustomerApiController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query() query: CustomerQueryDto,
   ) {
-    return this.customerService.getStatement(user.businessId, id, query);
+    return this.customerService.getStatement(user.businessId, id, query, user);
   }
 }

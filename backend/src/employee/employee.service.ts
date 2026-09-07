@@ -20,6 +20,7 @@ import { hashPassword } from '../auth/utils/password.util';
 import { DEFAULT_BUSINESS_CURRENCY, formatMoney } from '../common/currency';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssignEmployeeRoleDto } from './dto/assign-employee-role.dto';
+import { CreditSalePermissionsDto } from './dto/credit-sale-permissions.dto';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { EmployeeActivityQueryDto } from './dto/employee-activity-query.dto';
 import { EmployeeLoginAccessDto } from './dto/employee-login-access.dto';
@@ -40,6 +41,9 @@ type EmployeeWithUser = Prisma.EmployeeGetPayload<{
     };
   };
 }>;
+
+const CREDIT_SALE_EDIT_PERMISSION = 'credit-sales.edit';
+const CREDIT_SALE_DELETE_PERMISSION = 'credit-sales.delete';
 
 @Injectable()
 export class EmployeeService {
@@ -523,6 +527,129 @@ export class EmployeeService {
         entity: 'EmployeeLoginAccess',
         entityId: id,
         description: `${dto.canLogin ? 'Enabled' : 'Disabled'} login for employee ${employee.employeeCode}${dto.reason ? `: ${dto.reason}` : ''}`,
+        deviceId: dto.deviceId,
+      });
+
+      return employee;
+    });
+
+    return this.sanitize(updated);
+  }
+
+  async setCreditSalePermissions(
+    businessId: string,
+    id: string,
+    dto: CreditSalePermissionsDto,
+    actor: AuthenticatedUser,
+  ) {
+    if (
+      dto.canEditCreditSales === undefined &&
+      dto.canDeleteCreditSales === undefined
+    ) {
+      throw new BadRequestException(
+        'No credit sale permission changes were provided',
+      );
+    }
+
+    const current = await this.prisma.employee.findFirst({
+      where: { id, businessId, deletedAt: null },
+      include: {
+        user: {
+          include: {
+            role: {
+              include: { rolePermissions: { include: { permission: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    if (!current) {
+      throw new NotFoundException('Employee not found');
+    }
+
+    this.assertOwnerCanManageEmployee(
+      current,
+      actor,
+      'update credit sale permissions for',
+    );
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const editablePermission = await this.ensurePermission(
+        tx,
+        businessId,
+        CREDIT_SALE_EDIT_PERMISSION,
+        'Edit authorized credit sales',
+      );
+      const deletablePermission = await this.ensurePermission(
+        tx,
+        businessId,
+        CREDIT_SALE_DELETE_PERMISSION,
+        'Delete authorized credit sales',
+      );
+
+      const roleName = `${current.employeeCode} Custom Permissions`;
+      const role = await tx.role.upsert({
+        where: { businessId_name: { businessId, name: roleName } },
+        create: {
+          businessId,
+          name: roleName,
+          description: `Custom permissions for ${current.firstName} ${current.lastName}`.trim(),
+        },
+        update: {
+          description: `Custom permissions for ${current.firstName} ${current.lastName}`.trim(),
+        },
+      });
+
+      const existingPermissionIds =
+        current.user.role?.rolePermissions.map(
+          (rolePermission) => rolePermission.permissionId,
+        ) ?? [];
+      if (existingPermissionIds.length) {
+        await tx.rolePermission.createMany({
+          data: existingPermissionIds.map((permissionId) => ({
+            roleId: role.id,
+            permissionId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      await this.setRolePermission(
+        tx,
+        role.id,
+        editablePermission.id,
+        dto.canEditCreditSales,
+      );
+      await this.setRolePermission(
+        tx,
+        role.id,
+        deletablePermission.id,
+        dto.canDeleteCreditSales,
+      );
+
+      await tx.user.update({
+        where: { id: current.userId },
+        data: { roleId: role.id },
+      });
+
+      const employee = await tx.employee.update({
+        where: { id },
+        data: {
+          isSynced: true,
+          syncVersion: { increment: 1 },
+          deviceId: dto.deviceId ?? undefined,
+        },
+        include: this.employeeInclude(),
+      });
+
+      await this.createAuditLog(tx, {
+        businessId,
+        userId: actor.id,
+        action: AuditAction.PERMISSION_CHANGE,
+        entity: 'EmployeeCreditSalePermissions',
+        entityId: id,
+        description: `Updated credit sale permissions for employee ${current.employeeCode}${dto.reason ? `: ${dto.reason}` : ''}`,
         deviceId: dto.deviceId,
       });
 
@@ -1788,6 +1915,50 @@ export class EmployeeService {
     }
 
     return role;
+  }
+
+  private async ensurePermission(
+    tx: Prisma.TransactionClient,
+    businessId: string,
+    name: string,
+    description: string,
+  ) {
+    return tx.permission.upsert({
+      where: { businessId_name: { businessId, name } },
+      create: {
+        businessId,
+        name,
+        module: 'Credit Sales',
+        description,
+      },
+      update: {
+        module: 'Credit Sales',
+        description,
+      },
+    });
+  }
+
+  private async setRolePermission(
+    tx: Prisma.TransactionClient,
+    roleId: string,
+    permissionId: string,
+    enabled: boolean | undefined,
+  ) {
+    if (enabled === undefined) {
+      return;
+    }
+
+    if (enabled) {
+      await tx.rolePermission.createMany({
+        data: [{ roleId, permissionId }],
+        skipDuplicates: true,
+      });
+      return;
+    }
+
+    await tx.rolePermission.deleteMany({
+      where: { roleId, permissionId },
+    });
   }
 
   private isPermissionRestrictedForRole(

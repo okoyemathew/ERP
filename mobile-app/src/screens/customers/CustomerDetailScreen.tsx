@@ -43,6 +43,8 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
   const [credits, setCredits] = useState<CustomerCreditSale[]>([]);
   const [selectedCredit, setSelectedCredit] = useState<CustomerCreditSale | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<ReceiptDocument | null>(null);
+  const [paymentSheetVisible, setPaymentSheetVisible] = useState(false);
+  const [receiptSheetVisible, setReceiptSheetVisible] = useState(false);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<CustomerPaymentMethod>("CASH");
   const [loading, setLoading] = useState(true);
@@ -85,7 +87,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
   const openPayment = (credit: CustomerCreditSale) => {
     setSelectedCredit(credit);
     setAmount(String(money(credit.balance)));
-    paymentRef.current?.expand();
+    setPaymentSheetVisible(true);
   };
 
   const buildCreditInvoiceReceipt = (credit: CustomerCreditSale): ReceiptDocument => {
@@ -120,7 +122,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
 
   const openCreditInvoice = (credit: CustomerCreditSale) => {
     setActiveReceipt(buildCreditInvoiceReceipt(credit));
-    receiptRef.current?.expand();
+    setReceiptSheetVisible(true);
   };
 
   const handlePayment = async () => {
@@ -141,6 +143,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
         referenceNumber: `MOB-${Date.now()}`
       });
       paymentRef.current?.close();
+      setPaymentSheetVisible(false);
       setSelectedCredit(null);
       await loadCustomer();
     } catch (paymentError) {
@@ -190,6 +193,8 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
         contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) + 96 }]}
         showsVerticalScrollIndicator
         persistentScrollbar
+        keyboardShouldPersistTaps="always"
+        keyboardDismissMode="on-drag"
       >
         <Text style={styles.sectionTitle}>Credit Invoices</Text>
         {credits.length === 0 ? (
@@ -215,8 +220,25 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
               <Text style={styles.meta}>Remaining balance</Text>
               <Text style={styles.balance}>{formatCurrency(money(credit.sale?.balanceDue ?? credit.balance))}</Text>
             </View>
-            <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => openCreditInvoice(credit)} />
-            {money(credit.balance) > 0 ? <Button label="Confirm Payment" variant="success" onPress={() => openPayment(credit)} /> : null}
+            <Button
+              label="Print Invoice"
+              variant="ghost"
+              icon={<Printer size={16} color={colors.primary} />}
+              onPress={() => {
+                console.log("CUSTOMER_DETAIL_PRINT_INVOICE_PRESSED", credit.id);
+                openCreditInvoice(credit);
+              }}
+            />
+            {money(credit.balance) > 0 ? (
+              <Button
+                label="Confirm Payment"
+                variant="success"
+                onPress={() => {
+                  console.log("CUSTOMER_DETAIL_CONFIRM_PAYMENT_PRESSED", credit.id);
+                  openPayment(credit);
+                }}
+              />
+            ) : null}
           </Card>
         ))}
 
@@ -246,12 +268,15 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
           </Card>
         ))}
       </ScrollView>
-      <AppBottomSheet ref={paymentRef} snapPoints={["64%"]}>
+      {paymentSheetVisible ? <AppBottomSheet ref={paymentRef} snapPoints={["64%"]} initialIndex={0} onClose={() => {
+        setPaymentSheetVisible(false);
+        setSelectedCredit(null);
+      }}>
         <BottomSheetScrollView
           contentContainerStyle={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
           showsVerticalScrollIndicator
           persistentScrollbar
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
           nestedScrollEnabled
         >
           <Text style={styles.sheetTitle}>Confirm Payment</Text>
@@ -271,16 +296,36 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
                   </Pressable>
                 ))}
               </View>
-              <Button label="Confirm Payment" variant="success" loading={processing} onPress={handlePayment} />
+              <Button
+                label="Confirm Payment"
+                variant="success"
+                loading={processing}
+                onPress={() => {
+                  console.log("CUSTOMER_DETAIL_PAYMENT_SUBMIT_PRESSED", selectedCredit.id);
+                  void handlePayment();
+                }}
+              />
             </>
           ) : null}
         </BottomSheetScrollView>
-      </AppBottomSheet>
-      <AppBottomSheet ref={receiptRef} snapPoints={["90%"]}>
+      </AppBottomSheet> : null}
+      {receiptSheetVisible ? <AppBottomSheet ref={receiptRef} snapPoints={["90%"]} initialIndex={0} onClose={() => {
+        setReceiptSheetVisible(false);
+        setActiveReceipt(null);
+      }}>
         <View style={styles.receiptSheet}>
           <View style={styles.receiptHeader}>
             <Text style={styles.sheetTitle}>Invoice Preview</Text>
-            <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void handlePrintInvoice()} style={styles.printButton} />
+            <Button
+              label="Print"
+              variant="ghost"
+              icon={<Printer size={16} color={colors.primary} />}
+              onPress={() => {
+                console.log("CUSTOMER_DETAIL_PRINT_SUBMIT_PRESSED", activeReceipt?.id);
+                void handlePrintInvoice();
+              }}
+              style={styles.printButton}
+            />
           </View>
           <BottomSheetScrollView
             style={styles.sheetScroller}
@@ -292,7 +337,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
             {activeReceipt ? <ReceiptTicket receipt={activeReceipt} /> : null}
           </BottomSheetScrollView>
         </View>
-      </AppBottomSheet>
+      </AppBottomSheet> : null}
     </View>
   );
 }

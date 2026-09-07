@@ -221,6 +221,16 @@ const DEFAULT_PERMISSIONS = [
     description: 'Manage credit sales transactions',
   },
   {
+    name: 'credit-sales.edit',
+    module: 'Credit Sales',
+    description: 'Edit authorized credit sales',
+  },
+  {
+    name: 'credit-sales.delete',
+    module: 'Credit Sales',
+    description: 'Delete authorized credit sales',
+  },
+  {
     name: 'expenses.manage',
     module: 'Expenses',
     description: 'Create and manage expenses',

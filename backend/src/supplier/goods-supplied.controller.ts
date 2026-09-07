@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   ParseUUIDPipe,
@@ -36,6 +37,7 @@ export class GoodsSuppliedController {
     @Body() dto: CreateGoodsSuppliedDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.goodsSuppliedService.create(businessId, supplierId, dto, user);
   }
 
@@ -52,9 +54,11 @@ export class GoodsSuppliedController {
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Param('supplierId', ParseUUIDPipe) supplierId: string,
     @Query() query: GoodsSuppliedQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     const queryWithSupplier = { ...query, supplierId };
-    return this.goodsSuppliedService.findAll(businessId, queryWithSupplier);
+    return this.goodsSuppliedService.findAll(businessId, queryWithSupplier, user);
   }
 
   @Get('search')
@@ -71,12 +75,15 @@ export class GoodsSuppliedController {
     @Param('supplierId', ParseUUIDPipe) supplierId: string,
     @Query('q') q: string,
     @Query() query: GoodsSuppliedQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     const queryWithSupplier = { ...query, supplierId };
     return this.goodsSuppliedService.search(
       businessId,
       q ?? '',
       queryWithSupplier,
+      user,
     );
   }
 
@@ -92,8 +99,10 @@ export class GoodsSuppliedController {
   findOne(
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.goodsSuppliedService.findOne(businessId, id);
+    this.assertBusinessAccess(businessId, user);
+    return this.goodsSuppliedService.findOne(businessId, id, user);
   }
 
   @Get('history/purchase')
@@ -109,11 +118,14 @@ export class GoodsSuppliedController {
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Param('supplierId', ParseUUIDPipe) supplierId: string,
     @Query() query: GoodsSuppliedQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.goodsSuppliedService.getSupplierPurchaseHistory(
       businessId,
       supplierId,
       query,
+      user,
     );
   }
 
@@ -128,10 +140,19 @@ export class GoodsSuppliedController {
   getStatistics(
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Param('supplierId', ParseUUIDPipe) supplierId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.goodsSuppliedService.getSupplierStatistics(
       businessId,
       supplierId,
+      user,
     );
+  }
+
+  private assertBusinessAccess(businessId: string, user: AuthenticatedUser) {
+    if (businessId !== user.businessId) {
+      throw new ForbiddenException('Access denied to this business');
+    }
   }
 }

@@ -119,7 +119,14 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
           const name = customerDisplayName(item);
           const outstanding = money(item.outstandingBalance);
           return (
-            <Pressable onPress={() => navigateStack("CustomerDetail", { customerId: item.id })} accessibilityLabel={`Open ${name}`}>
+            <Pressable
+              onPress={() => {
+                console.log("CUSTOMER_ROW_PRESSED", item.id, name);
+                navigateStack("CustomerDetail", { customerId: item.id });
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${name}`}
+            >
               <Card style={styles.row}>
                 <Avatar name={name} />
                 <View style={styles.body}>
@@ -133,6 +140,8 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
         }}
         ListEmptyComponent={<EmptyState icon={<Users size={28} color={colors.textPlaceholder} />} title="No customers yet" />}
         contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
+        keyboardShouldPersistTaps="always"
+        keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator
         persistentScrollbar
       />

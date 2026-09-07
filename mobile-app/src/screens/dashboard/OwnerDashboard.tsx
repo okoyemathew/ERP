@@ -14,8 +14,8 @@ import { formatCurrency } from "@/utils/format";
 
 const quickActions = [
   { label: "New Sale", route: "AddNewSales", icon: ShoppingBag, color: colors.primary },
-  { label: "Add Stock", route: "Inventory", icon: Package, color: colors.success },
-  { label: "Add Customer", route: "Customers", icon: Users, color: colors.purple },
+  { label: "Add Stock", route: "ProductForm", icon: Package, color: colors.success },
+  { label: "Add Customer", route: "CustomerForm", icon: Users, color: colors.purple },
   { label: "Reports", route: "Reports", icon: TrendingUp, color: colors.orange }
 ];
 
@@ -64,6 +64,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
   const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
   const navigateApp = (route: string) => {
+    console.log("DASHBOARD_NAVIGATION_PRESSED", route);
     if (tabRoutes.has(route)) {
       navigation.navigate(route);
       return;
@@ -130,7 +131,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
               {quickActions.map((action) => {
                 const Icon = action.icon;
                 return (
-                <Pressable key={action.label} onPress={() => navigateApp(action.route)} style={styles.action} accessibilityLabel={action.label}>
+                <Pressable key={action.label} onPress={() => navigateApp(action.route)} style={styles.action} hitSlop={8} accessibilityRole="button" accessibilityLabel={action.label}>
                   <Icon size={21} color={action.color} />
                   <Text style={styles.actionText}>{action.label}</Text>
                 </Pressable>
@@ -143,14 +144,16 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
               </View>
               <AreaChart data={chartData.length ? chartData : [{ label: "Today", revenue: 0 }]} />
             </Card>
-            <Card style={styles.lowStock}>
-              <Package size={18} color={colors.orange} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.lowTitle}>Low Stock Alert</Text>
-                <Text style={styles.lowText}>{summary?.lowStockProductsCount ?? 0} products need immediate restocking</Text>
-              </View>
-              <Text style={styles.view}>View</Text>
-            </Card>
+            <Pressable onPress={() => navigateApp("Inventory")} accessibilityRole="button" accessibilityLabel="View low stock products">
+              <Card style={styles.lowStock}>
+                <Package size={18} color={colors.orange} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.lowTitle}>Low Stock Alert</Text>
+                  <Text style={styles.lowText}>{summary?.lowStockProductsCount ?? 0} products need immediate restocking</Text>
+                </View>
+                <Text style={styles.view}>View</Text>
+              </Card>
+            </Pressable>
             <Text style={styles.section}>Recent Sales</Text>
           </View>
         }
@@ -166,6 +169,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
         )}
         ListEmptyComponent={<EmptyState icon={<ShoppingBag size={28} color={colors.textPlaceholder} />} title="No recent sales" />}
         contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
+        keyboardShouldPersistTaps="handled"
       />
     </View>
   );

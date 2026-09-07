@@ -113,7 +113,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.getProfile(businessId, id);
+    return this.customerService.getProfile(businessId, id, user);
   }
 
   @Get(':id/outstanding-balance')
@@ -164,7 +164,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.getPurchaseHistory(businessId, id, query);
+    return this.customerService.getPurchaseHistory(businessId, id, query, user);
   }
 
   @Get(':id/sales-history')
@@ -177,7 +177,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.getSalesHistory(businessId, id, query);
+    return this.customerService.getSalesHistory(businessId, id, query, user);
   }
 
   @Get(':id/payment-history')
@@ -197,7 +197,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.getPaymentHistory(businessId, id, query);
+    return this.customerService.getPaymentHistory(businessId, id, query, user);
   }
 
   @Get(':id/credit-history')
@@ -216,7 +216,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.getCreditHistory(businessId, id, query);
+    return this.customerService.getCreditHistory(businessId, id, query, user);
   }
 
   @Get(':id/statement')
@@ -234,7 +234,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.getStatement(businessId, id, query);
+    return this.customerService.getStatement(businessId, id, query, user);
   }
 
   @Post(':id/credit-payments')

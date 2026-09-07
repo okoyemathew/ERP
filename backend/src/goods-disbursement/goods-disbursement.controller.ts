@@ -64,7 +64,7 @@ export class GoodsDisbursementController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.goodsDisbursementService.findAll(businessId, query);
+    return this.goodsDisbursementService.findAll(businessId, query, user);
   }
 
   @Get('me')
@@ -80,10 +80,14 @@ export class GoodsDisbursementController {
     if (!user.employeeId) {
       throw new ForbiddenException('Employee profile is required');
     }
-    return this.goodsDisbursementService.findAll(businessId, {
-      ...query,
-      employeeId: user.employeeId,
-    });
+    return this.goodsDisbursementService.findAll(
+      businessId,
+      {
+        ...query,
+        employeeId: user.employeeId,
+      },
+      user,
+    );
   }
 
   @Get(':id')
@@ -94,7 +98,7 @@ export class GoodsDisbursementController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.goodsDisbursementService.findOne(businessId, id);
+    return this.goodsDisbursementService.findOne(businessId, id, user);
   }
 
   @Patch(':id')

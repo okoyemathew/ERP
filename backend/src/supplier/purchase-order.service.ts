@@ -4,11 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
   Prisma,
   PurchaseOrderStatus,
   InventoryTransactionType,
 } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
@@ -80,7 +82,7 @@ export class PurchaseOrderService {
       data: {
         businessId,
         userId: user?.id ?? null,
-        action: 'CREATE',
+        action: AuditAction.CREATE,
         entity: 'PurchaseOrder',
         entityId: purchaseOrder.id,
         description: `Created purchase order ${purchaseOrder.orderNumber}`,
@@ -97,9 +99,11 @@ export class PurchaseOrderService {
     dto: AddPurchaseOrderItemDto,
     user?: AuthenticatedUser,
   ) {
-    const purchaseOrder = await this.prisma.purchaseOrder.findFirst({
-      where: { id: purchaseOrderId, businessId },
-    });
+    const purchaseOrder = await this.findOne(
+      businessId,
+      purchaseOrderId,
+      user,
+    );
 
     if (!purchaseOrder) {
       throw new NotFoundException('Purchase order not found');
@@ -139,7 +143,7 @@ export class PurchaseOrderService {
       data: {
         businessId,
         userId: user?.id ?? null,
-        action: 'CREATE',
+        action: AuditAction.CREATE,
         entity: 'PurchaseOrderItem',
         entityId: item.id,
         description: `Added item to purchase order ${purchaseOrder.orderNumber}`,
@@ -147,7 +151,7 @@ export class PurchaseOrderService {
       },
     });
 
-    return await this.findOne(businessId, purchaseOrderId);
+    return await this.findOne(businessId, purchaseOrderId, user);
   }
 
   async removeItem(
@@ -156,9 +160,11 @@ export class PurchaseOrderService {
     itemId: string,
     user?: AuthenticatedUser,
   ) {
-    const purchaseOrder = await this.prisma.purchaseOrder.findFirst({
-      where: { id: purchaseOrderId, businessId },
-    });
+    const purchaseOrder = await this.findOne(
+      businessId,
+      purchaseOrderId,
+      user,
+    );
 
     if (!purchaseOrder) {
       throw new NotFoundException('Purchase order not found');
@@ -188,7 +194,7 @@ export class PurchaseOrderService {
       data: {
         businessId,
         userId: user?.id ?? null,
-        action: 'DELETE',
+        action: AuditAction.DELETE,
         entity: 'PurchaseOrderItem',
         entityId: itemId,
         description: `Removed item from purchase order ${purchaseOrder.orderNumber}`,
@@ -196,7 +202,7 @@ export class PurchaseOrderService {
       },
     });
 
-    return await this.findOne(businessId, purchaseOrderId);
+    return await this.findOne(businessId, purchaseOrderId, user);
   }
 
   private async recalculatePurchaseOrderTotals(purchaseOrderId: string) {
@@ -218,9 +224,13 @@ export class PurchaseOrderService {
     });
   }
 
-  async findOne(businessId: string, id: string) {
+  async findOne(businessId: string, id: string, user?: AuthenticatedUser) {
     const purchaseOrder = await this.prisma.purchaseOrder.findFirst({
-      where: { id, businessId },
+      where: {
+        id,
+        businessId,
+        ...(await this.purchaseOrderActivityScope(businessId, user)),
+      },
       include: {
         items: {
           include: {
@@ -238,30 +248,23 @@ export class PurchaseOrderService {
     return purchaseOrder;
   }
 
-  async findAll(businessId: string, query: PurchaseOrderQueryDto = {}) {
+  async findAll(
+    businessId: string,
+    query: PurchaseOrderQueryDto = {},
+    user?: AuthenticatedUser,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'createdAt';
     const sortOrder = query.sortOrder ?? 'desc';
     const search = query.search?.trim();
 
-    const where: Prisma.PurchaseOrderWhereInput = {
+    const where = await this.buildPurchaseOrderWhere(
       businessId,
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.supplierId ? { supplierId: query.supplierId } : {}),
-      ...(search
-        ? {
-            OR: [
-              { orderNumber: { contains: search, mode: 'insensitive' } },
-              {
-                supplier: {
-                  companyName: { contains: search, mode: 'insensitive' },
-                },
-              },
-            ],
-          }
-        : {}),
-    };
+      query,
+      user,
+      search,
+    );
 
     const [total, items] = await Promise.all([
       this.prisma.purchaseOrder.count({ where }),
@@ -296,41 +299,26 @@ export class PurchaseOrderService {
     businessId: string,
     term: string,
     query: PurchaseOrderQueryDto = {},
+    user?: AuthenticatedUser,
   ) {
     const search = term.trim();
     if (!search) {
-      return this.findAll(businessId, query);
+      return this.findAll(businessId, query, user);
     }
 
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    const where = await this.buildPurchaseOrderWhere(
+      businessId,
+      query,
+      user,
+      search,
+    );
 
     const [total, items] = await Promise.all([
-      this.prisma.purchaseOrder.count({
-        where: {
-          businessId,
-          OR: [
-            { orderNumber: { contains: search, mode: 'insensitive' } },
-            {
-              supplier: {
-                companyName: { contains: search, mode: 'insensitive' },
-              },
-            },
-          ],
-        },
-      }),
+      this.prisma.purchaseOrder.count({ where }),
       this.prisma.purchaseOrder.findMany({
-        where: {
-          businessId,
-          OR: [
-            { orderNumber: { contains: search, mode: 'insensitive' } },
-            {
-              supplier: {
-                companyName: { contains: search, mode: 'insensitive' },
-              },
-            },
-          ],
-        },
+        where,
         include: {
           items: {
             include: {
@@ -362,7 +350,7 @@ export class PurchaseOrderService {
     dto: UpdatePurchaseOrderDto,
     user?: AuthenticatedUser,
   ) {
-    const purchaseOrder = await this.findOne(businessId, id);
+    const purchaseOrder = await this.findOne(businessId, id, user);
 
     if (purchaseOrder.status !== PurchaseOrderStatus.DRAFT) {
       throw new BadRequestException(
@@ -401,7 +389,7 @@ export class PurchaseOrderService {
       data: {
         businessId,
         userId: user?.id ?? null,
-        action: 'UPDATE',
+        action: AuditAction.UPDATE,
         entity: 'PurchaseOrder',
         entityId: id,
         description: `Updated purchase order ${updatedOrder.orderNumber}`,
@@ -413,7 +401,7 @@ export class PurchaseOrderService {
   }
 
   async submit(businessId: string, id: string, user?: AuthenticatedUser) {
-    const purchaseOrder = await this.findOne(businessId, id);
+    const purchaseOrder = await this.findOne(businessId, id, user);
 
     if (purchaseOrder.status !== PurchaseOrderStatus.DRAFT) {
       throw new BadRequestException(
@@ -444,7 +432,7 @@ export class PurchaseOrderService {
       data: {
         businessId,
         userId: user?.id ?? null,
-        action: 'UPDATE',
+        action: AuditAction.UPDATE,
         entity: 'PurchaseOrderStatus',
         entityId: id,
         description: `Submitted purchase order ${updatedOrder.orderNumber}`,
@@ -456,7 +444,7 @@ export class PurchaseOrderService {
   }
 
   async approve(businessId: string, id: string, user?: AuthenticatedUser) {
-    const purchaseOrder = await this.findOne(businessId, id);
+    const purchaseOrder = await this.findOne(businessId, id, user);
 
     if (purchaseOrder.status !== PurchaseOrderStatus.PENDING) {
       throw new BadRequestException(
@@ -483,7 +471,7 @@ export class PurchaseOrderService {
       data: {
         businessId,
         userId: user?.id ?? null,
-        action: 'UPDATE',
+        action: AuditAction.UPDATE,
         entity: 'PurchaseOrderStatus',
         entityId: id,
         description: `Approved purchase order ${updatedOrder.orderNumber}`,
@@ -495,7 +483,7 @@ export class PurchaseOrderService {
   }
 
   async cancel(businessId: string, id: string, user?: AuthenticatedUser) {
-    const purchaseOrder = await this.findOne(businessId, id);
+    const purchaseOrder = await this.findOne(businessId, id, user);
 
     if (
       purchaseOrder.status === PurchaseOrderStatus.RECEIVED ||
@@ -525,7 +513,7 @@ export class PurchaseOrderService {
       data: {
         businessId,
         userId: user?.id ?? null,
-        action: 'UPDATE',
+        action: AuditAction.UPDATE,
         entity: 'PurchaseOrderStatus',
         entityId: id,
         description: `Cancelled purchase order ${updatedOrder.orderNumber}`,
@@ -542,7 +530,7 @@ export class PurchaseOrderService {
     dto: ReceivePurchaseOrderDto,
     user?: AuthenticatedUser,
   ) {
-    const purchaseOrder = await this.findOne(businessId, id);
+    const purchaseOrder = await this.findOne(businessId, id, user);
 
     if (purchaseOrder.status !== PurchaseOrderStatus.APPROVED) {
       throw new BadRequestException(
@@ -587,7 +575,7 @@ export class PurchaseOrderService {
         data: {
           businessId,
           userId: user?.id ?? null,
-          action: 'UPDATE',
+          action: AuditAction.UPDATE,
           entity: 'PurchaseOrderStatus',
           entityId: id,
           description: `Marked purchase order ${updatedOrder.orderNumber} as received`,
@@ -597,5 +585,65 @@ export class PurchaseOrderService {
 
       return updatedOrder;
     });
+  }
+
+  private async buildPurchaseOrderWhere(
+    businessId: string,
+    query: PurchaseOrderQueryDto,
+    user?: AuthenticatedUser,
+    search?: string,
+  ): Promise<Prisma.PurchaseOrderWhereInput> {
+    return {
+      businessId,
+      ...(await this.purchaseOrderActivityScope(businessId, user)),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.supplierId ? { supplierId: query.supplierId } : {}),
+      ...(search
+        ? {
+            OR: [
+              { orderNumber: { contains: search, mode: 'insensitive' } },
+              {
+                supplier: {
+                  companyName: { contains: search, mode: 'insensitive' },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+  }
+
+  private async purchaseOrderActivityScope(
+    businessId: string,
+    user?: AuthenticatedUser,
+  ): Promise<Prisma.PurchaseOrderWhereInput> {
+    if (this.canViewAllUserActivity(user) || !user) {
+      return {};
+    }
+
+    const createdLogs = await this.prisma.auditLog.findMany({
+      where: {
+        businessId,
+        userId: user.id,
+        action: AuditAction.CREATE,
+        entity: 'PurchaseOrder',
+        entityId: { not: null },
+      },
+      select: { entityId: true },
+    });
+
+    return {
+      id: {
+        in: createdLogs
+          .map((log) => log.entityId)
+          .filter((entityId): entityId is string => Boolean(entityId)),
+      },
+    };
+  }
+
+  private canViewAllUserActivity(user?: AuthenticatedUser) {
+    return Boolean(
+      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
   }
 }

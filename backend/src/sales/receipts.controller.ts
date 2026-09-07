@@ -46,7 +46,7 @@ export class ReceiptsController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ReceiptQueryDto,
   ) {
-    return this.salesService.findReceipts(user.businessId, query);
+    return this.salesService.findReceipts(user.businessId, query, user);
   }
 
   @Get(':id')
@@ -59,7 +59,7 @@ export class ReceiptsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.salesService.getReceipt(user.businessId, id);
+    return this.salesService.getReceipt(user.businessId, id, user);
   }
 
   @Get(':id/print')
@@ -72,7 +72,7 @@ export class ReceiptsController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.salesService.getReceiptPrintData(user.businessId, id);
+    return this.salesService.getReceiptPrintData(user.businessId, id, user);
   }
 
   @Get(':id/reprint')

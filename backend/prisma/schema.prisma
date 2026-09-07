@@ -101,6 +101,7 @@ model Business {
   auditLogs                AuditLog[]
   employees                Employee[]
   creditSaleActionRequests CreditSaleActionRequest[]
+  productReturnRequests    ProductReturnRequest[]
 
   @@index([name])
 }
@@ -181,6 +182,8 @@ model User {
   notifications              Notification[]
   requestedCreditSaleActions CreditSaleActionRequest[] @relation("CreditSaleActionRequester")
   approvedCreditSaleActions  CreditSaleActionRequest[] @relation("CreditSaleActionApprover")
+  requestedProductReturns    ProductReturnRequest[]    @relation("ProductReturnRequester")
+  reviewedProductReturns     ProductReturnRequest[]    @relation("ProductReturnReviewer")
 
   @@index([businessId])
   @@index([branchId])
@@ -445,6 +448,7 @@ model Product {
   goodsSuppliedItems     GoodsSuppliedItem[]
   goodsDisbursementItems GoodsDisbursementItem[]
   saleItems              SaleItem[]
+  productReturnRequests  ProductReturnRequest[]
 
   @@unique([businessId, sku])
   @@index([businessId])
@@ -596,6 +600,54 @@ model InventoryTransaction {
   @@index([productId])
   @@index([transactionType])
   @@index([transactionDate])
+}
+
+//////////////////////////////////////////////////////
+// PRODUCT RETURN REQUEST
+//////////////////////////////////////////////////////
+
+enum ProductReturnRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model ProductReturnRequest {
+  id String @id @default(uuid()) @db.Uuid
+
+  businessId String   @db.Uuid
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  productId String  @db.Uuid
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  requestedById String @db.Uuid
+  requestedBy   User   @relation("ProductReturnRequester", fields: [requestedById], references: [id])
+
+  reviewedById String? @db.Uuid
+  reviewedBy   User?   @relation("ProductReturnReviewer", fields: [reviewedById], references: [id])
+
+  quantity Int
+  unitCost Decimal? @db.Decimal(12, 2)
+
+  referenceNumber String?
+  remarks         String?
+  status          ProductReturnRequestStatus @default(PENDING)
+  decisionNote    String?
+
+  requestedAt DateTime  @default(now())
+  reviewedAt  DateTime?
+
+  inventoryTransactionId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([productId])
+  @@index([requestedById])
+  @@index([reviewedById])
+  @@index([status])
 }
 
 //////////////////////////////////////////////////////

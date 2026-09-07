@@ -16,7 +16,10 @@ import {
   Prisma,
   SaleStatus,
 } from '@prisma/client';
-import { SYSTEM_ROLES } from '../auth/constants/roles.constant';
+import {
+  ADMIN_ROLE_NAMES,
+  SYSTEM_ROLES,
+} from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { DEFAULT_BUSINESS_CURRENCY, formatMoney } from '../common/currency';
 import { PrismaService } from '../prisma/prisma.service';
@@ -127,12 +130,16 @@ export class SalesService {
     return sale;
   }
 
-  async findAll(businessId: string, query: SaleQueryDto = {}) {
+  async findAll(
+    businessId: string,
+    query: SaleQueryDto = {},
+    user?: AuthenticatedUser,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'saleDate';
     const sortOrder = query.sortOrder ?? 'desc';
-    const where = this.buildWhere(businessId, query);
+    const where = this.buildWhere(businessId, query, user);
 
     const [total, data] = await Promise.all([
       this.prisma.sale.count({ where }),
@@ -151,8 +158,8 @@ export class SalesService {
     };
   }
 
-  async findOne(businessId: string, id: string) {
-    return this.getSaleOrThrow(businessId, id, this.prisma);
+  async findOne(businessId: string, id: string, user?: AuthenticatedUser) {
+    return this.getSaleOrThrow(businessId, id, this.prisma, user);
   }
 
   async lookupProduct(
@@ -176,8 +183,8 @@ export class SalesService {
     };
   }
 
-  async validateCart(businessId: string, id: string) {
-    const sale = await this.getSaleOrThrow(businessId, id, this.prisma);
+  async validateCart(businessId: string, id: string, user?: AuthenticatedUser) {
+    const sale = await this.getSaleOrThrow(businessId, id, this.prisma, user);
     this.assertPending(sale.status);
     const issues = await this.cartIssues(businessId, sale.items, this.prisma);
 
@@ -190,9 +197,20 @@ export class SalesService {
     };
   }
 
-  async getSaleReceipt(businessId: string, saleId: string) {
+  async getSaleReceipt(
+    businessId: string,
+    saleId: string,
+    user?: AuthenticatedUser,
+  ) {
     const receipt = await this.prisma.receipt.findFirst({
-      where: { saleId, sale: { businessId, status: SaleStatus.COMPLETED } },
+      where: {
+        saleId,
+        sale: {
+          businessId,
+          status: SaleStatus.COMPLETED,
+          ...this.userActivityScope(user),
+        },
+      },
       include: this.receiptInclude(),
     });
 
@@ -203,12 +221,16 @@ export class SalesService {
     return this.formatReceipt(receipt);
   }
 
-  async findReceipts(businessId: string, query: ReceiptQueryDto = {}) {
+  async findReceipts(
+    businessId: string,
+    query: ReceiptQueryDto = {},
+    user?: AuthenticatedUser,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'createdAt';
     const sortOrder = query.sortOrder ?? 'desc';
-    const where = this.buildReceiptWhere(businessId, query);
+    const where = this.buildReceiptWhere(businessId, query, user);
 
     const [total, receipts] = await Promise.all([
       this.prisma.receipt.count({ where }),
@@ -227,13 +249,27 @@ export class SalesService {
     };
   }
 
-  async getReceipt(businessId: string, id: string) {
-    const receipt = await this.getReceiptOrThrow(businessId, id, this.prisma);
+  async getReceipt(businessId: string, id: string, user?: AuthenticatedUser) {
+    const receipt = await this.getReceiptOrThrow(
+      businessId,
+      id,
+      this.prisma,
+      user,
+    );
     return this.formatReceipt(receipt);
   }
 
-  async getReceiptPrintData(businessId: string, id: string) {
-    const receipt = await this.getReceiptOrThrow(businessId, id, this.prisma);
+  async getReceiptPrintData(
+    businessId: string,
+    id: string,
+    user?: AuthenticatedUser,
+  ) {
+    const receipt = await this.getReceiptOrThrow(
+      businessId,
+      id,
+      this.prisma,
+      user,
+    );
     return this.toPrintReadyReceipt(receipt);
   }
 
@@ -243,7 +279,7 @@ export class SalesService {
     user: AuthenticatedUser,
   ) {
     const receipt = await this.prisma.$transaction(async (tx) => {
-      const current = await this.getReceiptOrThrow(businessId, id, tx);
+      const current = await this.getReceiptOrThrow(businessId, id, tx, user);
       await this.audit(tx, {
         businessId,
         userId: user.id,
@@ -268,7 +304,7 @@ export class SalesService {
     await this.assertCustomer(businessId, dto.customerId ?? undefined);
 
     const sale = await this.prisma.$transaction(async (tx) => {
-      const current = await this.getSaleOrThrow(businessId, id, tx);
+      const current = await this.getSaleOrThrow(businessId, id, tx, user);
       this.assertPending(current.status);
 
       await tx.sale.update({
@@ -290,7 +326,7 @@ export class SalesService {
         deviceId: dto.deviceId,
       });
 
-      return this.getSaleOrThrow(businessId, id, tx);
+      return this.getSaleOrThrow(businessId, id, tx, user);
     });
 
     return sale;
@@ -306,7 +342,7 @@ export class SalesService {
     this.assertDiscountAllowed([dto], user);
 
     return this.prisma.$transaction(async (tx) => {
-      const sale = await this.getSaleOrThrow(businessId, id, tx);
+      const sale = await this.getSaleOrThrow(businessId, id, tx, user);
       this.assertPending(sale.status);
       const item = await this.buildItemData(businessId, dto, tx, seller);
       const existing = sale.items.find(
@@ -335,7 +371,7 @@ export class SalesService {
       }
 
       await this.recalculateSale(id, tx);
-      return this.getSaleOrThrow(businessId, id, tx);
+      return this.getSaleOrThrow(businessId, id, tx, user);
     });
   }
 
@@ -348,7 +384,7 @@ export class SalesService {
     await this.getSellerStockScope(businessId, user);
 
     return this.prisma.$transaction(async (tx) => {
-      const sale = await this.getSaleOrThrow(businessId, id, tx);
+      const sale = await this.getSaleOrThrow(businessId, id, tx, user);
       this.assertPending(sale.status);
       const item = sale.items.find((saleItem) => saleItem.id === saleItemId);
 
@@ -358,7 +394,7 @@ export class SalesService {
 
       await tx.saleItem.delete({ where: { id: saleItemId } });
       await this.recalculateSale(id, tx);
-      return this.getSaleOrThrow(businessId, id, tx);
+      return this.getSaleOrThrow(businessId, id, tx, user);
     });
   }
 
@@ -387,7 +423,7 @@ export class SalesService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const sale = await this.getSaleOrThrow(businessId, id, tx);
+      const sale = await this.getSaleOrThrow(businessId, id, tx, user);
       this.assertPending(sale.status);
 
       await tx.sale.update({
@@ -407,7 +443,7 @@ export class SalesService {
         description: `Cancelled pending sale ${sale.saleNumber}`,
       });
 
-      return this.getSaleOrThrow(businessId, id, tx);
+      return this.getSaleOrThrow(businessId, id, tx, user);
     });
   }
 
@@ -419,7 +455,7 @@ export class SalesService {
     tx: Tx,
     seller: SellerStockScope,
   ) {
-    const sale = await this.getSaleOrThrow(businessId, id, tx);
+    const sale = await this.getSaleOrThrow(businessId, id, tx, user);
     this.assertPending(sale.status);
 
     if (sale.items.length === 0) {
@@ -565,7 +601,7 @@ export class SalesService {
       deviceId: dto.deviceId,
     });
 
-    return this.getSaleOrThrow(businessId, id, tx);
+    return this.getSaleOrThrow(businessId, id, tx, user);
   }
 
   private async replaceItems(
@@ -1208,9 +1244,17 @@ export class SalesService {
     businessId: string,
     id: string,
     tx: Tx | PrismaService,
+    user?: AuthenticatedUser,
   ) {
     const receipt = await tx.receipt.findFirst({
-      where: { id, sale: { businessId, status: SaleStatus.COMPLETED } },
+      where: {
+        id,
+        sale: {
+          businessId,
+          status: SaleStatus.COMPLETED,
+          ...this.userActivityScope(user),
+        },
+      },
       include: this.receiptInclude(),
     });
 
@@ -1555,6 +1599,7 @@ export class SalesService {
   private buildReceiptWhere(
     businessId: string,
     query: ReceiptQueryDto,
+    user?: AuthenticatedUser,
   ): Prisma.ReceiptWhereInput {
     const search = query.search?.trim();
 
@@ -1562,6 +1607,7 @@ export class SalesService {
       sale: {
         businessId,
         status: SaleStatus.COMPLETED,
+        ...this.userActivityScope(user),
       },
       ...(query.startDate || query.endDate
         ? {
@@ -1661,14 +1707,18 @@ export class SalesService {
   private buildWhere(
     businessId: string,
     query: SaleQueryDto,
+    user?: AuthenticatedUser,
   ): Prisma.SaleWhereInput {
     const search = query.search?.trim();
+    const scopedUserId = this.canViewAllUserActivity(user)
+      ? query.userId
+      : user?.id;
 
     return {
       businessId,
       deletedAt: null,
       ...(query.customerId ? { customerId: query.customerId } : {}),
-      ...(query.userId ? { userId: query.userId } : {}),
+      ...(scopedUserId ? { userId: scopedUserId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.paymentStatus ? { paymentStatus: query.paymentStatus } : {}),
       ...(query.startDate || query.endDate
@@ -1728,9 +1778,15 @@ export class SalesService {
     businessId: string,
     id: string,
     tx: Tx | PrismaService,
+    user?: AuthenticatedUser,
   ) {
     const sale = await tx.sale.findFirst({
-      where: { id, businessId, deletedAt: null },
+      where: {
+        id,
+        businessId,
+        deletedAt: null,
+        ...this.userActivityScope(user),
+      },
       include: this.saleInclude(),
     });
 
@@ -1739,6 +1795,18 @@ export class SalesService {
     }
 
     return sale;
+  }
+
+  private canViewAllUserActivity(user?: AuthenticatedUser): boolean {
+    return Boolean(
+      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
+  }
+
+  private userActivityScope(user?: AuthenticatedUser) {
+    return this.canViewAllUserActivity(user) || !user
+      ? {}
+      : { userId: user.id };
   }
 
   private saleInclude() {

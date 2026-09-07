@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,11 +9,16 @@ import {
   AuditAction,
   InventoryTransactionType,
   Prisma,
+  ProductReturnRequestStatus,
 } from '@prisma/client';
+import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateProductReturnRequestDto } from './dto/create-product-return-request.dto';
 import { InventoryHistoryQueryDto } from './dto/inventory-history-query.dto';
 import { InventoryQueryDto } from './dto/inventory-query.dto';
+import { ProductReturnRequestDecisionDto } from './dto/product-return-request-decision.dto';
+import { ProductReturnRequestQueryDto } from './dto/product-return-request-query.dto';
 import { AdjustInventoryDto } from './dto/adjust-inventory.dto';
 import { StockAdjustmentQueryDto } from './dto/stock-adjustment-query.dto';
 import { StockMutationDto } from './dto/stock-mutation.dto';
@@ -221,6 +227,316 @@ export class InventoryService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  async createReturnRequest(
+    businessId: string,
+    dto: CreateProductReturnRequestDto,
+    user: AuthenticatedUser,
+  ) {
+    await this.assertInventoryContext(businessId, dto.productId);
+    this.validateDelta(
+      dto.quantity,
+      'Return quantity must be greater than zero.',
+      true,
+      dto.quantity,
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      const request = await tx.productReturnRequest.create({
+        data: {
+          businessId,
+          productId: dto.productId,
+          requestedById: user.id,
+          quantity: dto.quantity,
+          unitCost: dto.unitCost ?? null,
+          referenceNumber: dto.referenceNumber ?? null,
+          remarks: dto.remarks ?? null,
+          status: ProductReturnRequestStatus.PENDING,
+        },
+        include: this.returnRequestInclude(),
+      });
+
+      await tx.auditLog.create({
+        data: {
+          businessId,
+          userId: user.id,
+          action: AuditAction.CREATE,
+          entity: 'ProductReturnRequest',
+          entityId: request.id,
+          description: `Requested return of ${dto.quantity} unit(s) for product ${dto.productId}`,
+          deviceId: dto.deviceId ?? null,
+        },
+      });
+
+      return request;
+    });
+  }
+
+  async findReturnRequests(
+    businessId: string,
+    query: ProductReturnRequestQueryDto = {},
+    user: AuthenticatedUser,
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const search = query.search?.trim();
+    const where: Prisma.ProductReturnRequestWhereInput = {
+      businessId,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.productId ? { productId: query.productId } : {}),
+      ...(this.canViewAllReturnRequests(user)
+        ? query.requestedById
+          ? { requestedById: query.requestedById }
+          : {}
+        : { requestedById: user.id }),
+      ...(query.startDate || query.endDate
+        ? {
+            requestedAt: {
+              ...(query.startDate ? { gte: new Date(query.startDate) } : {}),
+              ...(query.endDate ? { lte: new Date(query.endDate) } : {}),
+            },
+          }
+        : {}),
+      ...(search
+        ? {
+            OR: [
+              { referenceNumber: { contains: search, mode: 'insensitive' } },
+              { remarks: { contains: search, mode: 'insensitive' } },
+              { product: { name: { contains: search, mode: 'insensitive' } } },
+              { product: { sku: { contains: search, mode: 'insensitive' } } },
+              {
+                requestedBy: {
+                  username: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                requestedBy: {
+                  firstName: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                requestedBy: {
+                  lastName: { contains: search, mode: 'insensitive' },
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, data] = await Promise.all([
+      this.prisma.productReturnRequest.count({ where }),
+      this.prisma.productReturnRequest.findMany({
+        where,
+        include: this.returnRequestInclude(),
+        orderBy: { requestedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async approveReturnRequest(
+    businessId: string,
+    id: string,
+    dto: ProductReturnRequestDecisionDto,
+    user: AuthenticatedUser,
+  ) {
+    this.assertCanReviewReturnRequests(user);
+
+    return this.prisma.$transaction(async (tx) => {
+      const request = await this.getPendingReturnRequestOrThrow(
+        businessId,
+        id,
+        tx,
+      );
+      const inventory = await tx.inventory.findFirst({
+        where: { businessId, productId: request.productId },
+      });
+
+      if (!inventory) {
+        throw new NotFoundException(
+          'Inventory record not found for this product',
+        );
+      }
+
+      const quantityBefore = inventory.quantityAvailable;
+      const quantityAfter = quantityBefore + request.quantity;
+      const updatedInventory = await tx.inventory.update({
+        where: { id: inventory.id },
+        data: {
+          quantityOnHand: inventory.quantityOnHand + request.quantity,
+          quantityReserved: inventory.quantityReserved,
+          quantityAvailable: quantityAfter,
+          lastStockUpdate: new Date(),
+          averageCost: request.unitCost ?? inventory.averageCost ?? null,
+          syncVersion: (inventory.syncVersion ?? 1) + 1,
+          isSynced: true,
+          deviceId: dto.deviceId ?? inventory.deviceId,
+        },
+      });
+
+      const transaction =
+        await this.inventoryTransactionService.createTransaction(
+          {
+            businessId,
+            inventoryId: updatedInventory.id,
+            productId: request.productId,
+            transactionType: InventoryTransactionType.RETURN,
+            quantity: request.quantity,
+            quantityBefore,
+            quantityAfter,
+            unitCost: request.unitCost ? request.unitCost.toNumber() : null,
+            referenceNumber: request.referenceNumber ?? `RETURN:${request.id}`,
+            remarks: request.remarks ?? 'Approved returned stock',
+            transactionDate: new Date(),
+            deviceId: dto.deviceId ?? null,
+          },
+          tx,
+        );
+
+      const updated = await tx.productReturnRequest.update({
+        where: { id: request.id },
+        data: {
+          status: ProductReturnRequestStatus.APPROVED,
+          reviewedById: user.id,
+          reviewedAt: new Date(),
+          decisionNote: dto.note ?? null,
+          inventoryTransactionId: transaction.id,
+        },
+        include: this.returnRequestInclude(),
+      });
+
+      await tx.auditLog.create({
+        data: {
+          businessId,
+          userId: user.id,
+          action: AuditAction.UPDATE,
+          entity: 'ProductReturnRequest',
+          entityId: request.id,
+          description: `Approved return request ${request.id}`,
+          deviceId: dto.deviceId ?? null,
+        },
+      });
+
+      return updated;
+    });
+  }
+
+  async rejectReturnRequest(
+    businessId: string,
+    id: string,
+    dto: ProductReturnRequestDecisionDto,
+    user: AuthenticatedUser,
+  ) {
+    this.assertCanReviewReturnRequests(user);
+
+    return this.prisma.$transaction(async (tx) => {
+      const request = await this.getPendingReturnRequestOrThrow(
+        businessId,
+        id,
+        tx,
+      );
+      const updated = await tx.productReturnRequest.update({
+        where: { id: request.id },
+        data: {
+          status: ProductReturnRequestStatus.REJECTED,
+          reviewedById: user.id,
+          reviewedAt: new Date(),
+          decisionNote: dto.note ?? null,
+        },
+        include: this.returnRequestInclude(),
+      });
+
+      await tx.auditLog.create({
+        data: {
+          businessId,
+          userId: user.id,
+          action: AuditAction.UPDATE,
+          entity: 'ProductReturnRequest',
+          entityId: request.id,
+          description: `Rejected return request ${request.id}`,
+          deviceId: dto.deviceId ?? null,
+        },
+      });
+
+      return updated;
+    });
+  }
+
+  private returnRequestInclude() {
+    return {
+      product: {
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          barcode: true,
+        },
+      },
+      requestedBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          username: true,
+        },
+      },
+      reviewedBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          username: true,
+        },
+      },
+    } satisfies Prisma.ProductReturnRequestInclude;
+  }
+
+  private async getPendingReturnRequestOrThrow(
+    businessId: string,
+    id: string,
+    tx: Prisma.TransactionClient,
+  ) {
+    const request = await tx.productReturnRequest.findFirst({
+      where: {
+        id,
+        businessId,
+        status: ProductReturnRequestStatus.PENDING,
+      },
+      include: this.returnRequestInclude(),
+    });
+
+    if (!request) {
+      throw new NotFoundException('Pending return request not found');
+    }
+
+    return request;
+  }
+
+  private assertCanReviewReturnRequests(user: AuthenticatedUser) {
+    if (!this.canViewAllReturnRequests(user)) {
+      throw new ForbiddenException(
+        'Only the business owner or admin can approve returned products',
+      );
+    }
+  }
+
+  private canViewAllReturnRequests(user: AuthenticatedUser) {
+    return Boolean(
+      user.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
   }
 
   private async assertInventoryContext(

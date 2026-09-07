@@ -39,6 +39,8 @@ const BUILT_IN_ROLE_PERMISSIONS: Partial<Record<SystemRole, readonly string[]>> 
       'customers.manage',
       'sales.manage',
       'credit-sales.manage',
+      'credit-sales.edit',
+      'credit-sales.delete',
       'expenses.manage',
       'reports.view',
       'notifications.manage',

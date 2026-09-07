@@ -11,6 +11,7 @@ import {
   Prisma,
   SaleStatus,
 } from '@prisma/client';
+import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -76,7 +77,7 @@ export class CashRegisterService {
         description: 'Opened cash register',
       });
 
-      return this.findOne(businessId, register.id, tx);
+      return this.findOne(businessId, register.id, user, tx);
     });
   }
 
@@ -94,13 +95,20 @@ export class CashRegisterService {
     return register ? this.formatRegister(register) : null;
   }
 
-  async findAll(businessId: string, query: CashRegisterQueryDto = {}) {
+  async findAll(
+    businessId: string,
+    query: CashRegisterQueryDto = {},
+    user?: AuthenticatedUser,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
+    const scopedUserId = this.canViewAllUserActivity(user)
+      ? query.userId
+      : user?.id;
     const where: Prisma.CashRegisterWhereInput = {
       businessId,
       ...(query.status ? { status: query.status } : {}),
-      ...(query.userId ? { userId: query.userId } : {}),
+      ...(scopedUserId ? { userId: scopedUserId } : {}),
       ...(query.startDate || query.endDate
         ? {
             openedAt: {
@@ -131,10 +139,11 @@ export class CashRegisterService {
   async findOne(
     businessId: string,
     id: string,
+    user?: AuthenticatedUser,
     tx: Tx | PrismaService = this.prisma,
   ) {
     const register = await tx.cashRegister.findFirst({
-      where: { id, businessId },
+      where: { id, businessId, ...this.userActivityScope(user) },
       include: this.registerInclude(),
     });
 
@@ -195,7 +204,7 @@ export class CashRegisterService {
         description: `Recorded ${dto.transactionType} cash register adjustment`,
       });
 
-      return this.findOne(businessId, register.id, tx);
+      return this.findOne(businessId, register.id, user, tx);
     });
   }
 
@@ -248,13 +257,17 @@ export class CashRegisterService {
         description: `Closed cash register with difference ${difference.toFixed(2)}`,
       });
 
-      return this.findOne(businessId, register.id, tx);
+      return this.findOne(businessId, register.id, user, tx);
     });
   }
 
-  async dailyBalance(businessId: string, query: DailyBalanceQueryDto = {}) {
+  async dailyBalance(
+    businessId: string,
+    query: DailyBalanceQueryDto = {},
+    user?: AuthenticatedUser,
+  ) {
     const day = this.startOfDay(query.date ?? new Date());
-    return this.calculateDailyBalance(businessId, day, this.prisma);
+    return this.calculateDailyBalance(businessId, day, this.prisma, user);
   }
 
   private async upsertDailyBalance(businessId: string, date: Date, tx: Tx) {
@@ -290,6 +303,7 @@ export class CashRegisterService {
     businessId: string,
     day: Date,
     tx: Tx | PrismaService,
+    user?: AuthenticatedUser,
   ) {
     const start = this.startOfDay(day);
     const end = this.endOfDay(day);
@@ -297,12 +311,17 @@ export class CashRegisterService {
     const [opening, cashSales, cashExpenses, creditPayments, cashPayments] =
       await Promise.all([
         tx.cashRegister.aggregate({
-          where: { businessId, openedAt: { gte: start, lte: end } },
+          where: {
+            businessId,
+            ...this.userActivityScope(user),
+            openedAt: { gte: start, lte: end },
+          },
           _sum: { openingBalance: true },
         }),
         tx.payment.aggregate({
           where: {
             businessId,
+            ...this.userActivityScope(user),
             paymentMethod: PaymentMethod.CASH,
             paymentDate: { gte: start, lte: end },
             sale: { status: SaleStatus.COMPLETED },
@@ -313,6 +332,7 @@ export class CashRegisterService {
           where: {
             businessId,
             deletedAt: null,
+            ...this.userActivityScope(user),
             paymentMethod: PaymentMethod.CASH,
             expenseDate: { gte: start, lte: end },
           },
@@ -321,6 +341,7 @@ export class CashRegisterService {
         tx.creditPayment.aggregate({
           where: {
             paymentMethod: PaymentMethod.CASH,
+            ...this.userActivityScope(user),
             paymentDate: { gte: start, lte: end },
             creditSale: { sale: { businessId } },
           },
@@ -329,6 +350,7 @@ export class CashRegisterService {
         tx.payment.aggregate({
           where: {
             businessId,
+            ...this.userActivityScope(user),
             paymentDate: { gte: start, lte: end },
             paymentMethod: {
               in: [
@@ -531,6 +553,18 @@ export class CashRegisterService {
       },
       transactions: { orderBy: { transactionDate: 'desc' } },
     } satisfies Prisma.CashRegisterInclude;
+  }
+
+  private canViewAllUserActivity(user?: AuthenticatedUser) {
+    return Boolean(
+      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
+  }
+
+  private userActivityScope(user?: AuthenticatedUser) {
+    return this.canViewAllUserActivity(user) || !user
+      ? {}
+      : { userId: user.id };
   }
 
   private async audit(
