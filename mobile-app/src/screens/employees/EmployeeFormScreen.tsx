@@ -30,13 +30,16 @@ const defaults: FormState = {
   canSell: true,
   canManageStock: false,
   canManageExpenses: false,
-  canPrintReceipt: true
+  canPrintReceipt: true,
+  canEditCreditSales: false,
+  canDeleteCreditSales: false
 };
 
 export function EmployeeFormScreen({ route, navigation }: { route: any; navigation: any }) {
   const employeeId = route.params?.employeeId as string | undefined;
   const businessId = useAuthStore((state) => state.business?.id ?? state.user?.businessId);
   const canManage = useAuthStore((state) => state.can("employees.manage"));
+  const currentUser = useAuthStore((state) => state.user);
   const [form, setForm] = useState<FormState>(defaults);
   const [roles, setRoles] = useState<ApiRole[]>([]);
   const [loading, setLoading] = useState(Boolean(employeeId));
@@ -45,6 +48,7 @@ export function EmployeeFormScreen({ route, navigation }: { route: any; navigati
 
   const title = employeeId ? "Edit Employee" : "Create Employee";
   const selectedRole = useMemo(() => roles.find((role) => role.id === form.roleId), [form.roleId, roles]);
+  const canManageCreditSalePermissions = Boolean(currentUser?.roleName === "Owner" || (!currentUser?.roleName && currentUser?.role === "owner"));
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -55,6 +59,10 @@ export function EmployeeFormScreen({ route, navigation }: { route: any; navigati
       setRoles(roleList);
       if (employeeId) {
         const employee = await employeesService.detail(employeeId);
+        const employeePermissions = new Set([
+          ...(employee.user.role?.permissions ?? []),
+          ...(employee.user.role?.rolePermissions?.map((rolePermission) => rolePermission.permission.name) ?? [])
+        ]);
         setForm({
           ...defaults,
           employeeCode: employee.employeeCode,
@@ -74,7 +82,9 @@ export function EmployeeFormScreen({ route, navigation }: { route: any; navigati
           canSell: employee.canSell,
           canManageStock: employee.canManageStock,
           canManageExpenses: employee.canManageExpenses,
-          canPrintReceipt: employee.canPrintReceipt
+          canPrintReceipt: employee.canPrintReceipt,
+          canEditCreditSales: employeePermissions.has("credit-sales.edit"),
+          canDeleteCreditSales: employeePermissions.has("credit-sales.delete")
         });
       }
     } catch {
@@ -128,10 +138,15 @@ export function EmployeeFormScreen({ route, navigation }: { route: any; navigati
       };
       if (form.password) payload.password = form.password;
 
-      if (employeeId) {
-        await employeesService.update(employeeId, payload);
-      } else {
-        await employeesService.create(payload);
+      const saved = employeeId
+        ? await employeesService.update(employeeId, payload)
+        : await employeesService.create(payload);
+
+      if (canManageCreditSalePermissions) {
+        await employeesService.setCreditSalePermissions(saved.id, {
+          canEditCreditSales: Boolean(form.canEditCreditSales),
+          canDeleteCreditSales: Boolean(form.canDeleteCreditSales)
+        });
       }
       navigation.goBack();
     } catch (saveError) {
@@ -179,6 +194,26 @@ export function EmployeeFormScreen({ route, navigation }: { route: any; navigati
           />
         ))}
       </Card>
+
+      {canManageCreditSalePermissions ? (
+        <>
+          <SectionTitle title="Credit Sale Permissions" />
+          <Card style={styles.form}>
+            <SimpleRow
+              title="Edit Credit Sales"
+              subtitle="Allow this employee to edit authorized credit sales"
+              status={form.canEditCreditSales ? "Enabled" : "Disabled"}
+              onPress={canManage ? () => setField("canEditCreditSales", !form.canEditCreditSales) : undefined}
+            />
+            <SimpleRow
+              title="Delete Credit Sales"
+              subtitle="Allow this employee to delete authorized credit sales"
+              status={form.canDeleteCreditSales ? "Enabled" : "Disabled"}
+              onPress={canManage ? () => setField("canDeleteCreditSales", !form.canDeleteCreditSales) : undefined}
+            />
+          </Card>
+        </>
+      ) : null}
 
       {!canManage ? <Text style={styles.note}>You do not have permission to manage employees.</Text> : null}
       <Button label="Save Employee" loading={saving} onPress={save} />

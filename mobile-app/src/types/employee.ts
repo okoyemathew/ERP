@@ -5,6 +5,12 @@ export interface ApiRole {
   name: string;
   description: string | null;
   permissions?: string[];
+  rolePermissions?: Array<{
+    permission: {
+      id?: string;
+      name: string;
+    };
+  }>;
 }
 
 export interface ApiEmployee {
@@ -169,4 +175,6 @@ export interface UpsertEmployeePayload {
   canManageStock?: boolean;
   canManageExpenses?: boolean;
   canPrintReceipt?: boolean;
+  canEditCreditSales?: boolean;
+  canDeleteCreditSales?: boolean;
 }

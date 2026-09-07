@@ -11,6 +11,9 @@ import type {
   ProductListResponse,
   ProductOptionPayload,
   ProductQuery,
+  ProductReturnRequest,
+  ProductReturnRequestListResponse,
+  ProductReturnRequestPayload,
   ProductSupplier,
   ProductUnit,
   UpsertProductPayload
@@ -187,6 +190,30 @@ export const productsService = {
       }
       await queueOfflineMutation(error, { method: "POST", url: endpoints.inventory.stockIn(businessId), data: payload }, undefined);
     }
+  },
+
+  async returnRequests(params: { status?: "PENDING" | "APPROVED" | "REJECTED"; limit?: number; productId?: string } = {}): Promise<ProductReturnRequestListResponse> {
+    const businessId = await getRequiredBusinessId();
+    const { data } = await api.get<ProductReturnRequestListResponse>(endpoints.inventory.returnRequests(businessId), { params });
+    return data;
+  },
+
+  async createReturnRequest(payload: ProductReturnRequestPayload): Promise<ProductReturnRequest> {
+    const businessId = await getRequiredBusinessId();
+    const { data } = await api.post<ProductReturnRequest>(endpoints.inventory.returnRequests(businessId), payload);
+    return data;
+  },
+
+  async approveReturnRequest(requestId: string, note?: string): Promise<ProductReturnRequest> {
+    const businessId = await getRequiredBusinessId();
+    const { data } = await api.patch<ProductReturnRequest>(endpoints.inventory.approveReturnRequest(businessId, requestId), { note });
+    return data;
+  },
+
+  async rejectReturnRequest(requestId: string, note?: string): Promise<ProductReturnRequest> {
+    const businessId = await getRequiredBusinessId();
+    const { data } = await api.patch<ProductReturnRequest>(endpoints.inventory.rejectReturnRequest(businessId, requestId), { note });
+    return data;
   },
 
   async deactivate(id: string): Promise<ApiProduct> {

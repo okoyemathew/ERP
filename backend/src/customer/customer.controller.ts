@@ -76,7 +76,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.findAll(businessId, query);
+    return this.customerService.findAll(businessId, query, user);
   }
 
   @Get('search')
@@ -89,7 +89,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.search(businessId, q ?? '', query);
+    return this.customerService.search(businessId, q ?? '', query, user);
   }
 
   @Get(':id')
@@ -101,7 +101,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.findOne(businessId, id);
+    return this.customerService.findOne(businessId, id, user);
   }
 
   @Get(':id/profile')
@@ -132,7 +132,7 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.getOutstandingBalance(businessId, id);
+    return this.customerService.getOutstandingBalance(businessId, id, user);
   }
 
   @Get(':id/outstanding-credit-balance')
@@ -151,7 +151,11 @@ export class CustomerController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.customerService.getOutstandingCreditBalance(businessId, id);
+    return this.customerService.getOutstandingCreditBalance(
+      businessId,
+      id,
+      user,
+    );
   }
 
   @Get(':id/purchase-history')

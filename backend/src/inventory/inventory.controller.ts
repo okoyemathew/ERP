@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -46,7 +47,9 @@ export class InventoryController {
   findAll(
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Query() query: InventoryQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.findAll(businessId, query);
   }
 
@@ -63,7 +66,9 @@ export class InventoryController {
   searchBySku(
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Query('sku') sku: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.searchBySku(businessId, sku);
   }
 
@@ -80,7 +85,9 @@ export class InventoryController {
   searchByBarcode(
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Query('barcode') barcode: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.searchByBarcode(businessId, barcode);
   }
 
@@ -98,8 +105,10 @@ export class InventoryController {
   })
   searchInventory(
     @Param('businessId', ParseUUIDPipe) businessId: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Query('q') q?: string,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.searchInventory(businessId, q ?? '');
   }
 
@@ -115,7 +124,9 @@ export class InventoryController {
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Query('productId', ParseUUIDPipe) productId: string,
     @Query() query: StockAdjustmentQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.getAdjustments(businessId, productId, query);
   }
 
@@ -129,7 +140,11 @@ export class InventoryController {
     SYSTEM_ROLES.CASHIER,
   )
   @ApiOperation({ summary: 'Detect low stock items' })
-  getLowStockProducts(@Param('businessId', ParseUUIDPipe) businessId: string) {
+  getLowStockProducts(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.getLowStockProducts(businessId);
   }
 
@@ -145,7 +160,9 @@ export class InventoryController {
   @ApiOperation({ summary: 'Detect out-of-stock items' })
   getOutOfStockProducts(
     @Param('businessId', ParseUUIDPipe) businessId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.getOutOfStockProducts(businessId);
   }
 
@@ -164,6 +181,7 @@ export class InventoryController {
     @Query() query: ProductReturnRequestQueryDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.findReturnRequests(businessId, query, user);
   }
 
@@ -183,6 +201,7 @@ export class InventoryController {
     @Body() dto: CreateProductReturnRequestDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.createReturnRequest(businessId, dto, user);
   }
 
@@ -196,6 +215,7 @@ export class InventoryController {
     @Body() dto: ProductReturnRequestDecisionDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.approveReturnRequest(
       businessId,
       id,
@@ -214,6 +234,7 @@ export class InventoryController {
     @Body() dto: ProductReturnRequestDecisionDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.rejectReturnRequest(
       businessId,
       id,
@@ -235,7 +256,9 @@ export class InventoryController {
   findByProduct(
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Param('productId', ParseUUIDPipe) productId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.findByProduct(businessId, productId);
   }
 
@@ -253,7 +276,9 @@ export class InventoryController {
     @Param('businessId', ParseUUIDPipe) businessId: string,
     @Param('productId', ParseUUIDPipe) productId: string,
     @Query() query: InventoryHistoryQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.getHistory(businessId, productId, query);
   }
 
@@ -272,6 +297,7 @@ export class InventoryController {
     @Body() dto: StockMutationDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.stockIn(businessId, dto, user);
   }
 
@@ -290,6 +316,7 @@ export class InventoryController {
     @Body() dto: StockMutationDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.stockOut(businessId, dto, user);
   }
 
@@ -308,6 +335,7 @@ export class InventoryController {
     @Body() dto: AdjustInventoryDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.adjustStock(
       businessId,
       dto.productId,
@@ -331,6 +359,7 @@ export class InventoryController {
     @Body() dto: StockAdjustmentRequestDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.stockAdjustment(businessId, dto, user);
   }
 
@@ -349,6 +378,7 @@ export class InventoryController {
     @Body() dto: StockMutationDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.createDamage(businessId, dto, user);
   }
 
@@ -367,6 +397,7 @@ export class InventoryController {
     @Body() dto: StockMutationDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.createExpiredStock(businessId, dto, user);
   }
 
@@ -383,6 +414,16 @@ export class InventoryController {
     @Body() dto: StockMutationDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    this.assertBusinessAccess(businessId, user);
     return this.inventoryService.stockReturn(businessId, dto, user);
+  }
+
+  private assertBusinessAccess(
+    businessId: string,
+    user?: AuthenticatedUser,
+  ): void {
+    if (!user || user.businessId !== businessId) {
+      throw new ForbiddenException('Cannot access inventory for this business');
+    }
   }
 }

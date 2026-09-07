@@ -106,7 +106,11 @@ export class CustomerService {
     return customer;
   }
 
-  async findAll(businessId: string, query: CustomerQueryDto = {}) {
+  async findAll(
+    businessId: string,
+    query: CustomerQueryDto = {},
+    viewer?: AuthenticatedUser,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'createdAt';
@@ -119,12 +123,7 @@ export class CustomerService {
         where,
         include: {
           _count: {
-            select: {
-              sales: true,
-              payments: true,
-              creditSales: true,
-              creditPayments: true,
-            },
+            select: this.buildRelationCountSelect(businessId, viewer),
           },
         },
         orderBy: { [sortBy]: sortOrder },
@@ -139,18 +138,60 @@ export class CustomerService {
     };
   }
 
-  async search(businessId: string, term: string, query: CustomerQueryDto = {}) {
-    return this.findAll(businessId, { ...query, search: term || query.search });
+  async search(
+    businessId: string,
+    term: string,
+    query: CustomerQueryDto = {},
+    viewer?: AuthenticatedUser,
+  ) {
+    return this.findAll(
+      businessId,
+      { ...query, search: term || query.search },
+      viewer,
+    );
   }
 
-  async findOne(businessId: string, id: string) {
+  async findOne(
+    businessId: string,
+    id: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const customer = await this.prisma.customer.findFirst({
       where: { id, businessId, deletedAt: null },
       include: {
-        sales: { orderBy: { saleDate: 'desc' }, take: 10 },
-        payments: { orderBy: { paymentDate: 'desc' }, take: 10 },
-        creditSales: { orderBy: { createdAt: 'desc' }, take: 10 },
-        creditPayments: { orderBy: { paymentDate: 'desc' }, take: 10 },
+        sales: {
+          where: {
+            deletedAt: null,
+            ...this.userActivityScope(viewer),
+          },
+          orderBy: { saleDate: 'desc' },
+          take: 10,
+        },
+        payments: {
+          where: {
+            businessId,
+            ...this.paymentActivityScope(viewer),
+          },
+          orderBy: { paymentDate: 'desc' },
+          take: 10,
+        },
+        creditSales: {
+          where: {
+            deletedAt: null,
+            sale: { businessId, ...this.userActivityScope(viewer) },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+        creditPayments: {
+          where: {
+            creditSale: {
+              sale: { businessId, ...this.userActivityScope(viewer) },
+            },
+          },
+          orderBy: { paymentDate: 'desc' },
+          take: 10,
+        },
       },
     });
 
@@ -227,9 +268,13 @@ export class CustomerService {
     return this.setStatus(businessId, id, CustomerStatus.INACTIVE, user);
   }
 
-  async getOutstandingBalance(businessId: string, id: string) {
-    const customer = await this.findOne(businessId, id);
-    const balance = await this.calculateCustomerBalance(businessId, id);
+  async getOutstandingBalance(
+    businessId: string,
+    id: string,
+    viewer?: AuthenticatedUser,
+  ) {
+    const customer = await this.findOne(businessId, id, viewer);
+    const balance = await this.calculateCustomerBalance(businessId, id, viewer);
 
     return {
       customerId: customer.id,
@@ -246,9 +291,13 @@ export class CustomerService {
     };
   }
 
-  async getOutstandingCreditBalance(businessId: string, id: string) {
-    const customer = await this.findOne(businessId, id);
-    const balance = await this.calculateCustomerBalance(businessId, id);
+  async getOutstandingCreditBalance(
+    businessId: string,
+    id: string,
+    viewer?: AuthenticatedUser,
+  ) {
+    const customer = await this.findOne(businessId, id, viewer);
+    const balance = await this.calculateCustomerBalance(businessId, id, viewer);
 
     return {
       customerId: customer.id,
@@ -267,7 +316,7 @@ export class CustomerService {
     id: string,
     viewer?: AuthenticatedUser,
   ) {
-    const customer = await this.findOne(businessId, id);
+    const customer = await this.findOne(businessId, id, viewer);
     const balance = await this.calculateCustomerBalance(businessId, id, viewer);
 
     const [
@@ -291,7 +340,7 @@ export class CustomerService {
         where: {
           businessId,
           customerId: id,
-          ...this.userActivityScope(viewer),
+          ...this.paymentActivityScope(viewer),
         },
         _sum: { amount: true },
       }),
@@ -323,7 +372,7 @@ export class CustomerService {
         where: {
           businessId,
           customerId: id,
-          ...this.userActivityScope(viewer),
+          ...this.paymentActivityScope(viewer),
         },
       }),
     ]);
@@ -412,7 +461,7 @@ export class CustomerService {
           where: {
             businessId,
             customerId: id,
-            ...this.userActivityScope(viewer),
+            ...this.paymentActivityScope(viewer),
           },
         }),
         this.prisma.creditPayment.count({
@@ -427,7 +476,7 @@ export class CustomerService {
           where: {
             businessId,
             customerId: id,
-            ...this.userActivityScope(viewer),
+            ...this.paymentActivityScope(viewer),
           },
           include: { sale: true },
           orderBy: { paymentDate: 'desc' },
@@ -515,7 +564,7 @@ export class CustomerService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
-    const customer = await this.findOne(businessId, id);
+    const customer = await this.findOne(businessId, id, viewer);
     const [sales, payments, creditPayments, balance] = await Promise.all([
       this.prisma.sale.findMany({
         where: {
@@ -530,7 +579,7 @@ export class CustomerService {
         where: {
           businessId,
           customerId: id,
-          ...this.userActivityScope(viewer),
+          ...this.paymentActivityScope(viewer),
         },
         orderBy: { paymentDate: 'asc' },
       }),
@@ -600,7 +649,7 @@ export class CustomerService {
     creditAmount: number | Prisma.Decimal,
     user?: AuthenticatedUser,
   ) {
-    const customer = await this.findOne(businessId, customerId);
+    const customer = await this.findOne(businessId, customerId, user);
     const amount = new Decimal(creditAmount);
     const balance = await this.calculateCustomerBalance(
       businessId,
@@ -948,6 +997,45 @@ export class CustomerService {
     return this.canViewAllUserActivity(user) || !user
       ? {}
       : { userId: user.id };
+  }
+
+  private paymentActivityScope(user?: AuthenticatedUser) {
+    return this.canViewAllUserActivity(user) || !user
+      ? {}
+      : { sale: { userId: user.id } };
+  }
+
+  private buildRelationCountSelect(
+    businessId: string,
+    viewer?: AuthenticatedUser,
+  ) {
+    return {
+      sales: {
+        where: {
+          deletedAt: null,
+          ...this.userActivityScope(viewer),
+        },
+      },
+      payments: {
+        where: {
+          businessId,
+          ...this.paymentActivityScope(viewer),
+        },
+      },
+      creditSales: {
+        where: {
+          deletedAt: null,
+          sale: { businessId, ...this.userActivityScope(viewer) },
+        },
+      },
+      creditPayments: {
+        where: {
+          creditSale: {
+            sale: { businessId, ...this.userActivityScope(viewer) },
+          },
+        },
+      },
+    };
   }
 
   private buildWhere(

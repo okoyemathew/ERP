@@ -142,6 +142,23 @@ export const employeesService = {
     }
   },
 
+  async setCreditSalePermissions(
+    id: string,
+    payload: { canEditCreditSales?: boolean; canDeleteCreditSales?: boolean; reason?: string }
+  ): Promise<ApiEmployee> {
+    try {
+      const { data } = await api.patch<ApiEmployee>(endpoints.employees.creditSalePermissions(id), payload);
+      return data;
+    } catch (error) {
+      const businessId = await getRequiredBusinessId();
+      return queueOfflineMutation(
+        error,
+        { method: "PATCH", url: endpoints.employees.creditSalePermissions(id), data: payload },
+        employeeFallback(businessId, {}, id)
+      );
+    }
+  },
+
   async assignRole(id: string, roleId: string): Promise<ApiEmployee> {
     try {
       const { data } = await api.patch<ApiEmployee>(endpoints.employees.assignRole(id), { roleId });

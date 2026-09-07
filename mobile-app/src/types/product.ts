@@ -107,6 +107,43 @@ export interface ProductListResponse {
   meta: { page: number; limit: number; total: number; totalPages: number };
 }
 
+export type ProductReturnRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export interface ProductReturnRequest {
+  id: string;
+  businessId: string;
+  productId: string;
+  requestedById: string;
+  reviewedById?: string | null;
+  quantity: number;
+  unitCost?: string | number | null;
+  referenceNumber?: string | null;
+  remarks?: string | null;
+  status: ProductReturnRequestStatus;
+  decisionNote?: string | null;
+  requestedAt: string;
+  reviewedAt?: string | null;
+  inventoryTransactionId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  product?: Pick<ApiProduct, "id" | "name" | "sku" | "barcode">;
+  requestedBy?: ProductAddedBy;
+  reviewedBy?: ProductAddedBy | null;
+}
+
+export interface ProductReturnRequestListResponse {
+  data: ProductReturnRequest[];
+  meta: { page: number; limit: number; total: number; totalPages: number };
+}
+
+export interface ProductReturnRequestPayload {
+  productId: string;
+  quantity: number;
+  unitCost?: number;
+  referenceNumber?: string;
+  remarks?: string;
+}
+
 export interface ProductQuery {
   page?: number;
   limit?: number;

@@ -3,7 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, SupplierStatus } from '@prisma/client';
+import { AuditAction, Prisma, SupplierStatus } from '@prisma/client';
+import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
@@ -77,7 +78,11 @@ export class SupplierService {
     return supplier;
   }
 
-  async findAll(businessId: string, query: SupplierQueryDto = {}) {
+  async findAll(
+    businessId: string,
+    query: SupplierQueryDto = {},
+    user?: AuthenticatedUser,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'createdAt';
@@ -109,20 +114,17 @@ export class SupplierService {
         : {}),
     };
 
+    const activityInclude = await this.buildActivityInclude(
+      businessId,
+      user,
+      5,
+    );
+
     const [total, items] = await Promise.all([
       this.prisma.supplier.count({ where }),
       this.prisma.supplier.findMany({
         where,
-        include: {
-          purchaseOrders: {
-            take: 5,
-            orderBy: { createdAt: 'desc' },
-          },
-          goodsSupplied: {
-            take: 5,
-            orderBy: { createdAt: 'desc' },
-          },
-        },
+        include: activityInclude,
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
         take: limit,
@@ -140,19 +142,15 @@ export class SupplierService {
     };
   }
 
-  async findOne(businessId: string, id: string) {
+  async findOne(businessId: string, id: string, user?: AuthenticatedUser) {
+    const activityInclude = await this.buildActivityInclude(
+      businessId,
+      user,
+      10,
+    );
     const supplier = await this.prisma.supplier.findFirst({
       where: { id, businessId, deletedAt: null },
-      include: {
-        purchaseOrders: {
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-        },
-        goodsSupplied: {
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-        },
-      },
+      include: activityInclude,
     });
 
     if (!supplier) {
@@ -162,10 +160,15 @@ export class SupplierService {
     return supplier;
   }
 
-  async search(businessId: string, term: string, query: SupplierQueryDto = {}) {
+  async search(
+    businessId: string,
+    term: string,
+    query: SupplierQueryDto = {},
+    user?: AuthenticatedUser,
+  ) {
     const search = term.trim();
     if (!search) {
-      return this.findAll(businessId, query);
+      return this.findAll(businessId, query, user);
     }
 
     const page = query.page ?? 1;
@@ -341,8 +344,12 @@ export class SupplierService {
     return this.setStatus(businessId, id, SupplierStatus.INACTIVE, user);
   }
 
-  async getOutstandingBalance(businessId: string, id: string) {
-    const supplier = await this.findOne(businessId, id);
+  async getOutstandingBalance(
+    businessId: string,
+    id: string,
+    user?: AuthenticatedUser,
+  ) {
+    const supplier = await this.findOne(businessId, id, user);
     return {
       supplierId: supplier.id,
       companyName: supplier.companyName,
@@ -358,7 +365,7 @@ export class SupplierService {
     reference: string,
     user?: AuthenticatedUser,
   ) {
-    const supplier = await this.findOne(businessId, id);
+    const supplier = await this.findOne(businessId, id, user);
 
     if (amount <= 0) {
       throw new BadRequestException('Payment amount must be greater than zero');
@@ -403,8 +410,12 @@ export class SupplierService {
     };
   }
 
-  async getPaymentHistory(businessId: string, id: string) {
-    const supplier = await this.findOne(businessId, id);
+  async getPaymentHistory(
+    businessId: string,
+    id: string,
+    user?: AuthenticatedUser,
+  ) {
+    const supplier = await this.findOne(businessId, id, user);
 
     const auditLogs = await this.prisma.auditLog.findMany({
       where: {
@@ -428,5 +439,62 @@ export class SupplierService {
         recordedBy: log.userId,
       })),
     };
+  }
+
+  private async buildActivityInclude(
+    businessId: string,
+    user: AuthenticatedUser | undefined,
+    take: number,
+  ): Promise<Prisma.SupplierInclude> {
+    const [purchaseOrderIds, goodsSuppliedIds] = await Promise.all([
+      this.scopedCreatedEntityIds(businessId, user, 'PurchaseOrder'),
+      this.scopedCreatedEntityIds(businessId, user, 'GoodsSupplied'),
+    ]);
+
+    return {
+      purchaseOrders: {
+        where: purchaseOrderIds
+          ? { id: { in: purchaseOrderIds } }
+          : undefined,
+        take,
+        orderBy: { createdAt: 'desc' },
+      },
+      goodsSupplied: {
+        where: goodsSuppliedIds ? { id: { in: goodsSuppliedIds } } : undefined,
+        take,
+        orderBy: { createdAt: 'desc' },
+      },
+    };
+  }
+
+  private async scopedCreatedEntityIds(
+    businessId: string,
+    user: AuthenticatedUser | undefined,
+    entity: 'PurchaseOrder' | 'GoodsSupplied',
+  ): Promise<string[] | undefined> {
+    if (!user || this.canViewAllUserActivity(user)) {
+      return undefined;
+    }
+
+    const logs = await this.prisma.auditLog.findMany({
+      where: {
+        businessId,
+        userId: user.id,
+        action: AuditAction.CREATE,
+        entity,
+        entityId: { not: null },
+      },
+      select: { entityId: true },
+    });
+
+    return logs
+      .map((log) => log.entityId)
+      .filter((entityId): entityId is string => Boolean(entityId));
+  }
+
+  private canViewAllUserActivity(user?: AuthenticatedUser): boolean {
+    return Boolean(
+      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
+    );
   }
 }

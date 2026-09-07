@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, Image, ScrollView, StyleSheet, View } from "react-native";
+import { Alert, Image, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
-import { Package } from "lucide-react-native";
+import { Package, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Card, ErrorState, LoadingState, ScreenHeader } from "@/components/common";
 import { productsService } from "@/services/products.service";
@@ -21,9 +21,14 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
   const user = useAuthStore((state) => state.user);
   const canManage = useAuthStore((state) => state.can("products.manage"));
   const isOwner = user?.role === "owner" || user?.roleName === "Owner";
+  const canRequestReturn = Boolean(user);
   const [product, setProduct] = useState<ApiProduct | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [returnVisible, setReturnVisible] = useState(false);
+  const [returnQuantity, setReturnQuantity] = useState("1");
+  const [returnRemarks, setReturnRemarks] = useState("");
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,6 +64,33 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
         }
       }
     ]);
+  };
+
+  const submitReturnRequest = async () => {
+    if (!product || returnSubmitting) return;
+    const quantity = Number.parseInt(returnQuantity, 10);
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
+      return;
+    }
+
+    setReturnSubmitting(true);
+    try {
+      await productsService.createReturnRequest({
+        productId: product.id,
+        quantity,
+        remarks: returnRemarks.trim() || undefined
+      });
+      setReturnVisible(false);
+      setReturnQuantity("1");
+      setReturnRemarks("");
+      Alert.alert("Return submitted", "The business owner can now approve this returned product.");
+    } catch (returnError) {
+      const message = returnError instanceof Error ? returnError.message : "Unable to submit return request.";
+      Alert.alert("Return failed", message);
+    } finally {
+      setReturnSubmitting(false);
+    }
   };
 
   if (loading) return <LoadingState label="Loading product" />;
@@ -102,13 +134,55 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
           <Info label="Added By" value={addedByName(product)} />
           <Info label="Initial Stock" value={String(product.initialStockQuantity ?? 0)} />
         </Card>
-        {canManage ? (
+        {canManage || canRequestReturn ? (
           <View style={styles.actions}>
-            <Button label="Edit Product" onPress={() => navigation.navigate("ProductForm", { productId: product.id })} />
-            {isOwner ? <Button label="Delete Product" variant="danger" onPress={deleteProduct} /> : null}
+            {canRequestReturn ? <Button label="Request Return" variant="ghost" onPress={() => setReturnVisible(true)} /> : null}
+            {canManage ? <Button label="Edit Product" onPress={() => navigation.navigate("ProductForm", { productId: product.id })} /> : null}
+            {canManage && isOwner ? <Button label="Delete Product" variant="danger" onPress={deleteProduct} /> : null}
           </View>
         ) : null}
       </ScrollView>
+      <Modal
+        visible={returnVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setReturnVisible(false)}
+      >
+        <View style={styles.modal}>
+          <Pressable style={styles.backdrop} onPress={() => setReturnVisible(false)} accessibilityRole="button" accessibilityLabel="Close return request" />
+          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+            <View style={styles.sheetHeader}>
+              <View>
+                <Text style={styles.sheetTitle}>Request Return</Text>
+                <Text style={styles.meta}>{product.name}</Text>
+              </View>
+              <Pressable style={styles.closeButton} onPress={() => setReturnVisible(false)} accessibilityRole="button" accessibilityLabel="Close return request">
+                <X size={16} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <TextInput
+              value={returnQuantity}
+              onChangeText={setReturnQuantity}
+              keyboardType="number-pad"
+              style={styles.input}
+              placeholder="Quantity"
+              placeholderTextColor={colors.textPlaceholder}
+              accessibilityLabel="Return quantity"
+            />
+            <TextInput
+              value={returnRemarks}
+              onChangeText={setReturnRemarks}
+              style={[styles.input, styles.remarksInput]}
+              placeholder="Remarks"
+              placeholderTextColor={colors.textPlaceholder}
+              multiline
+              accessibilityLabel="Return remarks"
+            />
+            <Button label="Submit Return" loading={returnSubmitting} onPress={() => void submitReturnRequest()} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -137,5 +211,13 @@ const styles = StyleSheet.create({
   info: { gap: 12 },
   infoRow: { gap: 3 },
   item: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
-  actions: { gap: 10 }
+  actions: { gap: 10 },
+  modal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },
+  backdrop: { ...StyleSheet.absoluteFillObject },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, gap: 12 },
+  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  sheetTitle: { ...typography.cardTitle, color: colors.foreground },
+  closeButton: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  input: { minHeight: 48, borderWidth: 1, borderColor: colors.borderLight, borderRadius: 8, paddingHorizontal: 12, color: colors.foreground, backgroundColor: colors.inputBg },
+  remarksInput: { minHeight: 82, paddingTop: 12, textAlignVertical: "top" }
 });

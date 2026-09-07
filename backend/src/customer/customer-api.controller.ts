@@ -43,7 +43,7 @@ export class CustomerApiController {
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: CustomerQueryDto,
   ) {
-    return this.customerService.findAll(user.businessId, query);
+    return this.customerService.findAll(user.businessId, query, user);
   }
 
   @Post()
@@ -71,7 +71,7 @@ export class CustomerApiController {
     @Query('q') q: string,
     @Query() query: CustomerQueryDto,
   ) {
-    return this.customerService.search(user.businessId, q ?? '', query);
+    return this.customerService.search(user.businessId, q ?? '', query, user);
   }
 
   @Get(':id')
@@ -81,7 +81,7 @@ export class CustomerApiController {
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.customerService.findOne(user.businessId, id);
+    return this.customerService.findOne(user.businessId, id, user);
   }
 
   @Patch(':id')

@@ -55,9 +55,15 @@ function actionText(action: CreditSaleEmployeeAction) {
 export function CreditSalesScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const user = useAuth((state) => state.user);
+  const permissions = useAuth((state) => state.permissions);
   const roleName = user?.roleName?.trim();
+  const userPermissions = user?.permissions ?? [];
+  const hasPermission = (permission: string) => permissions.includes(permission) || userPermissions.includes(permission);
   const isBusinessOwner = Boolean(roleName === "Owner" || (!roleName && user?.role === "owner"));
-  const canUseFinancialCredit = Boolean(user?.permissions?.includes("credit-sales.manage") || roleName === "Owner" || roleName === "Admin" || (!roleName && user?.role === "owner"));
+  const isAdmin = roleName === "Admin";
+  const canUseFinancialCredit = Boolean(hasPermission("credit-sales.manage") || isBusinessOwner || isAdmin);
+  const canEditCreditSale = Boolean(hasPermission("credit-sales.edit") || isBusinessOwner || isAdmin);
+  const canDeleteCreditSale = Boolean(hasPermission("credit-sales.delete") || isBusinessOwner || isAdmin);
   const [query, setQuery] = useState("");
   const [response, setResponse] = useState<CreditSaleListResponse | null>(null);
   const [approvalRequests, setApprovalRequests] = useState<CreditSaleActionRequest[]>([]);
@@ -508,27 +514,28 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
                       <X size={15} color={colors.error} />
                     </Pressable>
                   </View>
-                ) : !canUseFinancialCredit ? (
+                ) : !isBusinessOwner && !isAdmin ? (
                   <View style={styles.employeeActions}>
                     {(["EDIT", "DELETE"] as CreditSaleEmployeeAction[]).map((action) => {
                       const request = activeActionRequest(item, action);
                       const processingKey = `${item.id}-${action}`;
+                      const hasDirectPermission = action === "EDIT" ? canEditCreditSale : canDeleteCreditSale;
                       const isApproved = request?.status === "APPROVED";
                       const isPending = request?.status === "PENDING";
-                      const disabled = actionProcessing === processingKey || isPending;
+                      const disabled = actionProcessing === processingKey || (!hasDirectPermission && isPending);
                       return (
                         <Pressable
                           key={action}
                           onPress={() => {
                             console.log("CREDIT_EMPLOYEE_ACTION_PRESSED", item.id, action, item.sale.saleNumber);
-                            if (isApproved && action === "EDIT") openEdit(item);
-                            else if (isApproved && action === "DELETE") removeCreditSale(item);
+                            if ((hasDirectPermission || isApproved) && action === "EDIT") openEdit(item);
+                            else if ((hasDirectPermission || isApproved) && action === "DELETE") removeCreditSale(item);
                             else requestApproval(item, action);
                           }}
                           disabled={disabled}
                           style={[styles.iconButton, action === "DELETE" && styles.deleteButton, disabled && styles.disabledAction]}
                           accessibilityRole="button"
-                          accessibilityLabel={`${isApproved ? actionText(action) : "Request " + actionText(action) + " approval"} for ${item.sale.saleNumber}`}
+                          accessibilityLabel={`${hasDirectPermission || isApproved ? actionText(action) : "Request " + actionText(action) + " approval"} for ${item.sale.saleNumber}`}
                         >
                           {action === "EDIT" ? <Edit3 size={14} color={colors.primary} /> : <Trash2 size={14} color={colors.error} />}
                         </Pressable>

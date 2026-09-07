@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Pressable, StyleSheet, View } from "react-native";
+import { Alert, FlatList, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
-import { Package, Plus, Search, X } from "lucide-react-native";
+import { Check, Package, Plus, Search, X } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
 import { productsService } from "@/services/products.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
-import type { ApiProduct } from "@/types/product";
+import type { ApiProduct, ProductReturnRequest } from "@/types/product";
 import { formatCurrency } from "@/utils/format";
 
 const stockStatus = (stock: number) => {
@@ -38,11 +38,16 @@ function addedByName(product: ApiProduct) {
 export function InventoryScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const canManage = useAuthStore((state) => state.can("products.manage"));
+  const user = useAuthStore((state) => state.user);
+  const roleName = user?.roleName?.trim();
+  const canReviewReturns = Boolean(roleName === "Owner" || roleName === "Admin" || (!roleName && user?.role === "owner"));
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState<ApiProduct[]>([]);
+  const [returnRequests, setReturnRequests] = useState<ProductReturnRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [returnProcessing, setReturnProcessing] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const hasLoadedRef = useRef(false);
   const queryRef = useRef(query);
@@ -67,6 +72,16 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
       });
       if (requestId !== latestRequestRef.current) return;
       setProducts(response.data);
+      if (canReviewReturns) {
+        try {
+          const returns = await productsService.returnRequests({ status: "PENDING", limit: 10 });
+          if (requestId === latestRequestRef.current) setReturnRequests(returns.data);
+        } catch {
+          if (requestId === latestRequestRef.current) setReturnRequests([]);
+        }
+      } else {
+        setReturnRequests([]);
+      }
     } catch {
       if (requestId !== latestRequestRef.current) return;
       setError(true);
@@ -78,7 +93,7 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
         hasLoadedRef.current = true;
       }
     }
-  }, []);
+  }, [canReviewReturns]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () => {
@@ -109,6 +124,38 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     void load(queryRef.current, false);
   };
   const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
+
+  const requesterName = (request: ProductReturnRequest) => {
+    if (!request.requestedBy) return "Employee";
+    return [request.requestedBy.firstName, request.requestedBy.lastName].filter(Boolean).join(" ") || request.requestedBy.username;
+  };
+
+  const decideReturnRequest = (request: ProductReturnRequest, approved: boolean) => {
+    Alert.alert(
+      approved ? "Approve return?" : "Reject return?",
+      `${request.product?.name ?? "Product"} return request from ${requesterName(request)}.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: approved ? "Approve" : "Reject",
+          style: approved ? "default" : "destructive",
+          onPress: async () => {
+            setReturnProcessing(request.id);
+            try {
+              if (approved) await productsService.approveReturnRequest(request.id);
+              else await productsService.rejectReturnRequest(request.id);
+              await load(queryRef.current, false);
+            } catch (decisionError) {
+              const message = decisionError instanceof Error ? decisionError.message : "Unable to update return request.";
+              Alert.alert("Return request failed", message);
+            } finally {
+              setReturnProcessing(null);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   if (loading) return <LoadingState label="Loading products" />;
   if (error) return <ErrorState onRetry={() => void load()} />;
@@ -149,6 +196,40 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
                 </Card>
               ))}
             </View>
+            {canReviewReturns && returnRequests.length ? (
+              <View style={styles.returnQueue}>
+                <Text style={styles.returnTitle}>Pending Returns</Text>
+                {returnRequests.map((request) => (
+                  <Card key={request.id} style={styles.returnCard}>
+                    <View style={styles.body}>
+                      <Text style={styles.title} numberOfLines={1}>{request.product?.name ?? "Product"}</Text>
+                      <Text style={styles.meta}>Qty {request.quantity} | {requesterName(request)}</Text>
+                      {request.remarks ? <Text style={styles.meta} numberOfLines={1}>{request.remarks}</Text> : null}
+                    </View>
+                    <View style={styles.returnActions}>
+                      <Pressable
+                        onPress={() => decideReturnRequest(request, true)}
+                        disabled={returnProcessing === request.id}
+                        style={[styles.returnButton, styles.approveButton, returnProcessing === request.id && styles.disabledAction]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Approve return for ${request.product?.name ?? "product"}`}
+                      >
+                        <Check size={15} color={colors.successDark} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => decideReturnRequest(request, false)}
+                        disabled={returnProcessing === request.id}
+                        style={[styles.returnButton, styles.rejectButton, returnProcessing === request.id && styles.disabledAction]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Reject return for ${request.product?.name ?? "product"}`}
+                      >
+                        <X size={15} color={colors.error} />
+                      </Pressable>
+                    </View>
+                  </Card>
+                ))}
+              </View>
+            ) : null}
             {searching ? <Text style={styles.searching}>Searching products...</Text> : null}
           </View>
         }
@@ -214,5 +295,13 @@ const styles = StyleSheet.create({
   progress: { height: 5, borderRadius: 99, backgroundColor: colors.borderLighter, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 99 },
   right: { alignItems: "flex-end", gap: 6 },
-  stock: { color: colors.foreground, fontSize: 15, fontWeight: "800" }
+  stock: { color: colors.foreground, fontSize: 15, fontWeight: "800" },
+  returnQueue: { gap: 8 },
+  returnTitle: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
+  returnCard: { flexDirection: "row", alignItems: "center", gap: 12 },
+  returnActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  returnButton: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  approveButton: { backgroundColor: colors.successBg, borderColor: colors.successBorder },
+  rejectButton: { backgroundColor: colors.errorBg, borderColor: colors.errorBorder },
+  disabledAction: { opacity: 0.55 }
 });

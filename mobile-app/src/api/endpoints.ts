@@ -38,6 +38,7 @@ export const endpoints = {
     update: (employeeId: string) => `/employees/${employeeId}`,
     delete: (employeeId: string) => `/employees/${employeeId}`,
     setLoginAccess: (employeeId: string) => `/employees/${employeeId}/login-access`,
+    creditSalePermissions: (employeeId: string) => `/employees/${employeeId}/credit-sale-permissions`,
     assignRole: (employeeId: string) => `/employees/${employeeId}/role`,
     activate: (employeeId: string) => `/employees/${employeeId}/activate`,
     deactivate: (employeeId: string) => `/employees/${employeeId}/deactivate`,
@@ -124,7 +125,11 @@ export const endpoints = {
     addBarcode: (businessId: string, productId: string) => `/businesses/${businessId}/products/${productId}/barcodes`
   },
   inventory: {
-    stockIn: (businessId: string) => `/businesses/${businessId}/inventory/stock-in`
+    list: (businessId: string) => `/businesses/${businessId}/inventory`,
+    stockIn: (businessId: string) => `/businesses/${businessId}/inventory/stock-in`,
+    returnRequests: (businessId: string) => `/businesses/${businessId}/inventory/return-requests`,
+    approveReturnRequest: (businessId: string, requestId: string) => `/businesses/${businessId}/inventory/return-requests/${requestId}/approve`,
+    rejectReturnRequest: (businessId: string, requestId: string) => `/businesses/${businessId}/inventory/return-requests/${requestId}/reject`
   },
   categories: {
     list: (businessId: string) => `/businesses/${businessId}/categories`,

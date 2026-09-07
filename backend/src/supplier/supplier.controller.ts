@@ -68,7 +68,7 @@ export class SupplierController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.supplierService.findAll(businessId, query);
+    return this.supplierService.findAll(businessId, query, user);
   }
 
   @Get('search')
@@ -87,7 +87,7 @@ export class SupplierController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.supplierService.search(businessId, q ?? '', query);
+    return this.supplierService.search(businessId, q ?? '', query, user);
   }
 
   @Get(':id')
@@ -105,7 +105,7 @@ export class SupplierController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.supplierService.findOne(businessId, id);
+    return this.supplierService.findOne(businessId, id, user);
   }
 
   @Patch(':id')
@@ -167,7 +167,7 @@ export class SupplierController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.supplierService.getOutstandingBalance(businessId, id);
+    return this.supplierService.getOutstandingBalance(businessId, id, user);
   }
 
   @Post(':id/payments')
@@ -198,6 +198,6 @@ export class SupplierController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.supplierService.getPaymentHistory(businessId, id);
+    return this.supplierService.getPaymentHistory(businessId, id, user);
   }
 }
