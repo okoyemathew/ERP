@@ -54,6 +54,12 @@ export function ReceiptTicket({ receipt, receiptId, items = [], method = "cash" 
             <Text style={styles.value}>{receipt.employeeName}</Text>
           </View>
         ) : null}
+        {receipt?.createdAt ? (
+          <View style={styles.meta}>
+            <Text style={styles.caption}>Date</Text>
+            <Text style={styles.value}>{new Date(receipt.createdAt).toLocaleDateString()}</Text>
+          </View>
+        ) : null}
         {ticketItems.map((item) => (
           <View key={`${item.productId}-${item.name}`} style={styles.row}>
             <Text style={styles.itemName}>{item.name}</Text>
@@ -84,6 +90,18 @@ export function ReceiptTicket({ receipt, receiptId, items = [], method = "cash" 
           <Text style={styles.caption}>Balance</Text>
           <Text style={styles.value}>{formatCurrency(balance)}</Text>
         </View>
+        {receipt?.paymentLines?.length ? (
+          <>
+            <View style={styles.dashed} />
+            <Text style={styles.itemName}>Payments</Text>
+            {receipt.paymentLines.map((payment, index) => (
+              <View key={`${payment.date}-${payment.amount}-${index}`} style={styles.totalRow}>
+                <Text style={styles.caption}>{new Date(payment.date).toLocaleDateString()}</Text>
+                <Text style={styles.value}>{formatCurrency(payment.amount)}</Text>
+              </View>
+            ))}
+          </>
+        ) : null}
         <View style={[styles.method, ticketMethod === "credit" && styles.credit]}>
           <Text style={[styles.methodText, ticketMethod === "credit" && styles.creditText]}>{ticketMethod}</Text>
         </View>

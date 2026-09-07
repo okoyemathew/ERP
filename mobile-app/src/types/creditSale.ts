@@ -16,6 +16,21 @@ export interface CreditSaleSummary {
   overdueAccounts: number;
 }
 
+export interface CustomerCreditSummary {
+  creditLimit: string | number;
+  outstandingBalance: string | number;
+  availableCredit: string | number;
+  defaultedBalance: string | number;
+  totalCreditSales: number;
+  totalAmount: string | number;
+  totalPaid: string | number;
+  totalOutstanding: string | number;
+  totalCreditIssued: string | number;
+  totalCreditPaid: string | number;
+  openCreditCount: number;
+  nextDueDate?: string | null;
+}
+
 export interface ApiCreditSale {
   id: string;
   saleId: string;
@@ -45,6 +60,8 @@ export interface ApiCreditSale {
     discountAmount: string | number;
     taxAmount: string | number;
     totalAmount: string | number;
+    amountPaid?: string | number;
+    balanceDue?: string | number;
     paymentStatus: string;
     status: string;
     salesperson: {
@@ -61,6 +78,14 @@ export interface ApiCreditSale {
       quantity: number;
       unitPrice: string | number;
       totalAmount: string | number;
+    }>;
+    payments?: Array<{
+      id: string;
+      paymentMethod: ApiPaymentMethod;
+      amount: string | number;
+      referenceNumber?: string | null;
+      paymentDate: string;
+      notes?: string | null;
     }>;
   };
   payments: CreditPayment[];
@@ -116,6 +141,20 @@ export interface CreditPayment {
 
 export interface CreditSaleListResponse {
   summary: CreditSaleSummary;
+  data: ApiCreditSale[];
+  meta: ApiListMeta;
+}
+
+export interface CustomerCreditResponse {
+  customer: {
+    id: string;
+    name: string;
+    phone: string;
+    status: string;
+    creditLimit: string | number;
+    storedOutstandingBalance: string | number;
+  };
+  summary: CustomerCreditSummary;
   data: ApiCreditSale[];
   meta: ApiListMeta;
 }

@@ -26,6 +26,7 @@ export const printingService = {
       divider,
       row("Receipt", receipt.id),
       row("Order", receipt.orderNumber),
+      row("Date", new Date(receipt.createdAt).toLocaleDateString()),
       row("Customer", receipt.customerName),
       ...(receipt.employeeName ? [row("Employee", receipt.employeeName)] : []),
       row("Method", receipt.method.toUpperCase()),
@@ -37,6 +38,18 @@ export const printingService = {
       row("Total", formatCurrency(receipt.total)),
       row("Paid", formatCurrency(receipt.paid)),
       row("Balance", formatCurrency(receipt.balance)),
+      ...(receipt.paymentLines?.length
+        ? [
+            divider,
+            "Payments",
+            ...receipt.paymentLines.map((payment) =>
+              row(
+                new Date(payment.date).toLocaleDateString(),
+                formatCurrency(payment.amount),
+              ),
+            ),
+          ]
+        : []),
       divider,
       center("Thank you")
     ];

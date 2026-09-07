@@ -129,6 +129,12 @@ export interface ReceiptDocument {
   method: PaymentMethod | Exclude<PaymentMethod, "credit">;
   createdAt: string;
   printed: boolean;
+  paymentLines?: Array<{
+    date: string;
+    amount: number;
+    method?: string;
+    referenceNumber?: string | null;
+  }>;
 }
 
 export interface Expense {

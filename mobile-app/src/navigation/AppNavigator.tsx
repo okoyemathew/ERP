@@ -18,6 +18,7 @@ import { ProductDetailScreen } from "@/screens/inventory/ProductDetailScreen";
 import { ProductFormScreen } from "@/screens/inventory/ProductFormScreen";
 import { ProductOptionManagerScreen } from "@/screens/inventory/ProductOptionManagerScreen";
 import { ReportsScreen } from "@/screens/reports/ReportsScreen";
+import { CreditCustomerDetailsScreen } from "@/screens/sales/CreditCustomerDetailsScreen";
 import { CreditSalesScreen } from "@/screens/sales/CreditSalesScreen";
 import { NotificationsScreen } from "@/screens/settings/NotificationsScreen";
 import { ProfileScreen } from "@/screens/settings/ProfileScreen";
@@ -42,6 +43,7 @@ const appScreens: Array<{
   component: React.ComponentType<any>;
 }> = [
   { name: "CustomerDetail", component: CustomerDetailScreen },
+  { name: "CreditCustomerDetails", component: CreditCustomerDetailsScreen },
   { name: "CustomerForm", component: CustomerFormScreen },
   { name: "CreditSales", component: CreditSalesScreen },
   { name: "Employees", component: EmployeesScreen },

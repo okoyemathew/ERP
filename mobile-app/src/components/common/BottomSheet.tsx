@@ -8,15 +8,18 @@ interface AppBottomSheetProps {
   snapPoints?: string[];
   initialIndex?: number;
   onClose?: () => void;
+  enableContentPanningGesture?: boolean;
 }
 
-export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>(({ children, snapPoints = ["82%"], initialIndex = -1, onClose }, ref) => {
+export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>(({ children, snapPoints = ["82%"], initialIndex = -1, onClose, enableContentPanningGesture = true }, ref) => {
   const points = useMemo(() => snapPoints, [snapPoints]);
   return (
     <GorhomBottomSheet
       ref={ref}
       index={initialIndex}
       snapPoints={points}
+      enableDynamicSizing={false}
+      enableContentPanningGesture={enableContentPanningGesture}
       containerStyle={styles.container}
       enablePanDownToClose
       onClose={onClose}

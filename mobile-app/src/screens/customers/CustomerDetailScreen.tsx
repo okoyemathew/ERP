@@ -4,11 +4,14 @@ import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
-import { Banknote, CreditCard, Pencil, Smartphone } from "lucide-react-native";
+import { Banknote, CreditCard, Pencil, Printer, Smartphone } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ReceiptTicket } from "@/components/receipt";
 import { AppBottomSheet, Avatar, Badge, Button, Card, ErrorState, LoadingState, ScreenHeader } from "@/components/common";
 import { customersService } from "@/services/customers.service";
+import { printingService } from "@/services/printing.service";
 import { colors } from "@/theme";
+import type { ReceiptDocument, SaleItem } from "@/types/domain.types";
 import type { CustomerCreditSale, CustomerPaymentMethod, CustomerPaymentHistoryItem, CustomerProfileResponse, CustomerSale } from "@/types/customer";
 import { customerDisplayName } from "@/types/customer";
 import { formatCurrency } from "@/utils/format";
@@ -39,12 +42,14 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
   const [payments, setPayments] = useState<CustomerPaymentHistoryItem[]>([]);
   const [credits, setCredits] = useState<CustomerCreditSale[]>([]);
   const [selectedCredit, setSelectedCredit] = useState<CustomerCreditSale | null>(null);
+  const [activeReceipt, setActiveReceipt] = useState<ReceiptDocument | null>(null);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<CustomerPaymentMethod>("CASH");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const paymentRef = useRef<BottomSheet>(null);
+  const receiptRef = useRef<BottomSheet>(null);
 
   const loadCustomer = useCallback(async () => {
     setLoading(true);
@@ -83,6 +88,41 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
     paymentRef.current?.expand();
   };
 
+  const buildCreditInvoiceReceipt = (credit: CustomerCreditSale): ReceiptDocument => {
+    const invoiceTotal = money(credit.sale?.totalAmount ?? credit.totalCredit);
+    const amountPaid = money(credit.sale?.amountPaid ?? credit.amountPaid);
+    const remainingBalance = money(credit.sale?.balanceDue ?? credit.balance);
+    const receiptItems: SaleItem[] = (credit.sale?.items ?? []).map((item) => ({
+      productId: item.product?.id ?? item.id,
+      name: item.product?.name ?? "Product",
+      qty: Number(item.quantity),
+      price: money(item.unitPrice)
+    }));
+
+    return {
+      id: credit.sale?.saleNumber ?? credit.id.slice(0, 8).toUpperCase(),
+      kind: remainingBalance > 0 ? "credit" : "sale",
+      businessName: "EST JP MOTORS",
+      title: "Credit Invoice",
+      orderNumber: credit.sale?.saleNumber ?? credit.id.slice(0, 8).toUpperCase(),
+      customerName: name,
+      items: receiptItems,
+      subtotal: invoiceTotal,
+      tax: 0,
+      total: invoiceTotal,
+      paid: amountPaid,
+      balance: remainingBalance,
+      method: remainingBalance > 0 ? "credit" : "cash",
+      createdAt: credit.sale?.saleDate ?? credit.createdAt,
+      printed: false
+    };
+  };
+
+  const openCreditInvoice = (credit: CustomerCreditSale) => {
+    setActiveReceipt(buildCreditInvoiceReceipt(credit));
+    receiptRef.current?.expand();
+  };
+
   const handlePayment = async () => {
     if (!selectedCredit) return;
     const value = Number(amount);
@@ -108,6 +148,12 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
     } finally {
       setProcessing(false);
     }
+  };
+
+  const handlePrintInvoice = async () => {
+    if (!activeReceipt) return;
+    await printingService.print(activeReceipt);
+    setActiveReceipt({ ...activeReceipt, printed: true });
   };
 
   if (loading && !profile) {
@@ -163,8 +209,13 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
             </View>
             <View style={styles.balanceRow}>
               <Text style={styles.meta}>Paid</Text>
-              <Text style={styles.balance}>{formatCurrency(money(credit.amountPaid))}</Text>
+              <Text style={styles.balance}>{formatCurrency(money(credit.sale?.amountPaid ?? credit.amountPaid))}</Text>
             </View>
+            <View style={styles.balanceRow}>
+              <Text style={styles.meta}>Remaining balance</Text>
+              <Text style={styles.balance}>{formatCurrency(money(credit.sale?.balanceDue ?? credit.balance))}</Text>
+            </View>
+            <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => openCreditInvoice(credit)} />
             {money(credit.balance) > 0 ? <Button label="Confirm Payment" variant="success" onPress={() => openPayment(credit)} /> : null}
           </Card>
         ))}
@@ -225,6 +276,23 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
           ) : null}
         </BottomSheetScrollView>
       </AppBottomSheet>
+      <AppBottomSheet ref={receiptRef} snapPoints={["90%"]}>
+        <View style={styles.receiptSheet}>
+          <View style={styles.receiptHeader}>
+            <Text style={styles.sheetTitle}>Invoice Preview</Text>
+            <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void handlePrintInvoice()} style={styles.printButton} />
+          </View>
+          <BottomSheetScrollView
+            style={styles.sheetScroller}
+            contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) + 48 }}
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            nestedScrollEnabled
+          >
+            {activeReceipt ? <ReceiptTicket receipt={activeReceipt} /> : null}
+          </BottomSheetScrollView>
+        </View>
+      </AppBottomSheet>
     </View>
   );
 }
@@ -246,6 +314,10 @@ const styles = StyleSheet.create({
   balance: { color: colors.foreground, fontSize: 14, fontWeight: "900" },
   paymentRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sheet: { padding: 16, gap: 12 },
+  receiptSheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
+  sheetScroller: { flex: 1 },
+  receiptHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  printButton: { minHeight: 44, paddingHorizontal: 14 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "900" },
   totalCard: { alignItems: "center" },
   largeAmount: { color: colors.primary, fontSize: 28, fontWeight: "900", marginTop: 4 },

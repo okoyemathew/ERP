@@ -29,6 +29,7 @@ const employeeAllowed = new Set([
   "AddNewSales",
   "Customers",
   "CustomerDetail",
+  "CreditCustomerDetails",
   "CustomerForm",
   "CreditSales",
   "Expenses",

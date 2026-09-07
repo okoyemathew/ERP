@@ -1,7 +1,7 @@
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
-import type { ApiCreditSale, CreditPaymentPayload, CreditSaleActionRequest, CreditSaleEmployeeAction, CreditSaleListResponse } from "@/types/creditSale";
+import type { ApiCreditSale, CreditPaymentPayload, CreditSaleActionRequest, CreditSaleEmployeeAction, CreditSaleListResponse, CustomerCreditResponse } from "@/types/creditSale";
 
 function fallbackCreditSale(id: string): ApiCreditSale {
   const now = new Date().toISOString();
@@ -71,6 +71,16 @@ export const creditSalesService = {
 
   async detail(id: string): Promise<ApiCreditSale> {
     const { data } = await api.get<ApiCreditSale>(`/credit-sales/${id}`);
+    return data;
+  },
+
+  async customerCredit(customerId: string, params: Record<string, string | number | boolean | undefined> = {}): Promise<CustomerCreditResponse> {
+    const { data } = await api.get<CustomerCreditResponse>(`/credit-sales/customers/${customerId}`, { params });
+    return data;
+  },
+
+  async posCustomerCredit(customerId: string, params: Record<string, string | number | boolean | undefined> = {}): Promise<CustomerCreditResponse> {
+    const { data } = await api.get<CustomerCreditResponse>(`/credit-sales/pos/customers/${customerId}`, { params });
     return data;
   },
 

@@ -29,6 +29,7 @@ export type BottomTabParamList = {
 export type AppStackParamList = {
   Tabs: NavigatorScreenParams<BottomTabParamList>;
   CustomerDetail: { customerId: string };
+  CreditCustomerDetails: { customerId: string };
   CustomerForm: { customerId?: string } | undefined;
   CreditSales: undefined;
   Employees: undefined;

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { CreditCard, Grid2X2, HandCoins, List, Minus, Package, Plus, Printer, Search, Trash2, Wallet } from "lucide-react-native";
@@ -84,6 +84,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const bottomInset = Math.max(insets.bottom, Platform.OS === "android" ? 24 : 0);
   const sheetBottomPadding = spacing.bottomNavHeight + bottomInset + (Platform.OS === "android" ? 180 : 96);
+  const checkoutScrollBottomPadding = spacing.bottomNavHeight + bottomInset + (Platform.OS === "android" ? 420 : 280);
   const user = useAuthStore((state) => state.user);
   const normalizedRoleName = user?.roleName?.trim().toLowerCase();
   const role = normalizedRoleName ? (normalizedRoleName === "owner" ? "owner" : "employee") : user?.role ?? "owner";
@@ -94,6 +95,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
   const [paymentMethod, setPaymentMethod] = useState<PosPaymentMethod>("cash");
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | undefined>();
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [selectedCollectInvoice, setSelectedCollectInvoice] = useState<CreditInvoiceView | null>(null);
   const [collectAmount, setCollectAmount] = useState("");
   const [collectMethod, setCollectMethod] = useState<Exclude<PosPaymentMethod, "credit">>("cash");
@@ -113,7 +116,6 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const [taxInput, setTaxInput] = useState("0");
   const [paidInput, setPaidInput] = useState("");
   const [referenceInput, setReferenceInput] = useState("");
-  const checkoutRef = useRef<BottomSheet>(null);
   const collectRef = useRef<BottomSheet>(null);
   const receiptRef = useRef<BottomSheet>(null);
   const ownerCart = useCartStore();
@@ -174,12 +176,6 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   }, [loadCreditInvoices, loadCustomers, loadProducts]);
 
   useEffect(() => {
-    if (!checkoutVisible) return;
-    const timer = setTimeout(() => checkoutRef.current?.snapToIndex(0), 0);
-    return () => clearTimeout(timer);
-  }, [checkoutVisible]);
-
-  useEffect(() => {
     if (!collectVisible) return;
     const timer = setTimeout(() => collectRef.current?.snapToIndex(0), 0);
     return () => clearTimeout(timer);
@@ -198,7 +194,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         name: product.name,
         sku: product.sku,
         category: product.category,
-        price: Number(prices[product.id] ?? product.price),
+        price: Number(product.price),
         stock: product.stock,
         iconColor: product.iconColor,
         floorPrice: product.floorPrice,
@@ -219,14 +215,14 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         name: product.name,
         sku: product.sku,
         category: product.category,
-        price: Number(prices[product.id] ?? product.price),
+        price: Number(product.price),
         stock: product.stock,
         iconColor: product.iconColor,
         floorPrice: product.floorPrice,
         source: stockItem
       };
     });
-  }, [prices, products, role]);
+  }, [products, role]);
 
   const categories = useMemo(() => ["All", ...Array.from(new Set(productTiles.map((product) => product.category)))], [productTiles]);
   const filteredProducts = useMemo(() => {
@@ -246,6 +242,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const paidAmount = paidInput.trim() === "" ? (paymentMethod === "credit" ? 0 : grandTotal) : Math.max(0, Number(paidInput || 0));
   const total = grandTotal;
   const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId);
+  const trimmedNewCustomerName = newCustomerName.trim();
+  const trimmedNewCustomerPhone = newCustomerPhone.trim();
+  const hasNewCreditCustomer = Boolean(trimmedNewCustomerName || trimmedNewCustomerPhone);
+  const needsCreditCustomer = paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0;
   const openCreditInvoices = useMemo(() => creditInvoices.filter((invoice) => invoice.remaining > 0), [creditInvoices]);
   const cartItems: SaleItem[] = role === "owner"
     ? ownerCart.items.map((item) => ({ productId: item.product.id, name: item.product.name, qty: item.qty, price: item.product.price }))
@@ -281,6 +281,24 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     );
   };
 
+  const createInlineCreditCustomer = async () => {
+    const [firstName, ...lastNameParts] = trimmedNewCustomerName.split(/\s+/);
+    const customer = await customersService.create({
+      firstName,
+      lastName: lastNameParts.join(" ") || undefined,
+      phone: trimmedNewCustomerPhone,
+      creditLimit: 0,
+      outstandingBalance: 0,
+      notes: "Created from POS credit sale"
+    });
+    setCustomers((current) => {
+      if (current.some((item) => item.id === customer.id)) return current;
+      return [customer, ...current];
+    });
+    setSelectedCustomerId(customer.id);
+    return customer;
+  };
+
   const openReceipt = (receipt: ReceiptDocument) => {
     setActiveReceipt(receipt);
     setReceiptVisible(true);
@@ -294,16 +312,33 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     setCollectVisible(true);
   };
 
+  const chooseCustomer = (customerId: string) => {
+    setSelectedCustomerId(customerId);
+    setNewCustomerName("");
+    setNewCustomerPhone("");
+  };
+
+  const updateNewCreditCustomerName = (value: string) => {
+    setNewCustomerName(value);
+    if (value.trim()) setSelectedCustomerId(undefined);
+  };
+
+  const updateNewCreditCustomerPhone = (value: string) => {
+    setNewCustomerPhone(value);
+    if (value.trim()) setSelectedCustomerId(undefined);
+  };
+
   const clearCart = () => {
     if (role === "owner") ownerCart.clearCart();
     else employeeCart.clearCart();
     setQuantityInputs({});
     setSelectedCustomerId(undefined);
+    setNewCustomerName("");
+    setNewCustomerPhone("");
     setPaidInput("");
     setReferenceInput("");
     setDiscountInput("0");
     setTaxInput("0");
-    checkoutRef.current?.close();
     setCheckoutVisible(false);
   };
 
@@ -357,7 +392,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         name: matchedProduct.name,
         sku: matchedProduct.sku,
         category: matchedProduct.category,
-        price: Number(prices[matchedProduct.id] ?? matchedProduct.price),
+        price: Number(matchedProduct.price),
         stock: matchedProduct.stock,
         iconColor: matchedProduct.iconColor,
         floorPrice: matchedProduct.floorPrice,
@@ -446,8 +481,12 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return;
     }
     const creditBalance = paymentMethod === "credit" ? grandTotal : Math.max(0, grandTotal - paidAmount);
-    if (creditBalance > 0 && !selectedCustomer) {
-      Alert.alert("Select customer", "Credit and partial payment sales must be assigned to a customer.");
+    if (creditBalance > 0 && !selectedCustomer && !hasNewCreditCustomer) {
+      Alert.alert("Credit customer", "Select an existing customer or enter the new customer's name and phone number.");
+      return;
+    }
+    if (creditBalance > 0 && !selectedCustomer && (!trimmedNewCustomerName || !trimmedNewCustomerPhone)) {
+      Alert.alert("Credit customer", "Enter both the customer's name and phone number before confirming the credit sale.");
       return;
     }
     if (paymentMethod !== "credit" && paidAmount <= 0) {
@@ -455,13 +494,15 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return;
     }
 
-    const buildOfflineReceipt = (operationId: string): ReceiptDocument => ({
+    let checkoutCustomer = selectedCustomer;
+
+    const buildOfflineReceipt = (operationId: string, receiptCustomer = checkoutCustomer): ReceiptDocument => ({
       id: `OFF-${operationId.slice(-8).toUpperCase()}`,
       kind: creditBalance > 0 ? "credit" : "sale",
       businessName: "EST JP MOTORS",
       title: "Sales Receipt",
       orderNumber: `OFF-${operationId.slice(-8).toUpperCase()}`,
-      customerName: selectedCustomer ? customerDisplayName(selectedCustomer) : "Walk-in Customer",
+      customerName: receiptCustomer ? customerDisplayName(receiptCustomer) : "Walk-in Customer",
       employeeName: user?.name ?? ([user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.username),
       items: cartItems,
       subtotal: cartSubtotal,
@@ -476,6 +517,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
     setProcessingSale(true);
     try {
+      if (creditBalance > 0 && !checkoutCustomer) {
+        checkoutCustomer = await createInlineCreditCustomer();
+      }
+
       const saleItems = cartItems.map((item) => {
         const lineSubtotal = item.qty * item.price;
         return {
@@ -504,7 +549,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       }
 
       const salePayload: CreateSalePayload = {
-        customerId: selectedCustomer?.id,
+        customerId: checkoutCustomer?.id,
         items: saleItems,
         payments,
         remarks: paymentMethod === "credit" ? "Credit sale" : undefined
@@ -517,7 +562,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         setReferenceInput("");
         setDiscountInput("0");
         setTaxInput("0");
-        checkoutRef.current?.close();
+        setSelectedCustomerId(undefined);
+        setNewCustomerName("");
+        setNewCustomerPhone("");
         setCheckoutVisible(false);
         if (refreshCreditInvoices) {
           await loadCreditInvoices();
@@ -576,7 +623,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
             });
           }
           const queued = await offlineSyncService.enqueueSale({
-            customerId: selectedCustomer?.id,
+            customerId: checkoutCustomer?.id,
             items: saleItems,
             payments,
             remarks: paymentMethod === "credit" ? "Credit sale" : undefined
@@ -588,7 +635,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           setReferenceInput("");
           setDiscountInput("0");
           setTaxInput("0");
-          checkoutRef.current?.close();
+          setSelectedCustomerId(undefined);
+          setNewCustomerName("");
+          setNewCustomerPhone("");
           setCheckoutVisible(false);
           await loadProducts();
           setPrintText(null);
@@ -830,15 +879,27 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         </Pressable>
       ) : null}
 
-      {checkoutVisible ? <AppBottomSheet ref={checkoutRef} snapPoints={["96%"]} initialIndex={0} onClose={() => setCheckoutVisible(false)}>
-        <View style={styles.sheet}>
+      <Modal
+        visible={checkoutVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setCheckoutVisible(false)}
+      >
+        <View style={styles.checkoutModal}>
+          <Pressable style={styles.checkoutBackdrop} onPress={() => setCheckoutVisible(false)} accessibilityRole="button" accessibilityLabel="Close checkout" />
+          <View style={[styles.checkoutSheet, { paddingTop: Math.max(insets.top, 10) + 8, paddingBottom: bottomInset }]}>
+            <View style={styles.modalHandle} />
           <Text style={styles.sheetTitle}>Complete sale</Text>
-          <BottomSheetScrollView
+          <ScrollView
             style={styles.sheetScroller}
-            contentContainerStyle={[styles.sheetScroll, { paddingBottom: sheetBottomPadding }]}
+            contentContainerStyle={[styles.sheetScroll, { paddingBottom: checkoutScrollBottomPadding }]}
             showsVerticalScrollIndicator
             persistentScrollbar
+            overScrollMode="always"
+            scrollEnabled
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             nestedScrollEnabled
           >
             {cartItems.map((item) => (
@@ -869,20 +930,44 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
             </View>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>{paymentMethod === "credit" ? "Credit customer" : "Customer"}</Text>
-              <View style={styles.customerList}>
-                {customers.map((customer) => (
-                  <Pressable
-                    key={customer.id}
-                    onPress={() => setSelectedCustomerId(customer.id)}
-                    style={[styles.customerChip, selectedCustomerId === customer.id && styles.customerChipActive]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Select ${customerDisplayName(customer)}`}
-                  >
-                    <Text style={[styles.customerName, selectedCustomerId === customer.id && styles.customerNameActive]}>{customerDisplayName(customer)}</Text>
-                    {Number(customer.outstandingBalance) > 0 ? <Text style={styles.customerOwes}>{formatCurrency(Number(customer.outstandingBalance))} owed</Text> : null}
-                  </Pressable>
-                ))}
-              </View>
+              {needsCreditCustomer ? (
+                <Card style={styles.newCustomerCard}>
+                  <Text style={styles.customerName}>New credit customer</Text>
+                  <TextInput
+                    value={newCustomerName}
+                    onChangeText={updateNewCreditCustomerName}
+                    placeholder="Customer name"
+                    placeholderTextColor={colors.textPlaceholder}
+                    style={styles.customerInput}
+                    accessibilityLabel="New customer name"
+                  />
+                  <TextInput
+                    value={newCustomerPhone}
+                    onChangeText={updateNewCreditCustomerPhone}
+                    placeholder="Phone number"
+                    placeholderTextColor={colors.textPlaceholder}
+                    keyboardType="phone-pad"
+                    style={styles.customerInput}
+                    accessibilityLabel="New customer phone number"
+                  />
+                </Card>
+              ) : null}
+              {!needsCreditCustomer ? (
+                <View style={styles.customerList}>
+                  {customers.map((customer) => (
+                    <Pressable
+                      key={customer.id}
+                      onPress={() => chooseCustomer(customer.id)}
+                      style={[styles.customerChip, selectedCustomerId === customer.id && styles.customerChipActive]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Select ${customerDisplayName(customer)}`}
+                    >
+                      <Text style={[styles.customerName, selectedCustomerId === customer.id && styles.customerNameActive]}>{customerDisplayName(customer)}</Text>
+                      {Number(customer.outstandingBalance) > 0 ? <Text style={styles.customerOwes}>{formatCurrency(Number(customer.outstandingBalance))} owed</Text> : null}
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
             </View>
             <Card style={styles.totalCard}>
               <View style={styles.totalRow}><Text style={styles.meta}>Subtotal</Text><Text style={styles.totalValue}>{formatCurrency(cartSubtotal)}</Text></View>
@@ -902,11 +987,34 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               <View style={styles.totalRow}><Text style={styles.grandLabel}>Total</Text><Text style={styles.grandValue}>{formatCurrency(grandTotal)}</Text></View>
               {(paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0) ? <View style={styles.totalRow}><Text style={styles.meta}>Credit Balance</Text><Text style={styles.totalValue}>{formatCurrency(paymentMethod === "credit" ? grandTotal : Math.max(0, grandTotal - paidAmount))}</Text></View> : null}
             </Card>
-            <Button label={paymentMethod === "credit" ? "Confirm Credit Sale" : "Confirm Payment"} loading={processingSale} onPress={() => void handleCheckout()} />
-            <Button label="Clear Cart" variant="danger" icon={<Trash2 size={16} color={colors.error} />} onPress={clearCart} />
-          </BottomSheetScrollView>
+            <View style={styles.checkoutActions}>
+              <Button label={paymentMethod === "credit" ? "Confirm Credit Sale" : "Confirm Payment"} loading={processingSale} onPress={() => void handleCheckout()} />
+              <Button label="Clear Cart" variant="danger" icon={<Trash2 size={16} color={colors.error} />} onPress={clearCart} />
+            </View>
+            {needsCreditCustomer ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Existing customers</Text>
+                <View style={styles.customerList}>
+                  {customers.map((customer) => (
+                    <Pressable
+                      key={customer.id}
+                      onPress={() => chooseCustomer(customer.id)}
+                      style={[styles.customerChip, selectedCustomerId === customer.id && styles.customerChipActive]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Select ${customerDisplayName(customer)}`}
+                    >
+                      <Text style={[styles.customerName, selectedCustomerId === customer.id && styles.customerNameActive]}>{customerDisplayName(customer)}</Text>
+                      {Number(customer.outstandingBalance) > 0 ? <Text style={styles.customerOwes}>{formatCurrency(Number(customer.outstandingBalance))} owed</Text> : null}
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+            <View style={styles.checkoutEndSpacer} />
+          </ScrollView>
+          </View>
         </View>
-      </AppBottomSheet> : null}
+      </Modal>
 
       {collectVisible ? <AppBottomSheet ref={collectRef} snapPoints={["96%"]} initialIndex={0} onClose={() => setCollectVisible(false)}>
         <View style={styles.sheet}>
@@ -1094,10 +1202,40 @@ const styles = StyleSheet.create({
   cartFabGradient: { height: 56, borderRadius: 18, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, gap: 10 },
   cartText: { color: colors.surface, fontSize: 14, fontWeight: "800", flex: 1 },
   cartTotal: { color: colors.surface, fontSize: 14, fontWeight: "800" },
+  checkoutModal: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(15, 23, 42, 0.45)"
+  },
+  checkoutBackdrop: {
+    ...StyleSheet.absoluteFillObject
+  },
+  checkoutSheet: {
+    height: "99%",
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 16,
+    gap: 12,
+    zIndex: 1,
+    elevation: 100
+  },
+  modalHandle: {
+    alignSelf: "center",
+    width: 32,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: colors.borderLight
+  },
   sheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
   sheetScroller: { flex: 1 },
   sheetScroll: { gap: 12, paddingBottom: 16 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "800" },
+  checkoutActions: {
+    gap: 8,
+    paddingTop: 4
+  },
+  checkoutEndSpacer: { height: 160 },
   cartRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   cartBody: { flex: 1 },
   sheetItemName: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
@@ -1110,6 +1248,18 @@ const styles = StyleSheet.create({
   methodChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   methodChipText: { color: colors.primary, fontSize: 12, fontWeight: "800" },
   methodChipTextActive: { color: colors.surface },
+  newCustomerCard: { gap: 10 },
+  customerInput: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.borderLight,
+    color: colors.foreground,
+    fontSize: 13,
+    fontWeight: "700",
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
   customerList: { gap: 8 },
   customerChip: { borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, padding: 12, backgroundColor: colors.surface },
   customerChipActive: { borderColor: colors.primary, backgroundColor: colors.secondaryBg },

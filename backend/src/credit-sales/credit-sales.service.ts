@@ -595,6 +595,7 @@ export class CreditSalesService {
     businessId: string,
     customerId: string,
     query: CreditSaleQueryDto = {},
+    viewer?: AuthenticatedUser,
   ) {
     await this.refreshDefaultedCredits(businessId, this.prisma);
 
@@ -605,13 +606,20 @@ export class CreditSalesService {
     );
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const where = this.buildWhere(businessId, {
-      ...query,
-      customerId,
-    });
+    const where: Prisma.CreditSaleWhereInput = {
+      AND: [
+        this.buildWhere(businessId, {
+          ...query,
+          customerId,
+        }),
+        ...(viewer && !this.canViewFinancialCredit(viewer)
+          ? [{ sale: { userId: viewer.id } }]
+          : []),
+      ],
+    };
 
     const [summary, total, creditSales] = await Promise.all([
-      this.creditSummary(businessId, customerId, this.prisma),
+      this.creditSummary(businessId, customerId, this.prisma, viewer),
       this.prisma.creditSale.count({ where }),
       this.prisma.creditSale.findMany({
         where,
@@ -1108,6 +1116,34 @@ export class CreditSalesService {
         },
       });
 
+      const initialPaid = creditSale.sale.payments.reduce(
+        (sum, salePayment) =>
+          salePayment.paymentMethod === PaymentMethod.CREDIT
+            ? sum
+            : sum.add(salePayment.amount),
+        new Prisma.Decimal(0),
+      );
+      const saleAmountPaid = Prisma.Decimal.min(
+        creditSale.sale.totalAmount,
+        initialPaid.add(newAmountPaid),
+      );
+      const saleBalanceDue = Prisma.Decimal.max(
+        new Prisma.Decimal(0),
+        creditSale.sale.totalAmount.sub(saleAmountPaid),
+      );
+
+      await tx.sale.update({
+        where: { id: creditSale.saleId },
+        data: {
+          amountPaid: saleAmountPaid,
+          balanceDue: saleBalanceDue,
+          paymentStatus: this.paymentStatus(
+            saleAmountPaid,
+            creditSale.sale.totalAmount,
+          ),
+        },
+      });
+
       const nextOutstanding = await this.customerOutstandingBalance(
         businessId,
         creditSale.customerId,
@@ -1545,54 +1581,116 @@ export class CreditSalesService {
     businessId: string,
     customerId: string,
     tx: Tx | PrismaService,
+    viewer?: AuthenticatedUser,
   ) {
     const now = new Date();
-    const [customer, creditTotals, defaultedTotals, nextDue] =
+    const creditWhere: Prisma.CreditSaleWhereInput = {
+      customerId,
+      deletedAt: null,
+      sale: {
+        businessId,
+        deletedAt: null,
+        ...(viewer && !this.canViewFinancialCredit(viewer)
+          ? { userId: viewer.id }
+          : {}),
+      },
+    };
+    const openCreditWhere: Prisma.CreditSaleWhereInput = {
+      AND: [
+        creditWhere,
+        { balance: { gt: 0 }, status: { not: CreditSaleStatus.PAID } },
+      ],
+    };
+    const [customer, creditRecords, creditTotals, defaultedTotals, nextDue] =
       await Promise.all([
         tx.customer.findFirst({
           where: { id: customerId, businessId, deletedAt: null },
           select: { creditLimit: true },
         }),
-        tx.creditSale.aggregate({
-          where: {
-            customerId,
-            deletedAt: null,
-            sale: { businessId, deletedAt: null },
-            balance: { gt: 0 },
-            status: { not: CreditSaleStatus.PAID },
+        tx.creditSale.findMany({
+          where: creditWhere,
+          select: {
+            totalCredit: true,
+            amountPaid: true,
+            balance: true,
+            sale: {
+              select: {
+                totalAmount: true,
+                payments: {
+                  select: {
+                    paymentMethod: true,
+                    amount: true,
+                  },
+                },
+              },
+            },
           },
+        }),
+        tx.creditSale.aggregate({
+          where: openCreditWhere,
           _count: true,
           _sum: { balance: true, totalCredit: true, amountPaid: true },
         }),
         tx.creditSale.aggregate({
           where: {
-            customerId,
-            deletedAt: null,
-            sale: { businessId, deletedAt: null },
-            balance: { gt: 0 },
-            OR: [
-              { status: CreditSaleStatus.DEFAULTED },
-              { dueDate: { lt: now } },
+            AND: [
+              creditWhere,
+              {
+                balance: { gt: 0 },
+                OR: [
+                  { status: CreditSaleStatus.DEFAULTED },
+                  { dueDate: { lt: now } },
+                ],
+              },
             ],
           },
           _sum: { balance: true },
         }),
         tx.creditSale.findFirst({
           where: {
-            customerId,
-            deletedAt: null,
-            sale: { businessId, deletedAt: null },
-            balance: { gt: 0 },
-            status: { not: CreditSaleStatus.PAID },
-            dueDate: { not: null },
+            AND: [
+              openCreditWhere,
+              { dueDate: { not: null } },
+            ],
           },
           orderBy: { dueDate: 'asc' },
           select: { dueDate: true },
         }),
       ]);
 
+    let totalAmount = new Prisma.Decimal(0);
+    let totalPaid = new Prisma.Decimal(0);
+    let totalOutstanding = new Prisma.Decimal(0);
+    let totalCreditIssued = new Prisma.Decimal(0);
+    let totalCreditPaid = new Prisma.Decimal(0);
+
+    for (const credit of creditRecords) {
+      const invoiceTotal = new Prisma.Decimal(credit.sale.totalAmount);
+      const initialPaid = credit.sale.payments.reduce(
+        (sum, salePayment) =>
+          salePayment.paymentMethod === PaymentMethod.CREDIT
+            ? sum
+            : sum.add(salePayment.amount),
+        new Prisma.Decimal(0),
+      );
+      const paid = Prisma.Decimal.min(
+        invoiceTotal,
+        initialPaid.add(credit.amountPaid),
+      );
+      const balance = Prisma.Decimal.max(
+        new Prisma.Decimal(0),
+        invoiceTotal.sub(paid),
+      );
+
+      totalAmount = totalAmount.add(invoiceTotal);
+      totalPaid = totalPaid.add(paid);
+      totalOutstanding = totalOutstanding.add(balance);
+      totalCreditIssued = totalCreditIssued.add(credit.totalCredit);
+      totalCreditPaid = totalCreditPaid.add(credit.amountPaid);
+    }
+
     const outstandingBalance =
-      creditTotals._sum.balance ?? new Prisma.Decimal(0);
+      totalOutstanding;
     const creditLimit = customer?.creditLimit ?? new Prisma.Decimal(0);
 
     return {
@@ -1600,8 +1698,12 @@ export class CreditSalesService {
       outstandingBalance,
       availableCredit: creditLimit.sub(outstandingBalance),
       defaultedBalance: defaultedTotals._sum.balance ?? new Prisma.Decimal(0),
-      totalCreditIssued: creditTotals._sum.totalCredit ?? new Prisma.Decimal(0),
-      totalCreditPaid: creditTotals._sum.amountPaid ?? new Prisma.Decimal(0),
+      totalCreditSales: creditRecords.length,
+      totalAmount,
+      totalPaid,
+      totalOutstanding,
+      totalCreditIssued,
+      totalCreditPaid,
       openCreditCount: creditTotals._count,
       nextDueDate: nextDue?.dueDate ?? null,
     };
@@ -2319,6 +2421,19 @@ export class CreditSalesService {
     }
 
     return CreditSaleStatus.ACTIVE;
+  }
+
+  private paymentStatus(
+    amountPaid: Prisma.Decimal,
+    totalAmount: Prisma.Decimal,
+  ) {
+    if (amountPaid.lte(0)) {
+      return PaymentStatus.UNPAID;
+    }
+    if (amountPaid.gte(totalAmount)) {
+      return PaymentStatus.PAID;
+    }
+    return PaymentStatus.PARTIAL;
   }
 
   private isOverdue(creditSale: {

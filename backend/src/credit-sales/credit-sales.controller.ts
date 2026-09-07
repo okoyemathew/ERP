@@ -133,6 +133,23 @@ export class CreditSalesController {
     );
   }
 
+  @Get('pos/customers/:customerId')
+  @Permissions('sales.manage')
+  @Roles(...CREDIT_SALE_ROLES)
+  @ApiOperation({ summary: 'View customer credit history for POS users' })
+  posCustomerCredit(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('customerId', ParseUUIDPipe) customerId: string,
+    @Query() query: CreditSaleQueryDto,
+  ) {
+    return this.creditSalesService.getCustomerCredit(
+      user.businessId,
+      customerId,
+      query,
+      user,
+    );
+  }
+
   @Get('action-requests')
   @Roles(SYSTEM_ROLES.OWNER)
   @ApiOperation({ summary: 'List pending employee credit sale action requests' })
@@ -201,6 +218,7 @@ export class CreditSalesController {
       user.businessId,
       customerId,
       query,
+      user,
     );
   }
 
@@ -216,6 +234,7 @@ export class CreditSalesController {
       user.businessId,
       customerId,
       query,
+      user,
     );
   }
 

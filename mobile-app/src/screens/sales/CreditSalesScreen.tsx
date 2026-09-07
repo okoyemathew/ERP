@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { Check, CreditCard, Edit3, HandCoins, Search, Trash2, X } from "lucide-react-native";
+import { Check, CreditCard, Edit3, HandCoins, Printer, Search, Trash2, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ReceiptTicket } from "@/components/receipt";
 import { AppBottomSheet, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
 import { creditSalesService } from "@/services/credit-sales.service";
+import { printingService } from "@/services/printing.service";
 import { useAuth } from "@/hooks/useAuth";
-import { colors, spacing } from "@/theme";
+import { borderRadius, colors, shadows, spacing } from "@/theme";
+import type { ReceiptDocument, SaleItem } from "@/types/domain.types";
 import type { ApiCreditSale, CreditSaleActionRequest, CreditSaleEmployeeAction, CreditSaleListResponse } from "@/types/creditSale";
 import type { PosPaymentMethod } from "@/types/sales";
 import { toApiPaymentMethod } from "@/types/sales";
@@ -41,7 +44,7 @@ function actionText(action: CreditSaleEmployeeAction) {
   return action === "EDIT" ? "edit" : "delete";
 }
 
-export function CreditSalesScreen() {
+export function CreditSalesScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const user = useAuth((state) => state.user);
   const roleName = user?.roleName?.trim();
@@ -51,6 +54,10 @@ export function CreditSalesScreen() {
   const [response, setResponse] = useState<CreditSaleListResponse | null>(null);
   const [approvalRequests, setApprovalRequests] = useState<CreditSaleActionRequest[]>([]);
   const [selected, setSelected] = useState<ApiCreditSale | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<ApiCreditSale | null>(null);
+  const [activeReceipt, setActiveReceipt] = useState<ReceiptDocument | null>(null);
+  const [detailVisible, setDetailVisible] = useState(false);
+  const [receiptVisible, setReceiptVisible] = useState(false);
   const [editing, setEditing] = useState<ApiCreditSale | null>(null);
   const [amount, setAmount] = useState("");
   const [editDueDate, setEditDueDate] = useState("");
@@ -128,12 +135,65 @@ export function CreditSalesScreen() {
     void loadCredits(query, false);
   };
 
+  const navigateStack = (route: string, params?: Record<string, string>) => {
+    const parent = navigation.getParent?.();
+    if (parent) parent.navigate(route as never, params as never);
+    else navigation.navigate(route, params);
+  };
+
+  const openCustomerProfile = (customerId: string) => {
+    setDetailVisible(false);
+    navigateStack("CreditCustomerDetails", { customerId });
+  };
+
   const openPayment = (creditSale: ApiCreditSale) => {
     setSelected(creditSale);
     setAmount(String(money(creditSale.balance)));
     setPaymentDate(todayDate());
     setReference(`CR-${Date.now()}`);
     paymentRef.current?.expand();
+  };
+
+  const buildCreditInvoiceReceipt = (creditSale: ApiCreditSale): ReceiptDocument => {
+    const receiptItems: SaleItem[] = creditSale.sale.items.map((item) => ({
+      productId: item.productId,
+      name: item.productName,
+      qty: item.quantity,
+      price: money(item.unitPrice)
+    }));
+    const invoiceTotal = money(creditSale.sale.totalAmount || creditSale.totalCredit);
+    const amountPaid = money(creditSale.sale.amountPaid || creditSale.amountPaid);
+    const remainingBalance = money(creditSale.sale.balanceDue || creditSale.balance);
+
+    return {
+      id: creditSale.sale.saleNumber,
+      kind: remainingBalance > 0 ? "credit" : "sale",
+      businessName: "EST JP MOTORS",
+      title: "Credit Invoice",
+      orderNumber: creditSale.sale.saleNumber,
+      customerName: creditSale.customer.name,
+      employeeName: creditSale.sale.salesperson.name || creditSale.sale.salesperson.username,
+      items: receiptItems,
+      subtotal: money(creditSale.sale.subtotal || invoiceTotal),
+      tax: money(creditSale.sale.taxAmount),
+      total: invoiceTotal,
+      paid: amountPaid,
+      balance: remainingBalance,
+      method: remainingBalance > 0 ? "credit" : "cash",
+      createdAt: creditSale.sale.saleDate || creditSale.createdAt,
+      printed: false
+    };
+  };
+
+  const openDetail = (creditSale: ApiCreditSale) => {
+    setSelectedDetail(creditSale);
+    setDetailVisible(true);
+    void creditSalesService.detail(creditSale.id).then(setSelectedDetail).catch(() => undefined);
+  };
+
+  const openInvoicePreview = (creditSale: ApiCreditSale) => {
+    setActiveReceipt(buildCreditInvoiceReceipt(creditSale));
+    setReceiptVisible(true);
   };
 
   const requestApproval = (creditSale: ApiCreditSale, action: CreditSaleEmployeeAction) => {
@@ -282,6 +342,12 @@ export function CreditSalesScreen() {
     }
   };
 
+  const handlePrintInvoice = async () => {
+    if (!activeReceipt) return;
+    await printingService.print(activeReceipt);
+    setActiveReceipt({ ...activeReceipt, printed: true });
+  };
+
   if (loading && !response) {
     return (
       <View style={styles.screen}>
@@ -353,53 +419,175 @@ export function CreditSalesScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => openPayment(item)} accessibilityLabel={`Open ${item.sale.saleNumber}`}>
-            <Card style={styles.row}>
+          <View style={styles.rowCard}>
+            <Pressable
+              onPress={() => openCustomerProfile(item.customer.id)}
+              style={styles.customerTouchArea}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`Open customer profile for ${item.customer.name}`}
+            >
               <View style={styles.icon}><HandCoins size={17} color={colors.primary} /></View>
               <View style={styles.body}>
-                <Text style={styles.title}>{item.customer.name}</Text>
+                <Text style={styles.customerLink}>{item.customer.name}</Text>
                 <Text style={styles.meta}>{item.sale.saleNumber} | {item.sale.items.length} products | {item.sale.salesperson.name || item.sale.salesperson.username}</Text>
               </View>
-              <View style={styles.rowRight}>
+            </Pressable>
+            <View style={styles.rowRight}>
+              <Pressable
+                onPress={() => openDetail(item)}
+                style={styles.balancePress}
+                accessibilityRole="button"
+                accessibilityLabel={`Open credit details for ${item.sale.saleNumber}`}
+              >
                 <Text style={styles.amount}>{formatCurrency(money(item.balance))}</Text>
                 <Badge label={item.status} variant={item.status === "PAID" ? "success" : item.isOverdue ? "error" : "warning"} />
-                {!canUseFinancialCredit ? (
-                  <View style={styles.employeeActions}>
-                    {(["EDIT", "DELETE"] as CreditSaleEmployeeAction[]).map((action) => {
-                      const request = activeActionRequest(item, action);
-                      const processingKey = `${item.id}-${action}`;
-                      const isApproved = request?.status === "APPROVED";
-                      const isPending = request?.status === "PENDING";
-                      const disabled = actionProcessing === processingKey || isPending;
-                      return (
-                        <Pressable
-                          key={action}
-                          onPress={(event) => {
-                            event.stopPropagation();
-                            if (isApproved && action === "EDIT") openEdit(item);
-                            else if (isApproved && action === "DELETE") removeCreditSale(item);
-                            else requestApproval(item, action);
-                          }}
-                          disabled={disabled}
-                          style={[styles.iconButton, action === "DELETE" && styles.deleteButton, disabled && styles.disabledAction]}
-                          accessibilityRole="button"
-                          accessibilityLabel={`${isApproved ? actionText(action) : "Request " + actionText(action) + " approval"} for ${item.sale.saleNumber}`}
-                        >
-                          {action === "EDIT" ? <Edit3 size={14} color={colors.primary} /> : <Trash2 size={14} color={colors.error} />}
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ) : null}
-              </View>
-            </Card>
-          </Pressable>
+              </Pressable>
+              {money(item.balance) > 0 ? (
+                <Pressable
+                  onPress={() => openPayment(item)}
+                  style={styles.iconButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Record payment for ${item.sale.saleNumber}`}
+                >
+                  <CreditCard size={14} color={colors.primary} />
+                </Pressable>
+              ) : null}
+              {!canUseFinancialCredit ? (
+                <View style={styles.employeeActions}>
+                  {(["EDIT", "DELETE"] as CreditSaleEmployeeAction[]).map((action) => {
+                    const request = activeActionRequest(item, action);
+                    const processingKey = `${item.id}-${action}`;
+                    const isApproved = request?.status === "APPROVED";
+                    const isPending = request?.status === "PENDING";
+                    const disabled = actionProcessing === processingKey || isPending;
+                    return (
+                      <Pressable
+                        key={action}
+                        onPress={() => {
+                          if (isApproved && action === "EDIT") openEdit(item);
+                          else if (isApproved && action === "DELETE") removeCreditSale(item);
+                          else requestApproval(item, action);
+                        }}
+                        disabled={disabled}
+                        style={[styles.iconButton, action === "DELETE" && styles.deleteButton, disabled && styles.disabledAction]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${isApproved ? actionText(action) : "Request " + actionText(action) + " approval"} for ${item.sale.saleNumber}`}
+                      >
+                        {action === "EDIT" ? <Edit3 size={14} color={colors.primary} /> : <Trash2 size={14} color={colors.error} />}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </View>
+          </View>
         )}
         ListEmptyComponent={<EmptyState icon={<Search size={28} color={colors.textPlaceholder} />} title="No credit sales found" />}
         contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
         showsVerticalScrollIndicator
         persistentScrollbar
       />
+
+      <Modal
+        visible={detailVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setDetailVisible(false)}
+      >
+        <View style={styles.detailModal}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setDetailVisible(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close credit details"
+          />
+          <View style={[styles.detailSheet, { paddingTop: Math.max(insets.top, 10) + 8, paddingBottom: Math.max(insets.bottom, 24) }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.receiptHeader}>
+              <Text style={styles.sheetTitle}>Credit Details</Text>
+              <Pressable
+                onPress={() => setDetailVisible(false)}
+                style={styles.iconButton}
+                accessibilityRole="button"
+                accessibilityLabel="Close credit details"
+              >
+                <X size={15} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            {selectedDetail ? (
+              <ScrollView
+                style={styles.sheetScroller}
+                contentContainerStyle={[styles.sheetScroll, { paddingBottom: sheetBottomPadding + 96 }]}
+                showsVerticalScrollIndicator
+                persistentScrollbar
+                keyboardShouldPersistTaps="handled"
+                overScrollMode="always"
+              >
+                <Card style={styles.detailSummary}>
+                  <View style={styles.invoiceHead}>
+                    <View style={styles.body}>
+                      <Text style={styles.title}>{selectedDetail.customer.name}</Text>
+                      <Text style={styles.meta}>{selectedDetail.sale.saleNumber}</Text>
+                      <Text style={styles.meta}>{new Date(selectedDetail.sale.saleDate).toLocaleDateString()} | {selectedDetail.sale.salesperson.name || selectedDetail.sale.salesperson.username}</Text>
+                    </View>
+                    <Badge label={selectedDetail.status} variant={selectedDetail.status === "PAID" ? "success" : selectedDetail.isOverdue ? "error" : "warning"} />
+                  </View>
+                  <View style={styles.balanceRow}>
+                    <Text style={styles.meta}>Invoice total</Text>
+                    <Text style={styles.amount}>{formatCurrency(money(selectedDetail.sale.totalAmount || selectedDetail.totalCredit))}</Text>
+                  </View>
+                  <View style={styles.balanceRow}>
+                    <Text style={styles.meta}>Amount paid</Text>
+                    <Text style={styles.amount}>{formatCurrency(money(selectedDetail.sale.amountPaid || selectedDetail.amountPaid))}</Text>
+                  </View>
+                  <View style={styles.balanceRow}>
+                    <Text style={styles.meta}>Remaining balance</Text>
+                    <Text style={styles.amount}>{formatCurrency(money(selectedDetail.sale.balanceDue || selectedDetail.balance))}</Text>
+                  </View>
+                </Card>
+
+                <Text style={styles.sectionTitle}>Products</Text>
+                {selectedDetail.sale.items.length === 0 ? (
+                  <Card><Text style={styles.meta}>No products found for this invoice.</Text></Card>
+                ) : selectedDetail.sale.items.map((item) => (
+                  <Card key={item.id} style={styles.paymentRow}>
+                    <View style={styles.body}>
+                      <Text style={styles.title}>{item.productName}</Text>
+                      <Text style={styles.meta}>{item.quantity} x {formatCurrency(money(item.unitPrice))}</Text>
+                    </View>
+                    <Text style={styles.amount}>{formatCurrency(money(item.totalAmount))}</Text>
+                  </Card>
+                ))}
+
+                <Text style={styles.sectionTitle}>Payment Transactions</Text>
+                {selectedDetail.payments.length === 0 ? (
+                  <Card><Text style={styles.meta}>No payments collected yet.</Text></Card>
+                ) : selectedDetail.payments.map((payment) => (
+                  <Card key={payment.id} style={styles.paymentRow}>
+                    <View style={styles.body}>
+                      <Text style={styles.title}>{payment.paymentMethod}</Text>
+                      <Text style={styles.meta}>{new Date(payment.paymentDate).toLocaleDateString()} | {payment.employee?.name ?? "Employee"}</Text>
+                      {payment.referenceNumber ? <Text style={styles.meta}>{payment.referenceNumber}</Text> : null}
+                    </View>
+                    <Text style={styles.amount}>{formatCurrency(money(payment.amount))}</Text>
+                  </Card>
+                ))}
+
+                <View style={styles.detailActions}>
+                  <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => openInvoicePreview(selectedDetail)} />
+                  {money(selectedDetail.balance) > 0 ? <Button label="Record Payment" variant="success" onPress={() => {
+                    setDetailVisible(false);
+                    openPayment(selectedDetail);
+                  }} /> : null}
+                  <Button label="Open Customer Credit History" variant="ghost" onPress={() => openCustomerProfile(selectedDetail.customer.id)} />
+                </View>
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
 
       <AppBottomSheet ref={paymentRef} snapPoints={["88%"]}>
         <View style={styles.sheet}>
@@ -457,6 +645,39 @@ export function CreditSalesScreen() {
         </View>
       </AppBottomSheet>
 
+      <Modal
+        visible={receiptVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setReceiptVisible(false)}
+      >
+        <View style={styles.detailModal}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setReceiptVisible(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close invoice preview"
+          />
+          <View style={[styles.detailSheet, { paddingTop: Math.max(insets.top, 10) + 8, paddingBottom: Math.max(insets.bottom, 24) }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.receiptHeader}>
+              <Text style={styles.sheetTitle}>Invoice Preview</Text>
+              <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void handlePrintInvoice()} style={styles.printButton} />
+            </View>
+            <ScrollView
+              style={styles.sheetScroller}
+              contentContainerStyle={{ paddingBottom: sheetBottomPadding + 96 }}
+              showsVerticalScrollIndicator
+              persistentScrollbar
+              overScrollMode="always"
+            >
+              {activeReceipt ? <ReceiptTicket receipt={activeReceipt} /> : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <AppBottomSheet ref={editRef} snapPoints={["55%"]}>
         <BottomSheetScrollView
           contentContainerStyle={[styles.sheetFormContent, { paddingBottom: sheetBottomPadding }]}
@@ -491,10 +712,24 @@ const styles = StyleSheet.create({
   approvalQueue: { gap: 8 },
   approvalCard: { flexDirection: "row", alignItems: "center", gap: 12 },
   approvalActions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
+  rowCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.card,
+    padding: spacing.cardPadding,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(0,0,0,0.04)",
+    ...shadows.card
+  },
+  rowCardPressed: { opacity: 0.82, transform: [{ scale: 0.99 }] },
+  customerTouchArea: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, minHeight: 54, paddingVertical: 4 },
+  balancePress: { alignItems: "flex-end", gap: 5, minHeight: 36, justifyContent: "center" },
   icon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.secondaryBg },
   body: { flex: 1 },
   title: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
+  customerLink: { color: colors.primary, fontSize: 13, fontWeight: "900", textDecorationLine: "underline" },
   meta: { color: colors.textPlaceholder, fontSize: 11, marginTop: 3 },
   rowRight: { alignItems: "flex-end", gap: 5 },
   employeeActions: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
@@ -504,12 +739,31 @@ const styles = StyleSheet.create({
   deleteButton: { backgroundColor: colors.errorBg, borderColor: colors.errorBorder },
   disabledAction: { opacity: 0.55 },
   amount: { color: colors.foreground, fontSize: 13, fontWeight: "800" },
+  detailModal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
+  detailSheet: {
+    height: "94%",
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 16,
+    gap: 12,
+    elevation: 100,
+    zIndex: 1
+  },
+  modalHandle: { alignSelf: "center", width: 34, height: 4, borderRadius: 999, backgroundColor: colors.borderLight },
   sheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 16, gap: 12 },
   sheetScroller: { flex: 1 },
   sheetScroll: { gap: 12, paddingBottom: 16 },
   sheetFooter: { paddingTop: 2 },
   sheetFormContent: { padding: 16, gap: 12 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "800" },
+  detailSummary: { gap: 10 },
+  invoiceHead: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  balanceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: colors.borderLighter, paddingTop: 10 },
+  detailActions: { gap: 8 },
+  receiptHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  printButton: { minHeight: 44, paddingHorizontal: 14 },
   totalCard: { alignItems: "center" },
   largeAmount: { color: colors.primary, fontSize: 28, fontWeight: "900", marginTop: 4 },
   amountInput: { minHeight: 52, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, paddingHorizontal: 14, color: colors.foreground, fontSize: 16, fontWeight: "800" },
