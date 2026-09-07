@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Button, Card } from "@/components/common";
 import { ErrorState, LoadingState } from "@/components/common/StateViews";
 import { AreaChart, PieChart } from "@/components/charts";
 import { ScrollScreen } from "@/screens/shared/ScreenKit";
+import { printingService } from "@/services/printing.service";
 import { reportsService } from "@/services/reports.service";
 import { useAuth } from "@/hooks/useAuth";
 import { colors } from "@/theme";
@@ -24,12 +25,14 @@ const numberValue = (value: unknown) => Number(value ?? 0);
 
 export function ReportsScreen() {
   const businessId = useAuth((state) => state.business?.id);
+  const businessName = useAuth((state) => state.business?.name);
   const [period, setPeriod] = useState<Period>("daily");
   const [salesReport, setSalesReport] = useState<ReportResponse | null>(null);
   const [profitReport, setProfitReport] = useState<ReportResponse | null>(null);
   const [expenseReport, setExpenseReport] = useState<ReportResponse | null>(null);
   const [statistics, setStatistics] = useState<DashboardStatistics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -81,6 +84,55 @@ export function ReportsScreen() {
       .filter((row) => row.value > 0);
   }, [salesReport]);
 
+  const buildExportText = () => {
+    const paymentBreakdown = salesReport?.paymentBreakdown as Array<{ paymentMethod?: string; totalAmount?: string | number }> | undefined;
+    const salesRows = salesReport?.data as Array<Record<string, unknown>> | undefined;
+    const lines = [
+      businessName ?? "Business",
+      `${period.toUpperCase()} REPORT`,
+      `Generated: ${new Date().toLocaleString()}`,
+      "",
+      "SUMMARY",
+      `Revenue: ${formatCurrency(numberValue(summary.totalSales))}`,
+      `Profit: ${formatCurrency(numberValue(profitSummary.netProfit))}`,
+      `Orders: ${numberValue(summary.transactionCount)}`,
+      `Expenses: ${formatCurrency(numberValue(expenseSummary.totalExpenses))}`,
+      "",
+      "SALES BY PAYMENT",
+      ...(paymentBreakdown?.length
+        ? paymentBreakdown.map((row) => `${row.paymentMethod ?? "Other"}: ${formatCurrency(numberValue(row.totalAmount))}`)
+        : ["No payment sales found"]),
+      "",
+      "LAST 7 DAYS REVENUE",
+      ...(chartData.length
+        ? chartData.map((row) => `${row.label}: ${formatCurrency(numberValue(row.revenue))}`)
+        : ["No revenue data found"]),
+      "",
+      "REPORT DATA",
+      ...(salesRows?.length
+        ? salesRows.slice(0, 20).map((row, index) => {
+            const label = String(row.saleNumber ?? row.period ?? row.date ?? `Row ${index + 1}`);
+            const amount = numberValue(row.totalAmount ?? row.revenue ?? row.amount);
+            return `${label}: ${formatCurrency(amount)}`;
+          })
+        : ["No detailed rows found"])
+    ];
+
+    return lines.join("\n");
+  };
+
+  const exportReport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await printingService.printText(buildExportText());
+    } catch (exportError) {
+      Alert.alert("Export failed", exportError instanceof Error ? exportError.message : "Unable to export report.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading) {
     return (
       <ScrollScreen title="Reports">
@@ -114,7 +166,7 @@ export function ReportsScreen() {
       </View>
       <Card><Text style={styles.title}>Revenue vs Profit</Text><AreaChart data={chartData.length ? chartData : [{ label: "Today", revenue: 0 }]} /></Card>
       <Card><Text style={styles.title}>Sales by Payment</Text><PieChart data={pieData.length ? pieData : [{ name: "No Sales", value: 1, color: colors.borderLight }]} /></Card>
-      <Button label="Export Report" />
+      <Button label="Export Report" loading={exporting} onPress={() => void exportReport()} />
     </ScrollScreen>
   );
 }

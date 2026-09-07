@@ -1,7 +1,7 @@
 import * as SQLite from "expo-sqlite";
 import type { ApiCustomer } from "@/types/customer";
 import type { ApiExpense, CreateExpensePayload, ExpenseCategory } from "@/types/expense";
-import type { ApiProduct } from "@/types/product";
+import type { ApiProduct, ProductReturnRequest } from "@/types/product";
 import type { ApiMutationPayload, SyncPayload, SyncQueueItem, SyncOperationType, SyncQueueStatus } from "@/types/sync";
 import type { CreateSalePayload } from "@/types/sales";
 
@@ -32,6 +32,12 @@ async function getDb() {
       updatedAt TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS expense_category_cache (
+      id TEXT PRIMARY KEY NOT NULL,
+      businessId TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS product_return_request_cache (
       id TEXT PRIMARY KEY NOT NULL,
       businessId TEXT NOT NULL,
       payload TEXT NOT NULL,
@@ -179,6 +185,33 @@ export const offlineDbService = {
       businessId
     );
     return rows.map((row) => JSON.parse(row.payload) as ExpenseCategory);
+  },
+
+  async cacheProductReturnRequests(businessId: string, requests: ProductReturnRequest[]) {
+    const db = await getDb();
+    const updatedAt = new Date().toISOString();
+    for (const request of requests) {
+      await db.runAsync(
+        "INSERT OR REPLACE INTO product_return_request_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+        request.id,
+        businessId,
+        JSON.stringify(request),
+        updatedAt
+      );
+    }
+  },
+
+  async cacheProductReturnRequest(businessId: string, request: ProductReturnRequest) {
+    await this.cacheProductReturnRequests(businessId, [request]);
+  },
+
+  async getCachedProductReturnRequests(businessId: string): Promise<ProductReturnRequest[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ payload: string }>(
+      "SELECT payload FROM product_return_request_cache WHERE businessId = ? ORDER BY updatedAt DESC",
+      businessId
+    );
+    return rows.map((row) => JSON.parse(row.payload) as ProductReturnRequest);
   },
 
   async applySaleToCachedProducts(businessId: string, items: CreateSalePayload["items"]) {

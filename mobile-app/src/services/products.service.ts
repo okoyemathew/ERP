@@ -101,6 +101,93 @@ function productFallback(businessId: string, payload: UpsertProductPayload, id =
   };
 }
 
+function filterCachedReturnRequests(
+  requests: ProductReturnRequest[],
+  params: { status?: "PENDING" | "APPROVED" | "REJECTED"; limit?: number; productId?: string }
+) {
+  return requests.filter((request) => {
+    if (params.status && request.status !== params.status) return false;
+    if (params.productId && request.productId !== params.productId) return false;
+    return true;
+  });
+}
+
+async function returnRequestFallback(
+  businessId: string,
+  payload: ProductReturnRequestPayload,
+  id = offlineId("return-request")
+): Promise<ProductReturnRequest> {
+  const now = new Date().toISOString();
+  const product = await offlineDbService.getCachedProduct(businessId, payload.productId);
+  return {
+    id,
+    businessId,
+    productId: payload.productId,
+    requestedById: "offline-user",
+    reviewedById: null,
+    quantity: payload.quantity,
+    unitCost: payload.unitCost ?? null,
+    referenceNumber: payload.referenceNumber ?? null,
+    remarks: payload.remarks ?? null,
+    status: "PENDING",
+    decisionNote: null,
+    requestedAt: now,
+    reviewedAt: null,
+    inventoryTransactionId: null,
+    createdAt: now,
+    updatedAt: now,
+    product: product ? { id: product.id, name: product.name, sku: product.sku, barcode: product.barcode } : undefined,
+    requestedBy: undefined,
+    reviewedBy: null
+  };
+}
+
+function decidedReturnRequestFallback(
+  current: ProductReturnRequest | undefined,
+  businessId: string,
+  requestId: string,
+  status: "APPROVED" | "REJECTED",
+  note?: string
+): ProductReturnRequest {
+  const now = new Date().toISOString();
+  return {
+    id: requestId,
+    businessId,
+    productId: current?.productId ?? "offline-product",
+    requestedById: current?.requestedById ?? "offline-user",
+    reviewedById: "offline-reviewer",
+    quantity: current?.quantity ?? 0,
+    unitCost: current?.unitCost ?? null,
+    referenceNumber: current?.referenceNumber ?? null,
+    remarks: current?.remarks ?? null,
+    status,
+    decisionNote: note ?? null,
+    requestedAt: current?.requestedAt ?? now,
+    reviewedAt: now,
+    inventoryTransactionId: current?.inventoryTransactionId ?? null,
+    createdAt: current?.createdAt ?? now,
+    updatedAt: now,
+    product: current?.product,
+    requestedBy: current?.requestedBy,
+    reviewedBy: current?.reviewedBy ?? null
+  };
+}
+
+async function applyApprovedReturnToCachedProduct(businessId: string, request: ProductReturnRequest) {
+  const product = await offlineDbService.getCachedProduct(businessId, request.productId);
+  if (!product?.inventory || request.quantity <= 0) return;
+  await offlineDbService.cacheProduct(businessId, {
+    ...product,
+    inventory: {
+      ...product.inventory,
+      quantityOnHand: product.inventory.quantityOnHand + request.quantity,
+      quantityAvailable: product.inventory.quantityAvailable + request.quantity,
+      averageCost: Number(request.unitCost ?? product.inventory.averageCost ?? 0)
+    },
+    updatedAt: new Date().toISOString()
+  });
+}
+
 export const productsService = {
   async list(params: ProductQuery = {}): Promise<ProductListResponse> {
     const businessId = await getRequiredBusinessId();
@@ -194,26 +281,63 @@ export const productsService = {
 
   async returnRequests(params: { status?: "PENDING" | "APPROVED" | "REJECTED"; limit?: number; productId?: string } = {}): Promise<ProductReturnRequestListResponse> {
     const businessId = await getRequiredBusinessId();
-    const { data } = await api.get<ProductReturnRequestListResponse>(endpoints.inventory.returnRequests(businessId), { params });
-    return data;
+    try {
+      const { data } = await api.get<ProductReturnRequestListResponse>(endpoints.inventory.returnRequests(businessId), { params });
+      await offlineDbService.cacheProductReturnRequests(businessId, data.data);
+      return data;
+    } catch (error) {
+      if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
+        const cached = filterCachedReturnRequests(await offlineDbService.getCachedProductReturnRequests(businessId), params);
+        const limit = params.limit ?? cached.length;
+        return {
+          data: cached.slice(0, limit),
+          meta: { page: 1, limit, total: cached.length, totalPages: cached.length > 0 ? 1 : 0 }
+        };
+      }
+      throw error;
+    }
   },
 
   async createReturnRequest(payload: ProductReturnRequestPayload): Promise<ProductReturnRequest> {
     const businessId = await getRequiredBusinessId();
-    const { data } = await api.post<ProductReturnRequest>(endpoints.inventory.returnRequests(businessId), payload);
-    return data;
+    try {
+      const { data } = await api.post<ProductReturnRequest>(endpoints.inventory.returnRequests(businessId), payload);
+      await offlineDbService.cacheProductReturnRequest(businessId, data);
+      return data;
+    } catch (error) {
+      const fallback = await returnRequestFallback(businessId, payload);
+      await offlineDbService.cacheProductReturnRequest(businessId, fallback);
+      return queueOfflineMutation(error, { method: "POST", url: endpoints.inventory.returnRequests(businessId), data: payload }, fallback);
+    }
   },
 
   async approveReturnRequest(requestId: string, note?: string): Promise<ProductReturnRequest> {
     const businessId = await getRequiredBusinessId();
-    const { data } = await api.patch<ProductReturnRequest>(endpoints.inventory.approveReturnRequest(businessId, requestId), { note });
-    return data;
+    try {
+      const { data } = await api.patch<ProductReturnRequest>(endpoints.inventory.approveReturnRequest(businessId, requestId), { note });
+      await offlineDbService.cacheProductReturnRequest(businessId, data);
+      return data;
+    } catch (error) {
+      const current = (await offlineDbService.getCachedProductReturnRequests(businessId)).find((request) => request.id === requestId);
+      const fallback = decidedReturnRequestFallback(current, businessId, requestId, "APPROVED", note);
+      await offlineDbService.cacheProductReturnRequest(businessId, fallback);
+      await applyApprovedReturnToCachedProduct(businessId, fallback);
+      return queueOfflineMutation(error, { method: "PATCH", url: endpoints.inventory.approveReturnRequest(businessId, requestId), data: { note } }, fallback);
+    }
   },
 
   async rejectReturnRequest(requestId: string, note?: string): Promise<ProductReturnRequest> {
     const businessId = await getRequiredBusinessId();
-    const { data } = await api.patch<ProductReturnRequest>(endpoints.inventory.rejectReturnRequest(businessId, requestId), { note });
-    return data;
+    try {
+      const { data } = await api.patch<ProductReturnRequest>(endpoints.inventory.rejectReturnRequest(businessId, requestId), { note });
+      await offlineDbService.cacheProductReturnRequest(businessId, data);
+      return data;
+    } catch (error) {
+      const current = (await offlineDbService.getCachedProductReturnRequests(businessId)).find((request) => request.id === requestId);
+      const fallback = decidedReturnRequestFallback(current, businessId, requestId, "REJECTED", note);
+      await offlineDbService.cacheProductReturnRequest(businessId, fallback);
+      return queueOfflineMutation(error, { method: "PATCH", url: endpoints.inventory.rejectReturnRequest(businessId, requestId), data: { note } }, fallback);
+    }
   },
 
   async deactivate(id: string): Promise<ApiProduct> {
@@ -231,14 +355,29 @@ export const productsService = {
 
   async searchByBarcode(barcode: string): Promise<ApiProduct[]> {
     const businessId = await getRequiredBusinessId();
-    const { data } = await api.get<ApiProduct[]>(endpoints.products.search(businessId), { params: { barcode } });
-    return data;
+    try {
+      const { data } = await api.get<ApiProduct[]>(endpoints.products.search(businessId), { params: { barcode } });
+      await offlineDbService.cacheProducts(businessId, data);
+      return data;
+    } catch (error) {
+      if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
+        return (await offlineDbService.getCachedProducts(businessId)).filter((product) => product.barcode === barcode);
+      }
+      throw error;
+    }
   },
 
   async generateBarcode(): Promise<string> {
     const businessId = await getRequiredBusinessId();
-    const { data } = await api.get<{ barcode: string }>(endpoints.products.generateBarcode(businessId));
-    return data.barcode;
+    try {
+      const { data } = await api.get<{ barcode: string }>(endpoints.products.generateBarcode(businessId));
+      return data.barcode;
+    } catch (error) {
+      if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
+        return `OFF${Date.now().toString().slice(-10)}`;
+      }
+      throw error;
+    }
   },
 
   async categories(): Promise<ProductCategory[]> {

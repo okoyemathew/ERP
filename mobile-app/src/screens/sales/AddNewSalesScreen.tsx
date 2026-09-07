@@ -80,6 +80,8 @@ const stockStatus = (stock: number) => {
   return { label: "In Stock", color: colors.successDark, bg: colors.successBg };
 };
 
+const normalizeCustomerPhone = (phone?: string | null) => (phone ?? "").replace(/\D/g, "") || (phone ?? "").trim().toLowerCase();
+
 export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const bottomInset = Math.max(insets.bottom, Platform.OS === "android" ? 24 : 0);
@@ -97,6 +99,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | undefined>();
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const [receiptCustomerName, setReceiptCustomerName] = useState("");
+  const [receiptCustomerPhone, setReceiptCustomerPhone] = useState("");
   const [selectedCollectInvoice, setSelectedCollectInvoice] = useState<CreditInvoiceView | null>(null);
   const [collectAmount, setCollectAmount] = useState("");
   const [collectMethod, setCollectMethod] = useState<Exclude<PosPaymentMethod, "credit">>("cash");
@@ -244,7 +248,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId);
   const trimmedNewCustomerName = newCustomerName.trim();
   const trimmedNewCustomerPhone = newCustomerPhone.trim();
+  const trimmedReceiptCustomerName = receiptCustomerName.trim();
+  const trimmedReceiptCustomerPhone = receiptCustomerPhone.trim();
   const hasNewCreditCustomer = Boolean(trimmedNewCustomerName || trimmedNewCustomerPhone);
+  const hasReceiptCustomerDetails = Boolean(trimmedReceiptCustomerName || trimmedReceiptCustomerPhone);
   const needsCreditCustomer = paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0;
   const openCreditInvoices = useMemo(() => creditInvoices.filter((invoice) => invoice.remaining > 0), [creditInvoices]);
   const cartItems: SaleItem[] = role === "owner"
@@ -299,6 +306,52 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     return customer;
   };
 
+  const createReceiptCustomer = async () => {
+    const rememberCustomer = (customer: ApiCustomer) => {
+      setCustomers((current) => {
+        if (current.some((item) => item.id === customer.id)) return current;
+        return [customer, ...current];
+      });
+      setSelectedCustomerId(customer.id);
+      return customer;
+    };
+    const findExistingReceiptCustomer = async () => {
+      const targetPhone = normalizeCustomerPhone(trimmedReceiptCustomerPhone);
+      const cachedMatch = customers.find((customer) => normalizeCustomerPhone(customer.phone) === targetPhone);
+      if (cachedMatch) return cachedMatch;
+
+      try {
+        const response = await customersService.search(trimmedReceiptCustomerPhone, { limit: 10, isActive: true });
+        return response.data.find((customer) => normalizeCustomerPhone(customer.phone) === targetPhone);
+      } catch (error) {
+        if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) return undefined;
+        throw error;
+      }
+    };
+
+    const existingCustomer = await findExistingReceiptCustomer();
+    if (existingCustomer) return rememberCustomer(existingCustomer);
+
+    const [firstName, ...lastNameParts] = trimmedReceiptCustomerName.split(/\s+/);
+    try {
+      const customer = await customersService.create({
+        firstName,
+        lastName: lastNameParts.join(" ") || undefined,
+        phone: trimmedReceiptCustomerPhone,
+        creditLimit: 0,
+        outstandingBalance: 0,
+        notes: "Created from POS receipt"
+      });
+      return rememberCustomer(customer);
+    } catch (error) {
+      if (error instanceof AppApiError && (error.code === "BAD_REQUEST" || error.code === "CONFLICT") && error.message.toLowerCase().includes("same phone")) {
+        const retryExistingCustomer = await findExistingReceiptCustomer();
+        if (retryExistingCustomer) return rememberCustomer(retryExistingCustomer);
+      }
+      throw error;
+    }
+  };
+
   const openReceipt = (receipt: ReceiptDocument) => {
     setActiveReceipt(receipt);
     setReceiptVisible(true);
@@ -316,6 +369,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     setSelectedCustomerId(customerId);
     setNewCustomerName("");
     setNewCustomerPhone("");
+    setReceiptCustomerName("");
+    setReceiptCustomerPhone("");
   };
 
   const updateNewCreditCustomerName = (value: string) => {
@@ -328,6 +383,16 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     if (value.trim()) setSelectedCustomerId(undefined);
   };
 
+  const updateReceiptCustomerName = (value: string) => {
+    setReceiptCustomerName(value);
+    if (value.trim()) setSelectedCustomerId(undefined);
+  };
+
+  const updateReceiptCustomerPhone = (value: string) => {
+    setReceiptCustomerPhone(value);
+    if (value.trim()) setSelectedCustomerId(undefined);
+  };
+
   const clearCart = () => {
     if (role === "owner") ownerCart.clearCart();
     else employeeCart.clearCart();
@@ -335,6 +400,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     setSelectedCustomerId(undefined);
     setNewCustomerName("");
     setNewCustomerPhone("");
+    setReceiptCustomerName("");
+    setReceiptCustomerPhone("");
     setPaidInput("");
     setReferenceInput("");
     setDiscountInput("0");
@@ -493,6 +560,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       Alert.alert("Payment amount", "Paid amount must be greater than zero.");
       return;
     }
+    if (paymentMethod !== "credit" && creditBalance <= 0 && hasReceiptCustomerDetails && (!trimmedReceiptCustomerName || !trimmedReceiptCustomerPhone)) {
+      Alert.alert("Customer", "Enter both the customer's name and phone number before confirming payment.");
+      return;
+    }
 
     let checkoutCustomer = selectedCustomer;
 
@@ -519,6 +590,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     try {
       if (creditBalance > 0 && !checkoutCustomer) {
         checkoutCustomer = await createInlineCreditCustomer();
+      }
+      if (paymentMethod !== "credit" && creditBalance <= 0 && hasReceiptCustomerDetails && !checkoutCustomer) {
+        checkoutCustomer = await createReceiptCustomer();
       }
 
       const saleItems = cartItems.map((item) => {
@@ -565,6 +639,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         setSelectedCustomerId(undefined);
         setNewCustomerName("");
         setNewCustomerPhone("");
+        setReceiptCustomerName("");
+        setReceiptCustomerPhone("");
         setCheckoutVisible(false);
         if (refreshCreditInvoices) {
           await loadCreditInvoices();
@@ -638,6 +714,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           setSelectedCustomerId(undefined);
           setNewCustomerName("");
           setNewCustomerPhone("");
+          setReceiptCustomerName("");
+          setReceiptCustomerPhone("");
           setCheckoutVisible(false);
           await loadProducts();
           setPrintText(null);
@@ -954,18 +1032,25 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               ) : null}
               {!needsCreditCustomer ? (
                 <View style={styles.customerList}>
-                  {customers.map((customer) => (
-                    <Pressable
-                      key={customer.id}
-                      onPress={() => chooseCustomer(customer.id)}
-                      style={[styles.customerChip, selectedCustomerId === customer.id && styles.customerChipActive]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Select ${customerDisplayName(customer)}`}
-                    >
-                      <Text style={[styles.customerName, selectedCustomerId === customer.id && styles.customerNameActive]}>{customerDisplayName(customer)}</Text>
-                      {Number(customer.outstandingBalance) > 0 ? <Text style={styles.customerOwes}>{formatCurrency(Number(customer.outstandingBalance))} owed</Text> : null}
-                    </Pressable>
-                  ))}
+                  <Card style={styles.newCustomerCard}>
+                    <TextInput
+                      value={receiptCustomerName}
+                      onChangeText={updateReceiptCustomerName}
+                      placeholder="Name"
+                      placeholderTextColor={colors.textPlaceholder}
+                      style={styles.customerInput}
+                      accessibilityLabel="Receipt customer name"
+                    />
+                    <TextInput
+                      value={receiptCustomerPhone}
+                      onChangeText={updateReceiptCustomerPhone}
+                      placeholder="Phone number"
+                      placeholderTextColor={colors.textPlaceholder}
+                      keyboardType="phone-pad"
+                      style={styles.customerInput}
+                      accessibilityLabel="Receipt customer phone number"
+                    />
+                  </Card>
                 </View>
               ) : null}
             </View>

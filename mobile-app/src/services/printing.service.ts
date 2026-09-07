@@ -1,4 +1,4 @@
-import { Alert } from "react-native";
+import { Alert, Platform, Share } from "react-native";
 import type { ReceiptDocument } from "@/types/domain.types";
 import { formatCurrency } from "@/utils/format";
 
@@ -59,12 +59,30 @@ export const printingService = {
 
   async print(receipt: ReceiptDocument) {
     const text = this.buildReceiptText(receipt);
-    Alert.alert("Receipt ready", text);
-    return { ok: true, text };
+    return this.printText(text);
   },
 
   async printText(text: string) {
-    Alert.alert("Receipt ready", text);
-    return { ok: true, text };
+    try {
+      const result = await Share.share(
+        {
+          title: "Receipt",
+          message: text
+        },
+        Platform.OS === "android"
+          ? {
+              dialogTitle: "Print Receipt"
+            }
+          : undefined
+      );
+
+      return {
+        ok: result.action !== Share.dismissedAction,
+        text
+      };
+    } catch {
+      Alert.alert("Receipt ready", text);
+      return { ok: false, text };
+    }
   }
 };
