@@ -1,12 +1,13 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
-import { Banknote, CreditCard, FileText, Phone, Printer, Smartphone, X } from "lucide-react-native";
+import { Banknote, CreditCard, FileText, Phone, Printer, RotateCcw, Smartphone, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReceiptTicket } from "@/components/receipt";
 import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader } from "@/components/common";
 import { creditSalesService } from "@/services/credit-sales.service";
+import { productsService } from "@/services/products.service";
 import { printingService } from "@/services/printing.service";
 import { useAuth } from "@/hooks/useAuth";
 import { borderRadius, colors, shadows, spacing } from "@/theme";
@@ -15,6 +16,8 @@ import type { ApiCreditSale, CustomerCreditResponse } from "@/types/creditSale";
 import type { PosPaymentMethod } from "@/types/sales";
 import { toApiPaymentMethod } from "@/types/sales";
 import { formatCurrency } from "@/utils/format";
+
+type CreditSaleProductItem = ApiCreditSale["sale"]["items"][number];
 
 const paymentMethods: Array<{ label: string; value: Exclude<PosPaymentMethod, "credit">; icon: React.ReactNode }> = [
   { label: "Cash", value: "cash", icon: <Banknote size={15} color={colors.primary} /> },
@@ -114,6 +117,11 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
   const [detailVisible, setDetailVisible] = useState(false);
   const [paymentVisible, setPaymentVisible] = useState(false);
   const [receiptVisible, setReceiptVisible] = useState(false);
+  const [returnItem, setReturnItem] = useState<CreditSaleProductItem | null>(null);
+  const [returnQuantity, setReturnQuantity] = useState("1");
+  const [returnRemarks, setReturnRemarks] = useState("");
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<Exclude<PosPaymentMethod, "credit">>("cash");
   const [reference, setReference] = useState("");
@@ -157,6 +165,22 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
     }, [loadCustomerCredit])
   );
 
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setReturnKeyboardOffset(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setReturnKeyboardOffset(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   const openTransaction = (creditSale: ApiCreditSale) => {
     console.log("CREDIT_CUSTOMER_TRANSACTION_PRESSED", creditSale.id, creditSale.sale.saleNumber);
     setSelectedCredit(creditSale);
@@ -172,6 +196,19 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
     setPaymentVisible(true);
   };
 
+  const openReturnForm = (item: CreditSaleProductItem) => {
+    setReturnItem(item);
+    setReturnQuantity(item.quantity > 0 ? "1" : "0");
+    setReturnRemarks("");
+  };
+
+  const closeReturnForm = () => {
+    if (returnSubmitting) return;
+    setReturnItem(null);
+    setReturnQuantity("1");
+    setReturnRemarks("");
+  };
+
   const openInvoice = async (creditSale: ApiCreditSale) => {
     console.log("CREDIT_CUSTOMER_PRINT_INVOICE_PRESSED", creditSale.id, creditSale.sale.saleNumber);
     try {
@@ -183,6 +220,44 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
       setReceiptVisible(true);
     } catch (error) {
       Alert.alert("Invoice", error instanceof Error ? error.message : "Unable to load invoice products.");
+    }
+  };
+
+  const submitReturnRequest = async () => {
+    if (!selectedCredit || !returnItem || returnSubmitting) return;
+
+    const quantity = Number.parseInt(returnQuantity, 10);
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
+      return;
+    }
+
+    if (quantity > returnItem.quantity) {
+      Alert.alert("Invalid quantity", `This credit sale only has ${returnItem.quantity} unit(s) of ${returnItem.productName}.`);
+      return;
+    }
+
+    setReturnSubmitting(true);
+    try {
+      await productsService.createReturnRequest({
+        productId: returnItem.productId,
+        saleItemId: returnItem.id,
+        quantity,
+        unitCost: money(returnItem.unitPrice),
+        referenceNumber: selectedCredit.sale.saleNumber,
+        remarks: returnRemarks.trim() || `Customer return from credit sale ${selectedCredit.sale.saleNumber}`
+      });
+      const productName = returnItem.productName;
+      setReturnItem(null);
+      setReturnQuantity("1");
+      setReturnRemarks("");
+      await loadCustomerCredit();
+      Alert.alert("Return submitted", `${productName} is now waiting for owner approval.`);
+    } catch (returnError) {
+      const message = returnError instanceof Error ? returnError.message : "Unable to submit return request.";
+      Alert.alert("Return failed", message);
+    } finally {
+      setReturnSubmitting(false);
     }
   };
 
@@ -346,7 +421,17 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
                             <Text style={styles.title}>{item.productName}</Text>
                             <Text style={styles.meta}>{item.quantity} x {formatCurrency(money(item.unitPrice))}</Text>
                           </View>
-                          <Text style={styles.amount}>{formatCurrency(lineTotal(item))}</Text>
+                          <View style={styles.productReturnActions}>
+                            <Text style={styles.amount}>{formatCurrency(lineTotal(item))}</Text>
+                            <Pressable
+                              onPress={() => openReturnForm(item)}
+                              style={styles.iconButton}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Return ${item.productName}`}
+                            >
+                              <RotateCcw size={14} color={colors.primary} />
+                            </Pressable>
+                          </View>
                         </Card>
                       ))}
 
@@ -389,6 +474,49 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
             ) : null}
           </View>
         </View>
+      </Modal>
+
+      <Modal visible={Boolean(returnItem)} transparent animationType="slide" statusBarTranslucent onRequestClose={closeReturnForm}>
+        <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+          <Pressable style={styles.backdrop} onPress={closeReturnForm} accessibilityRole="button" accessibilityLabel="Close product return" />
+          <View style={[
+            styles.returnSheet,
+            {
+              paddingBottom: Math.max(insets.bottom, 24),
+              marginBottom: Platform.OS === "android" ? returnKeyboardOffset : 0
+            }
+          ]}>
+            <View style={styles.returnHeader}>
+              <View style={styles.body}>
+                <Text style={styles.sheetTitle}>Return Product</Text>
+                <Text style={styles.meta}>{returnItem?.productName ?? ""}</Text>
+                <Text style={styles.meta}>{selectedCredit ? `${selectedCredit.sale.saleNumber} | ${customerName}` : ""}</Text>
+              </View>
+              <Pressable onPress={closeReturnForm} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Close product return">
+                <X size={15} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <TextInput
+              value={returnQuantity}
+              onChangeText={setReturnQuantity}
+              keyboardType="number-pad"
+              style={styles.amountInput}
+              placeholder="Quantity"
+              placeholderTextColor={colors.textPlaceholder}
+              accessibilityLabel="Return quantity"
+            />
+            <TextInput
+              value={returnRemarks}
+              onChangeText={setReturnRemarks}
+              style={[styles.amountInput, styles.remarksInput]}
+              placeholder="Reason or condition"
+              placeholderTextColor={colors.textPlaceholder}
+              multiline
+              accessibilityLabel="Return reason"
+            />
+            <Button label="Submit Return" loading={returnSubmitting} onPress={() => void submitReturnRequest()} />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={paymentVisible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setPaymentVisible(false)}>
@@ -503,16 +631,20 @@ const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
   sheet: { height: "94%", backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 16, gap: 12, elevation: 100, zIndex: 1 },
   paymentSheet: { height: "78%", backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 16, paddingHorizontal: 16, gap: 12, elevation: 100, zIndex: 1 },
+  returnSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, gap: 12, elevation: 100, zIndex: 1 },
+  returnHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   handle: { alignSelf: "center", width: 34, height: 4, borderRadius: 999, backgroundColor: colors.borderLight },
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "900" },
   sheetContent: { gap: 12 },
   summaryCard: { gap: 10 },
   lineRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  productReturnActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   iconButton: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
   printButton: { minHeight: 44, paddingHorizontal: 14 },
   largeAmount: { color: colors.primary, fontSize: 28, fontWeight: "900", marginTop: 4 },
   amountInput: { minHeight: 52, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, paddingHorizontal: 14, color: colors.foreground, fontSize: 18, fontWeight: "900" },
+  remarksInput: { minHeight: 96, paddingTop: 12, textAlignVertical: "top" },
   methodGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   methodChip: { minHeight: 44, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: colors.surface },
   methodChipActive: { backgroundColor: colors.secondaryBg, borderColor: colors.primary },
