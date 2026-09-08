@@ -46,6 +46,13 @@ const owner: AuthenticatedUser = {
   employeeId: null,
 };
 
+const admin: AuthenticatedUser = {
+  ...owner,
+  id: otherUserId,
+  username: 'admin',
+  roleName: 'Admin',
+};
+
 function user(id: string, roleName: string) {
   return {
     id,
@@ -313,6 +320,72 @@ describe('InventoryService product returns', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.productReturnRequest.create).not.toHaveBeenCalled();
+  });
+
+  it('lets the business owner see employee return requests across customer ownership boundaries', async () => {
+    const { service, prisma } = createService();
+    const request = pendingReturn('Cashier');
+    prisma.productReturnRequest.count.mockResolvedValue(1);
+    prisma.productReturnRequest.findMany.mockResolvedValue([request]);
+
+    const result = await service.findReturnRequests(
+      businessId,
+      { status: ProductReturnRequestStatus.PENDING },
+      owner,
+    );
+
+    expect(result.data).toEqual([request]);
+    const findManyArgs = prisma.productReturnRequest.findMany.mock.calls[0][0];
+    expect(findManyArgs.where).toEqual({
+      businessId,
+      status: ProductReturnRequestStatus.PENDING,
+    });
+  });
+
+  it('lets admins see employee return requests for owner-side approval', async () => {
+    const { service, prisma } = createService();
+    const request = pendingReturn('Cashier');
+    prisma.productReturnRequest.count.mockResolvedValue(1);
+    prisma.productReturnRequest.findMany.mockResolvedValue([request]);
+
+    const result = await service.findReturnRequests(
+      businessId,
+      { status: ProductReturnRequestStatus.PENDING },
+      admin,
+    );
+
+    expect(result.data).toEqual([request]);
+    const findManyArgs = prisma.productReturnRequest.findMany.mock.calls[0][0];
+    expect(findManyArgs.where).toEqual({
+      businessId,
+      status: ProductReturnRequestStatus.PENDING,
+    });
+  });
+
+  it('keeps employees scoped to returns they requested or originally sold', async () => {
+    const { service, prisma } = createService();
+    prisma.productReturnRequest.count.mockResolvedValue(0);
+    prisma.productReturnRequest.findMany.mockResolvedValue([]);
+
+    await service.findReturnRequests(
+      businessId,
+      { status: ProductReturnRequestStatus.PENDING },
+      employee,
+    );
+
+    const findManyArgs = prisma.productReturnRequest.findMany.mock.calls[0][0];
+    expect(findManyArgs.where).toEqual({
+      businessId,
+      AND: [
+        {
+          OR: [
+            { requestedById: employeeUserId },
+            { originalSellerId: employeeUserId },
+          ],
+        },
+      ],
+      status: ProductReturnRequestStatus.PENDING,
+    });
   });
 
   it('approves an employee return without adding stock to main inventory', async () => {

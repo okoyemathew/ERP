@@ -15,6 +15,7 @@ import {
   SaleStatus,
 } from '@prisma/client';
 import {
+  ADMIN_ROLE_NAMES,
   SYSTEM_ROLES,
   normalizeSystemRoleName,
 } from '../auth/constants/roles.constant';
@@ -765,7 +766,7 @@ export class InventoryService {
     const owners = await tx.user.findMany({
       where: {
         businessId,
-        role: { name: SYSTEM_ROLES.OWNER },
+        role: { name: { in: [...ADMIN_ROLE_NAMES] } },
       },
       select: { id: true },
     });
@@ -902,13 +903,14 @@ export class InventoryService {
   private assertCanReviewReturnRequests(user: AuthenticatedUser) {
     if (!this.canViewAllReturnRequests(user)) {
       throw new ForbiddenException(
-        'Only the business owner can approve returned products',
+        'Only the business owner or admin can approve returned products',
       );
     }
   }
 
   private canViewAllReturnRequests(user: AuthenticatedUser) {
-    return normalizeSystemRoleName(user.roleName) === SYSTEM_ROLES.OWNER;
+    const roleName = normalizeSystemRoleName(user.roleName);
+    return roleName ? ADMIN_ROLE_NAMES.includes(roleName) : false;
   }
 
   private async assertInventoryContext(

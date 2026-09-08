@@ -69,6 +69,8 @@ export const canReviewProductReturns = (user: User | null | undefined): boolean 
 
   return Boolean(
     normalizedRoleName === "owner" ||
+      normalizedRoleName === "admin" ||
+      normalizedRoleName === "administrator" ||
       (!normalizedRoleName && user?.role === "owner")
   );
 };
