@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, FlatList, Modal, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Clock, CreditCard, Printer, RotateCcw, Search, ShoppingBag, X } from "lucide-react-native";
@@ -43,6 +43,7 @@ export function SalesRecordsScreen() {
   const [returnQuantity, setReturnQuantity] = useState("1");
   const [returnRemarks, setReturnRemarks] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
   const [printing, setPrinting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -72,6 +73,23 @@ export function SalesRecordsScreen() {
     }, 350);
     return () => clearTimeout(timer);
   }, [loadSales]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setReturnKeyboardOffset(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setReturnKeyboardOffset(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
   const openSale = (sale: ApiSale) => {
@@ -295,9 +313,15 @@ export function SalesRecordsScreen() {
         statusBarTranslucent
         onRequestClose={closeReturnForm}
       >
-        <View style={styles.modal}>
+        <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <Pressable style={styles.backdrop} onPress={closeReturnForm} accessibilityRole="button" accessibilityLabel="Close product return" />
-          <View style={[styles.returnSheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <View style={[
+            styles.returnSheet,
+            {
+              paddingBottom: Math.max(insets.bottom, 24),
+              marginBottom: Platform.OS === "android" ? returnKeyboardOffset : 0
+            }
+          ]}>
             <View style={styles.returnHeader}>
               <View style={styles.body}>
                 <Text style={styles.returnTitle}>Return Product</Text>
@@ -328,7 +352,7 @@ export function SalesRecordsScreen() {
             />
             <Button label="Submit Return" loading={returnSubmitting} onPress={() => void submitReturnRequest()} />
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

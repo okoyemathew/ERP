@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Check, CreditCard, Edit3, HandCoins, Printer, RotateCcw, Search, Trash2, X } from "lucide-react-native";
@@ -94,6 +94,7 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
   const [returnQuantity, setReturnQuantity] = useState("1");
   const [returnRemarks, setReturnRemarks] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const paymentRef = useRef<BottomSheet>(null);
   const editRef = useRef<BottomSheet>(null);
@@ -145,6 +146,22 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
   useEffect(() => {
     void loadApprovalRequests();
   }, [loadApprovalRequests]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setReturnKeyboardOffset(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setReturnKeyboardOffset(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   const rows = response?.data ?? [];
   const summary = response?.summary;
@@ -829,14 +846,20 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
         statusBarTranslucent
         onRequestClose={closeReturnForm}
       >
-        <View style={styles.detailModal}>
+        <KeyboardAvoidingView style={styles.detailModal} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <Pressable
             style={styles.modalBackdrop}
             onPress={closeReturnForm}
             accessibilityRole="button"
             accessibilityLabel="Close product return"
           />
-          <View style={[styles.returnSheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <View style={[
+            styles.returnSheet,
+            {
+              paddingBottom: Math.max(insets.bottom, 24),
+              marginBottom: Platform.OS === "android" ? returnKeyboardOffset : 0
+            }
+          ]}>
             <View style={styles.returnHeader}>
               <View style={styles.body}>
                 <Text style={styles.sheetTitle}>Return Product</Text>
@@ -872,7 +895,7 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
             />
             <Button label="Submit Return" loading={returnSubmitting} onPress={() => void submitReturnRequest()} />
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {editSheetVisible ? <AppBottomSheet ref={editRef} snapPoints={["55%"]} initialIndex={0} onClose={() => {
