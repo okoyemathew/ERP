@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ProductReturnRequestStatus } from '@prisma/client';
+import { Type } from 'class-transformer';
 import {
   IsDateString,
   IsEnum,
@@ -46,12 +47,14 @@ export class ProductReturnRequestQueryDto {
 
   @ApiPropertyOptional({ description: 'Page number', default: 1, minimum: 1 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   page?: number;
 
   @ApiPropertyOptional({ description: 'Page size', default: 20, minimum: 1 })
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
   limit?: number;
