@@ -1,20 +1,23 @@
-import React, { useCallback, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
-import { Banknote, CreditCard, Pencil, Printer, Smartphone } from "lucide-react-native";
+import { Banknote, CreditCard, Pencil, Printer, RotateCcw, Smartphone, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReceiptTicket } from "@/components/receipt";
 import { AppBottomSheet, Avatar, Badge, Button, Card, ErrorState, LoadingState, ScreenHeader } from "@/components/common";
 import { customersService } from "@/services/customers.service";
+import { productsService } from "@/services/products.service";
 import { printingService } from "@/services/printing.service";
 import { colors } from "@/theme";
 import type { ReceiptDocument, SaleItem } from "@/types/domain.types";
 import type { CustomerCreditSale, CustomerPaymentMethod, CustomerPaymentHistoryItem, CustomerProfileResponse, CustomerSale } from "@/types/customer";
 import { customerDisplayName } from "@/types/customer";
 import { formatCurrency } from "@/utils/format";
+
+type CustomerSaleItem = NonNullable<CustomerSale["items"]>[number];
 
 const methods: Array<{ label: string; value: CustomerPaymentMethod; icon: React.ReactNode }> = [
   { label: "Cash", value: "CASH", icon: <Banknote size={15} color={colors.primary} /> },
@@ -58,6 +61,13 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
   const [activeReceipt, setActiveReceipt] = useState<ReceiptDocument | null>(null);
   const [paymentSheetVisible, setPaymentSheetVisible] = useState(false);
   const [receiptSheetVisible, setReceiptSheetVisible] = useState(false);
+  const [returnPickerVisible, setReturnPickerVisible] = useState(false);
+  const [returnCredit, setReturnCredit] = useState<CustomerCreditSale | null>(null);
+  const [returnItem, setReturnItem] = useState<CustomerSaleItem | null>(null);
+  const [returnQuantity, setReturnQuantity] = useState("1");
+  const [returnRemarks, setReturnRemarks] = useState("");
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState<CustomerPaymentMethod>("CASH");
   const [loading, setLoading] = useState(true);
@@ -93,6 +103,22 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
     }, [loadCustomer])
   );
 
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setReturnKeyboardOffset(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setReturnKeyboardOffset(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   const customer = profile?.customer;
   const summary = profile?.summary;
   const name = customer ? customerDisplayName(customer) : "";
@@ -101,6 +127,40 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
     setSelectedCredit(credit);
     setAmount(String(money(credit.balance)));
     setPaymentSheetVisible(true);
+  };
+
+  const openReturnOptions = (credit: CustomerCreditSale) => {
+    const items = credit.sale?.items ?? [];
+    if (items.length === 0) {
+      Alert.alert("Return unavailable", "No products were found on this credit invoice.");
+      return;
+    }
+
+    setReturnCredit(credit);
+    if (items.length === 1) {
+      setReturnItem(items[0]);
+      setReturnQuantity(Number(items[0].quantity) > 0 ? "1" : "0");
+      setReturnRemarks("");
+      return;
+    }
+
+    setReturnPickerVisible(true);
+  };
+
+  const openReturnForm = (credit: CustomerCreditSale, item: CustomerSaleItem) => {
+    setReturnCredit(credit);
+    setReturnItem(item);
+    setReturnQuantity(Number(item.quantity) > 0 ? "1" : "0");
+    setReturnRemarks("");
+    setReturnPickerVisible(false);
+  };
+
+  const closeReturnForm = () => {
+    if (returnSubmitting) return;
+    setReturnCredit(null);
+    setReturnItem(null);
+    setReturnQuantity("1");
+    setReturnRemarks("");
   };
 
   const buildCreditInvoiceReceipt = (
@@ -150,6 +210,54 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
   const openCreditInvoice = (credit: CustomerCreditSale) => {
     setActiveReceipt(buildCreditInvoiceReceipt(credit));
     setReceiptSheetVisible(true);
+  };
+
+  const submitReturnRequest = async () => {
+    if (!returnCredit || !returnItem || returnSubmitting) return;
+
+    const quantity = Number.parseInt(returnQuantity, 10);
+    const soldQuantity = Number(returnItem.quantity);
+    const productId = returnItem.product?.id;
+    const productName = returnItem.product?.name ?? "Product";
+    const saleNumber = returnCredit.sale?.saleNumber ?? returnCredit.id.slice(0, 8).toUpperCase();
+
+    if (!productId) {
+      Alert.alert("Return unavailable", "This invoice product is missing its product reference.");
+      return;
+    }
+
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
+      return;
+    }
+
+    if (quantity > soldQuantity) {
+      Alert.alert("Invalid quantity", `This credit sale only has ${soldQuantity} unit(s) of ${productName}.`);
+      return;
+    }
+
+    setReturnSubmitting(true);
+    try {
+      await productsService.createReturnRequest({
+        productId,
+        saleItemId: returnItem.id,
+        quantity,
+        unitCost: money(returnItem.unitPrice),
+        referenceNumber: saleNumber,
+        remarks: returnRemarks.trim() || `Customer return from credit sale ${saleNumber}`
+      });
+      setReturnCredit(null);
+      setReturnItem(null);
+      setReturnQuantity("1");
+      setReturnRemarks("");
+      await loadCustomer();
+      Alert.alert("Return submitted", `${productName} is now waiting for owner approval.`);
+    } catch (returnError) {
+      const message = returnError instanceof Error ? returnError.message : "Unable to submit return request.";
+      Alert.alert("Return failed", message);
+    } finally {
+      setReturnSubmitting(false);
+    }
   };
 
   const handlePayment = async () => {
@@ -277,6 +385,15 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
                 openCreditInvoice(credit);
               }}
             />
+            <Button
+              label="Return Product"
+              variant="ghost"
+              icon={<RotateCcw size={16} color={colors.primary} />}
+              onPress={() => {
+                console.log("CUSTOMER_DETAIL_RETURN_PRODUCT_PRESSED", credit.id);
+                openReturnOptions(credit);
+              }}
+            />
             {money(credit.balance) > 0 ? (
               <Button
                 label="Confirm Payment"
@@ -386,6 +503,78 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
           </BottomSheetScrollView>
         </View>
       </AppBottomSheet> : null}
+      {returnPickerVisible ? <AppBottomSheet snapPoints={["50%"]} initialIndex={0} onClose={() => {
+        setReturnPickerVisible(false);
+        setReturnCredit(null);
+      }}>
+        <BottomSheetScrollView
+          contentContainerStyle={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
+          showsVerticalScrollIndicator
+          persistentScrollbar
+          keyboardShouldPersistTaps="always"
+          nestedScrollEnabled
+        >
+          <Text style={styles.sheetTitle}>Return Product</Text>
+          {returnCredit?.sale?.items?.map((item) => (
+            <Card key={item.id} style={styles.returnProductRow}>
+              <View style={styles.returnProductBody}>
+                <Text style={styles.title}>{item.product?.name ?? "Product"}</Text>
+                <Text style={styles.meta}>{Number(item.quantity)} x {formatCurrency(money(item.unitPrice))}</Text>
+              </View>
+              <Pressable
+                onPress={() => openReturnForm(returnCredit, item)}
+                style={styles.iconButton}
+                accessibilityRole="button"
+                accessibilityLabel={`Return ${item.product?.name ?? "product"}`}
+              >
+                <RotateCcw size={14} color={colors.primary} />
+              </Pressable>
+            </Card>
+          ))}
+        </BottomSheetScrollView>
+      </AppBottomSheet> : null}
+      <Modal visible={Boolean(returnItem)} transparent animationType="slide" statusBarTranslucent onRequestClose={closeReturnForm}>
+        <KeyboardAvoidingView style={styles.returnModal} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+          <Pressable style={styles.backdrop} onPress={closeReturnForm} accessibilityRole="button" accessibilityLabel="Close product return" />
+          <View style={[
+            styles.returnSheet,
+            {
+              paddingBottom: Math.max(insets.bottom, 24),
+              marginBottom: Platform.OS === "android" ? returnKeyboardOffset : 0
+            }
+          ]}>
+            <View style={styles.returnHeader}>
+              <View style={styles.returnProductBody}>
+                <Text style={styles.sheetTitle}>Return Product</Text>
+                <Text style={styles.meta}>{returnItem?.product?.name ?? ""}</Text>
+                <Text style={styles.meta}>{returnCredit?.sale?.saleNumber ?? ""}</Text>
+              </View>
+              <Pressable onPress={closeReturnForm} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Close product return">
+                <X size={15} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <TextInput
+              value={returnQuantity}
+              onChangeText={setReturnQuantity}
+              keyboardType="number-pad"
+              style={styles.amountInput}
+              placeholder="Quantity"
+              placeholderTextColor={colors.textMuted}
+              accessibilityLabel="Return quantity"
+            />
+            <TextInput
+              value={returnRemarks}
+              onChangeText={setReturnRemarks}
+              style={[styles.amountInput, styles.remarksInput]}
+              placeholder="Reason or condition"
+              placeholderTextColor={colors.textMuted}
+              multiline
+              accessibilityLabel="Return reason"
+            />
+            <Button label="Submit Return" loading={returnSubmitting} onPress={() => void submitReturnRequest()} />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -409,12 +598,20 @@ const styles = StyleSheet.create({
   sheet: { padding: 16, gap: 12 },
   receiptSheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
   sheetScroller: { flex: 1 },
+  returnModal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },
+  backdrop: { ...StyleSheet.absoluteFillObject },
+  returnSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, gap: 12 },
+  returnHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  returnProductRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  returnProductBody: { flex: 1 },
   receiptHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  iconButton: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
   printButton: { minHeight: 44, paddingHorizontal: 14 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "900" },
   totalCard: { alignItems: "center" },
   largeAmount: { color: colors.primary, fontSize: 28, fontWeight: "900", marginTop: 4 },
   amountInput: { minHeight: 52, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, paddingHorizontal: 14, color: colors.foreground, fontSize: 20, fontWeight: "900" },
+  remarksInput: { minHeight: 96, paddingTop: 12, textAlignVertical: "top" },
   methodRow: { flexDirection: "row", gap: 8 },
   methodChip: { flex: 1, minHeight: 44, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", gap: 4 },
   methodChipActive: { borderColor: colors.primary, backgroundColor: colors.secondaryBg },
