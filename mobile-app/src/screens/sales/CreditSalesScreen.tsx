@@ -178,7 +178,7 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
   const buildCreditInvoiceReceipt = (creditSale: ApiCreditSale): ReceiptDocument => {
     const receiptItems: SaleItem[] = creditSale.sale.items.map((item) => ({
       productId: item.productId,
-      name: item.productName,
+      name: item.productName || "Product",
       qty: item.quantity,
       price: money(item.unitPrice)
     }));
@@ -212,9 +212,17 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
     void creditSalesService.detail(creditSale.id).then(setSelectedDetail).catch(() => undefined);
   };
 
-  const openInvoicePreview = (creditSale: ApiCreditSale) => {
-    setActiveReceipt(buildCreditInvoiceReceipt(creditSale));
-    setReceiptVisible(true);
+  const openInvoicePreview = async (creditSale: ApiCreditSale) => {
+    try {
+      const printableCreditSale = creditSale.sale.items.length > 0
+        ? creditSale
+        : await creditSalesService.detail(creditSale.id);
+      setSelectedDetail((current) => current?.id === printableCreditSale.id ? printableCreditSale : current);
+      setActiveReceipt(buildCreditInvoiceReceipt(printableCreditSale));
+      setReceiptVisible(true);
+    } catch (error) {
+      Alert.alert("Invoice", error instanceof Error ? error.message : "Unable to load invoice products.");
+    }
   };
 
   const requestApproval = (creditSale: ApiCreditSale, action: CreditSaleEmployeeAction) => {
@@ -642,7 +650,7 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
                 ))}
 
                 <View style={styles.detailActions}>
-                  <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => openInvoicePreview(selectedDetail)} />
+                  <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void openInvoicePreview(selectedDetail)} />
                   {money(selectedDetail.balance) > 0 ? <Button label="Record Payment" variant="success" onPress={() => {
                     setDetailVisible(false);
                     openPayment(selectedDetail);

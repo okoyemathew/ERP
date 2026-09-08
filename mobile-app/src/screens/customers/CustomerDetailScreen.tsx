@@ -34,6 +34,19 @@ function paymentAmount(item: CustomerPaymentHistoryItem): number {
   return money(item.payment.amount);
 }
 
+function creditInvoicePaid(credit: CustomerCreditSale): number {
+  const invoiceTotal = money(credit.sale?.totalAmount ?? credit.totalCredit);
+  const remainingBalance = Math.max(0, money(credit.balance));
+  return Math.max(0, Math.min(invoiceTotal, invoiceTotal - remainingBalance));
+}
+
+function receiptMethodFromPayment(method: CustomerPaymentMethod): ReceiptDocument["method"] {
+  if (method === "CARD") return "card";
+  if (method === "MOBILE_MONEY") return "mobile";
+  if (method === "BANK_TRANSFER") return "bank";
+  return "cash";
+}
+
 export function CustomerDetailScreen({ route, navigation }: { route: any; navigation: any }) {
   const insets = useSafeAreaInsets();
   const customerId = route.params?.customerId as string;
@@ -90,10 +103,18 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
     setPaymentSheetVisible(true);
   };
 
-  const buildCreditInvoiceReceipt = (credit: CustomerCreditSale): ReceiptDocument => {
+  const buildCreditInvoiceReceipt = (
+    credit: CustomerCreditSale,
+    override?: {
+      paid?: number;
+      balance?: number;
+      method?: ReceiptDocument["method"];
+      paymentLines?: ReceiptDocument["paymentLines"];
+    }
+  ): ReceiptDocument => {
     const invoiceTotal = money(credit.sale?.totalAmount ?? credit.totalCredit);
-    const amountPaid = money(credit.sale?.amountPaid ?? credit.amountPaid);
-    const remainingBalance = money(credit.sale?.balanceDue ?? credit.balance);
+    const amountPaid = override?.paid ?? creditInvoicePaid(credit);
+    const remainingBalance = override?.balance ?? Math.max(0, money(credit.balance));
     const receiptItems: SaleItem[] = (credit.sale?.items ?? []).map((item) => ({
       productId: item.product?.id ?? item.id,
       name: item.product?.name ?? "Product",
@@ -114,9 +135,15 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
       total: invoiceTotal,
       paid: amountPaid,
       balance: remainingBalance,
-      method: remainingBalance > 0 ? "credit" : "cash",
+      method: override?.method ?? (remainingBalance > 0 ? "credit" : "cash"),
       createdAt: credit.sale?.saleDate ?? credit.createdAt,
-      printed: false
+      printed: false,
+      paymentLines: override?.paymentLines ?? credit.payments?.map((payment) => ({
+        date: payment.paymentDate,
+        amount: money(payment.amount),
+        method: payment.paymentMethod,
+        referenceNumber: payment.referenceNumber
+      }))
     };
   };
 
@@ -136,6 +163,15 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
 
     setProcessing(true);
     try {
+      const paidBeforePayment = creditInvoicePaid(selectedCredit);
+      const remainingAfterPayment = Math.max(0, balance - value);
+      const paidAfterPayment = Math.min(money(selectedCredit.sale?.totalAmount ?? selectedCredit.totalCredit), paidBeforePayment + value);
+      const paymentLine = {
+        date: new Date().toISOString(),
+        amount: value,
+        method,
+        referenceNumber: null
+      };
       await customersService.collectCreditPayment(customerId, {
         amount: value,
         paymentMethod: method,
@@ -144,6 +180,18 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
       });
       paymentRef.current?.close();
       setPaymentSheetVisible(false);
+      setActiveReceipt(buildCreditInvoiceReceipt(selectedCredit, {
+        paid: paidAfterPayment,
+        balance: remainingAfterPayment,
+        method: receiptMethodFromPayment(method),
+        paymentLines: [...(selectedCredit.payments ?? []).map((payment) => ({
+          date: payment.paymentDate,
+          amount: money(payment.amount),
+          method: payment.paymentMethod,
+          referenceNumber: payment.referenceNumber
+        })), paymentLine]
+      }));
+      setReceiptSheetVisible(true);
       setSelectedCredit(null);
       await loadCustomer();
     } catch (paymentError) {

@@ -1,4 +1,6 @@
 import { Alert, Platform, Share } from "react-native";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import type { ReceiptDocument } from "@/types/domain.types";
 import { formatCurrency } from "@/utils/format";
 
@@ -17,6 +19,64 @@ const row = (left: string, right: string) => {
   const spaces = Math.max(1, lineWidth - cleanLeft.length - cleanRight.length);
   return `${cleanLeft}${" ".repeat(spaces)}${cleanRight}`;
 };
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const buildPdfHtml = (text: string, title = "Receipt") => `
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      @page {
+        size: auto;
+        margin: 6mm;
+      }
+      * { box-sizing: border-box; }
+      html {
+        width: 100%;
+      }
+      body {
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        color: #111827;
+        background: #ffffff;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      pre {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        font-size: 10pt;
+        line-height: 1.35;
+      }
+      @media screen and (max-width: 420px) {
+        pre {
+          font-size: 9pt;
+          line-height: 1.3;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <pre>${escapeHtml(text)}</pre>
+  </body>
+</html>`;
 
 export const printingService = {
   buildReceiptText(receipt: ReceiptDocument) {
@@ -59,30 +119,51 @@ export const printingService = {
 
   async print(receipt: ReceiptDocument) {
     const text = this.buildReceiptText(receipt);
-    return this.printText(text);
+    return this.printText(text, receipt.title);
   },
 
-  async printText(text: string) {
-    try {
-      const result = await Share.share(
-        {
-          title: "Receipt",
-          message: text
-        },
-        Platform.OS === "android"
-          ? {
-              dialogTitle: "Print Receipt"
-            }
-          : undefined
-      );
+  async printText(text: string, title = "Receipt") {
+    const html = buildPdfHtml(text, title);
 
-      return {
-        ok: result.action !== Share.dismissedAction,
-        text
-      };
+    try {
+      await Print.printAsync({ html });
+      return { ok: true, text };
     } catch {
-      Alert.alert("Receipt ready", text);
-      return { ok: false, text };
+      try {
+        const file = await Print.printToFileAsync({ html });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(file.uri, {
+            dialogTitle: "Share PDF",
+            mimeType: "application/pdf",
+            UTI: "com.adobe.pdf"
+          });
+          return { ok: true, text, uri: file.uri };
+        }
+      } catch {
+        // Fall back to the old text share path below.
+      }
+
+      try {
+        const result = await Share.share(
+          {
+            title,
+            message: text
+          },
+          Platform.OS === "android"
+            ? {
+                dialogTitle: title
+              }
+            : undefined
+        );
+
+        return {
+          ok: result.action !== Share.dismissedAction,
+          text
+        };
+      } catch {
+        Alert.alert("Receipt ready", text);
+        return { ok: false, text };
+      }
     }
   }
 };

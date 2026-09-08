@@ -76,7 +76,7 @@ function buildCreditInvoiceReceipt(creditSale: ApiCreditSale, customerName: stri
   ];
   const receiptItems: SaleItem[] = creditSale.sale.items.map((item) => ({
     productId: item.productId,
-    name: item.productName,
+    name: item.productName || "Product",
     qty: item.quantity,
     price: money(item.unitPrice)
   }));
@@ -172,10 +172,18 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
     setPaymentVisible(true);
   };
 
-  const openInvoice = (creditSale: ApiCreditSale) => {
+  const openInvoice = async (creditSale: ApiCreditSale) => {
     console.log("CREDIT_CUSTOMER_PRINT_INVOICE_PRESSED", creditSale.id, creditSale.sale.saleNumber);
-    setActiveReceipt(buildCreditInvoiceReceipt(creditSale, customerName));
-    setReceiptVisible(true);
+    try {
+      const printableCreditSale = creditSale.sale.items.length > 0
+        ? creditSale
+        : await creditSalesService.detail(creditSale.id);
+      setSelectedCredit((current) => current?.id === printableCreditSale.id ? printableCreditSale : current);
+      setActiveReceipt(buildCreditInvoiceReceipt(printableCreditSale, customerName));
+      setReceiptVisible(true);
+    } catch (error) {
+      Alert.alert("Invoice", error instanceof Error ? error.message : "Unable to load invoice products.");
+    }
   };
 
   const collectPayment = async () => {
@@ -292,7 +300,7 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
                 <View style={styles.balanceRow}><Text style={styles.meta}>Balance</Text><Text style={styles.amount}>{formatCurrency(totals.balance)}</Text></View>
               </Pressable>
               <View style={styles.actions}>
-                <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => openInvoice(creditSale)} />
+                <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void openInvoice(creditSale)} />
                 {totals.balance > 0 ? <Button label="Record Payment" variant="success" onPress={() => openPayment(creditSale)} /> : null}
               </View>
             </View>
@@ -371,7 +379,7 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
                       )}
 
                       <View style={styles.actions}>
-                        <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => openInvoice(selectedCredit)} />
+                        <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void openInvoice(selectedCredit)} />
                         {totals.balance > 0 ? <Button label="Record Payment" variant="success" onPress={() => openPayment(selectedCredit)} /> : null}
                       </View>
                     </>

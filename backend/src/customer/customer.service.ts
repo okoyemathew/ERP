@@ -543,7 +543,21 @@ export class CustomerService {
       this.prisma.creditSale.count({ where }),
       this.prisma.creditSale.findMany({
         where,
-        include: { sale: true, payments: { orderBy: { paymentDate: 'desc' } } },
+        include: {
+          sale: {
+            include: {
+              items: {
+                include: {
+                  product: {
+                    select: { id: true, name: true, sku: true },
+                  },
+                },
+                orderBy: { createdAt: 'asc' },
+              },
+            },
+          },
+          payments: { orderBy: { paymentDate: 'desc' } },
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,

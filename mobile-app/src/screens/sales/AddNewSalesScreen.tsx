@@ -58,8 +58,13 @@ type CreditInvoiceView = {
   id: string;
   customerName: string;
   orderNumber: string;
+  total: number;
+  paid: number;
   remaining: number;
   items: SaleItem[];
+  createdAt: string;
+  employeeName?: string;
+  paymentLines?: ReceiptDocument["paymentLines"];
 };
 
 type SalePriceResult =
@@ -81,6 +86,52 @@ const stockStatus = (stock: number) => {
 };
 
 const normalizeCustomerPhone = (phone?: string | null) => (phone ?? "").replace(/\D/g, "") || (phone ?? "").trim().toLowerCase();
+
+const moneyValue = (value: string | number | null | undefined) => {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount : 0;
+};
+
+const creditInvoicePaid = (invoiceTotal: number, remainingBalance: number) =>
+  Math.max(0, Math.min(invoiceTotal, invoiceTotal - remainingBalance));
+
+const mapCreditSaleToInvoiceView = (item: ApiCreditSale): CreditInvoiceView => {
+  const invoiceTotal = moneyValue(item.sale.totalAmount ?? item.totalCredit);
+  const remaining = Math.max(0, moneyValue(item.balance));
+
+  return {
+    id: item.id,
+    customerName: item.customer.name || "Customer",
+    orderNumber: item.sale.saleNumber ?? item.id.slice(0, 8),
+    total: invoiceTotal,
+    paid: creditInvoicePaid(invoiceTotal, remaining),
+    remaining,
+    items: item.sale.items.map((saleItem) => ({
+      productId: saleItem.productId,
+      name: saleItem.productName ?? "Product",
+      qty: saleItem.quantity,
+      price: moneyValue(saleItem.unitPrice)
+    })),
+    createdAt: item.sale.saleDate ?? item.createdAt,
+    employeeName: item.sale.salesperson.name || item.sale.salesperson.username,
+    paymentLines: [
+      ...(item.sale.payments ?? [])
+        .filter((payment) => payment.paymentMethod !== "CREDIT")
+        .map((payment) => ({
+          date: payment.paymentDate,
+          amount: moneyValue(payment.amount),
+          method: payment.paymentMethod,
+          referenceNumber: payment.referenceNumber
+        })),
+      ...item.payments.map((payment) => ({
+        date: payment.paymentDate,
+        amount: moneyValue(payment.amount),
+        method: payment.paymentMethod,
+        referenceNumber: payment.referenceNumber
+      }))
+    ]
+  };
+};
 
 export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
@@ -151,18 +202,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     setLoadingCreditInvoices(true);
     try {
       const response = await creditSalesService.posOutstanding({ limit: 50 });
-      const rows = response.data.map((item: ApiCreditSale): CreditInvoiceView => ({
-        id: item.id,
-        customerName: item.customer.name || "Customer",
-        orderNumber: item.sale.saleNumber ?? item.id.slice(0, 8),
-        remaining: Number(item.balance ?? 0),
-        items: item.sale.items.map((saleItem) => ({
-          productId: saleItem.productId,
-          name: saleItem.productName ?? "Product",
-          qty: saleItem.quantity,
-          price: Number(saleItem.unitPrice ?? 0)
-        }))
-      }));
+      const rows = response.data.map(mapCreditSaleToInvoiceView);
       setCreditInvoices(rows);
       return rows;
     } catch (error) {
@@ -356,6 +396,26 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     setActiveReceipt(receipt);
     setReceiptVisible(true);
   };
+
+  const buildCreditInvoiceReceipt = (invoice: CreditInvoiceView, method: Exclude<PosPaymentMethod, "credit">): ReceiptDocument => ({
+    id: invoice.orderNumber,
+    kind: invoice.remaining > 0 ? "credit" : "sale",
+    businessName: "EST JP MOTORS",
+    title: "Credit Invoice",
+    orderNumber: invoice.orderNumber,
+    customerName: invoice.customerName,
+    employeeName: invoice.employeeName,
+    items: invoice.items,
+    subtotal: invoice.total,
+    tax: 0,
+    total: invoice.total,
+    paid: invoice.paid,
+    balance: invoice.remaining,
+    method,
+    createdAt: invoice.createdAt,
+    printed: false,
+    paymentLines: invoice.paymentLines
+  });
 
   const openCheckout = () => {
     setCheckoutVisible(true);
@@ -763,16 +823,35 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
     setCollectingPayment(true);
     try {
-      await creditSalesService.collectPosPayment(selectedCollectInvoice.id, {
+      const updatedCreditSale = await creditSalesService.collectPosPayment(selectedCollectInvoice.id, {
         amount,
         paymentMethod: toApiPaymentMethod(collectMethod),
         referenceNumber: `CR-${Date.now()}`
       });
+      const updatedInvoice = mapCreditSaleToInvoiceView(updatedCreditSale);
+      const receiptInvoice = updatedInvoice.total > 0
+        ? updatedInvoice
+        : {
+            ...selectedCollectInvoice,
+            paid: Math.min(selectedCollectInvoice.total, selectedCollectInvoice.paid + amount),
+            remaining: Math.max(0, selectedCollectInvoice.remaining - amount),
+            paymentLines: [
+              ...(selectedCollectInvoice.paymentLines ?? []),
+              {
+                date: new Date().toISOString(),
+                amount,
+                method: toApiPaymentMethod(collectMethod),
+                referenceNumber: null
+              }
+            ]
+          };
       collectRef.current?.close();
       setCollectVisible(false);
       setSelectedCollectInvoice(null);
       setCollectAmount("");
       await loadCreditInvoices();
+      setPrintText(null);
+      openReceipt(buildCreditInvoiceReceipt(receiptInvoice, collectMethod));
       Alert.alert("Payment received", "Credit payment has been recorded.");
     } catch (collectError) {
       const message = collectError instanceof Error ? collectError.message : "Unable to collect credit payment.";
