@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 import { businessService } from "@/services/business.service";
 import { notificationsService } from "@/services/notifications.service";
@@ -8,24 +8,52 @@ import type { ApiNotification } from "@/types/notification";
 const CHANNEL_ID = "business-alerts";
 const POLL_INTERVAL_MS = 45000;
 
+type ExpoNotificationsModule = typeof import("expo-notifications");
+
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let polling = false;
+let notificationsModule: Promise<ExpoNotificationsModule | null> | null = null;
+let notificationHandlerConfigured = false;
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true
-  })
-});
+function isExpoGo() {
+  return Constants.appOwnership === "expo";
+}
+
+async function getNotificationsModule() {
+  if (isExpoGo()) return null;
+
+  if (!notificationsModule) {
+    notificationsModule = import("expo-notifications")
+      .then((module) => {
+        if (!notificationHandlerConfigured) {
+          module.setNotificationHandler({
+            handleNotification: async () => ({
+              shouldShowAlert: true,
+              shouldShowBanner: true,
+              shouldShowList: true,
+              shouldPlaySound: true,
+              shouldSetBadge: true
+            })
+          });
+          notificationHandlerConfigured = true;
+        }
+
+        return module;
+      })
+      .catch(() => null);
+  }
+
+  return notificationsModule;
+}
 
 function stateKey(businessId: string, userId: string) {
   return `device-notifications:last-seen:${businessId}:${userId}`;
 }
 
 async function ensurePermission() {
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return false;
+
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
       name: "Business alerts",
@@ -54,6 +82,9 @@ async function pushEnabled(businessId: string) {
 }
 
 async function notifyDevice(notification: ApiNotification) {
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return;
+
   await Notifications.scheduleNotificationAsync({
     content: {
       title: notification.title,
@@ -115,6 +146,7 @@ async function pollForNotifications(businessId: string, userId: string) {
 
 export const deviceNotificationsService = {
   start(businessId?: string | null, userId?: string | null) {
+    if (isExpoGo()) return () => undefined;
     if (!businessId || !userId) return () => undefined;
 
     void pollForNotifications(businessId, userId);
