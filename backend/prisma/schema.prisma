@@ -173,6 +173,7 @@ model User {
 
   sessions                   UserSession[]
   passwordResetTokens        PasswordResetToken[]
+  registeredCustomers        Customer[]                 @relation("CustomerRegistrar")
   sales                      Sale[]
   payments                   Payment[]
   creditPayments             CreditPayment[]
@@ -736,6 +737,9 @@ model Customer {
   businessId String   @db.Uuid
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("CustomerRegistrar", fields: [createdById], references: [id], onDelete: SetNull)
+
   customerCode String?
 
   firstName String
@@ -773,6 +777,7 @@ model Customer {
 
   @@unique([businessId, phone])
   @@index([businessId])
+  @@index([createdById])
   @@index([phone])
   @@index([firstName])
   @@index([companyName])

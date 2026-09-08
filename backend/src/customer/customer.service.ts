@@ -12,7 +12,6 @@ import {
   Prisma,
 } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
-import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
 import { AuthorizationService } from '../auth/services/authorization.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
@@ -73,6 +72,7 @@ export class CustomerService {
     const customer = await this.prisma.customer.create({
       data: {
         businessId,
+        createdById: user?.id ?? null,
         customerCode: dto.customerCode?.trim() || null,
         firstName,
         lastName: lastName || null,
@@ -115,7 +115,7 @@ export class CustomerService {
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'createdAt';
     const sortOrder = query.sortOrder ?? 'desc';
-    const where = this.buildWhere(businessId, query);
+    const where = this.buildWhere(businessId, query, viewer);
 
     const [total, items] = await Promise.all([
       this.prisma.customer.count({ where }),
@@ -157,7 +157,12 @@ export class CustomerService {
     viewer?: AuthenticatedUser,
   ) {
     const customer = await this.prisma.customer.findFirst({
-      where: { id, businessId, deletedAt: null },
+      where: {
+        id,
+        businessId,
+        deletedAt: null,
+        ...this.customerOwnershipScope(viewer),
+      },
       include: {
         sales: {
           where: {
@@ -208,7 +213,7 @@ export class CustomerService {
     dto: UpdateCustomerDto,
     user?: AuthenticatedUser,
   ) {
-    const customer = await this.findOne(businessId, id);
+    const customer = await this.findOne(businessId, id, user);
 
     await this.validateUniqueFields(businessId, id, dto, customer);
 
@@ -407,7 +412,7 @@ export class CustomerService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    await this.ensureCustomerExists(businessId, id);
+    await this.ensureCustomerExists(businessId, id, viewer);
 
     const where: Prisma.SaleWhereInput = {
       businessId,
@@ -453,7 +458,7 @@ export class CustomerService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    await this.ensureCustomerExists(businessId, id);
+    await this.ensureCustomerExists(businessId, id, viewer);
 
     const [paymentTotal, creditPaymentTotal, payments, creditPayments] =
       await Promise.all([
@@ -533,7 +538,7 @@ export class CustomerService {
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    await this.ensureCustomerExists(businessId, id);
+    await this.ensureCustomerExists(businessId, id, viewer);
 
     const where: Prisma.CreditSaleWhereInput = {
       customerId: id,
@@ -711,7 +716,7 @@ export class CustomerService {
     dto: CollectCreditPaymentDto,
     user: AuthenticatedUser,
   ) {
-    await this.ensureCustomerExists(businessId, id);
+    await this.ensureCustomerExists(businessId, id, user);
     const paymentAmount = new Decimal(dto.amount);
 
     return this.prisma.$transaction(async (tx) => {
@@ -934,7 +939,7 @@ export class CustomerService {
     status: CustomerStatus,
     user?: AuthenticatedUser,
   ) {
-    const customer = await this.findOne(businessId, id);
+    const customer = await this.findOne(businessId, id, user);
     const updated = await this.prisma.customer.update({
       where: { id },
       data: { status, isSynced: true, syncVersion: { increment: 1 } },
@@ -952,9 +957,18 @@ export class CustomerService {
     return updated;
   }
 
-  private async ensureCustomerExists(businessId: string, id: string) {
+  private async ensureCustomerExists(
+    businessId: string,
+    id: string,
+    viewer?: AuthenticatedUser,
+  ) {
     const customer = await this.prisma.customer.findFirst({
-      where: { id, businessId, deletedAt: null },
+      where: {
+        id,
+        businessId,
+        deletedAt: null,
+        ...this.customerOwnershipScope(viewer),
+      },
       select: { id: true },
     });
 
@@ -1001,22 +1015,12 @@ export class CustomerService {
     };
   }
 
-  private canViewAllUserActivity(user?: AuthenticatedUser): boolean {
-    return Boolean(
-      user?.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
-    );
-  }
-
   private userActivityScope(user?: AuthenticatedUser) {
-    return this.canViewAllUserActivity(user) || !user
-      ? {}
-      : { userId: user.id };
+    return user ? { userId: user.id } : {};
   }
 
   private paymentActivityScope(user?: AuthenticatedUser) {
-    return this.canViewAllUserActivity(user) || !user
-      ? {}
-      : { sale: { userId: user.id } };
+    return user ? { sale: { userId: user.id } } : {};
   }
 
   private buildRelationCountSelect(
@@ -1055,8 +1059,26 @@ export class CustomerService {
   private buildWhere(
     businessId: string,
     query: CustomerQueryDto,
+    viewer?: AuthenticatedUser,
   ): Prisma.CustomerWhereInput {
     const search = query.search?.trim();
+    const filters: Prisma.CustomerWhereInput[] = [
+      this.customerOwnershipScope(viewer),
+    ].filter((filter) => Object.keys(filter).length > 0);
+
+    if (search) {
+      filters.push({
+        OR: [
+          { customerCode: { contains: search, mode: 'insensitive' } },
+          { firstName: { contains: search, mode: 'insensitive' } },
+          { lastName: { contains: search, mode: 'insensitive' } },
+          { companyName: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
+          { city: { contains: search, mode: 'insensitive' } },
+        ],
+      });
+    }
 
     return {
       businessId,
@@ -1073,19 +1095,42 @@ export class CustomerService {
         ? { companyName: query.isCompany ? { not: null } : null }
         : {}),
       ...(query.hasOutstandingBalance ? { outstandingBalance: { gt: 0 } } : {}),
-      ...(search
-        ? {
-            OR: [
-              { customerCode: { contains: search, mode: 'insensitive' } },
-              { firstName: { contains: search, mode: 'insensitive' } },
-              { lastName: { contains: search, mode: 'insensitive' } },
-              { companyName: { contains: search, mode: 'insensitive' } },
-              { email: { contains: search, mode: 'insensitive' } },
-              { phone: { contains: search, mode: 'insensitive' } },
-              { city: { contains: search, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
+      ...(filters.length ? { AND: filters } : {}),
+    };
+  }
+
+  private customerOwnershipScope(
+    viewer?: AuthenticatedUser,
+  ): Prisma.CustomerWhereInput {
+    if (!viewer) {
+      return {};
+    }
+
+    return {
+      OR: [
+        { createdById: viewer.id },
+        {
+          createdById: null,
+          sales: {
+            some: {
+              deletedAt: null,
+              userId: viewer.id,
+            },
+          },
+        },
+        {
+          createdById: null,
+          creditSales: {
+            some: {
+              deletedAt: null,
+              sale: {
+                deletedAt: null,
+                userId: viewer.id,
+              },
+            },
+          },
+        },
+      ],
     };
   }
 

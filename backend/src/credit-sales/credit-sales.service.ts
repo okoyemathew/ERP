@@ -69,6 +69,7 @@ export class CreditSalesService {
         businessId,
         dto.customerId,
         tx,
+        user,
       );
       const items = await this.buildCreditSaleItems(businessId, dto.items, tx);
       const totals = this.sumItems(items);
@@ -652,6 +653,7 @@ export class CreditSalesService {
       businessId,
       customerId,
       this.prisma,
+      viewer,
     );
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -704,6 +706,7 @@ export class CreditSalesService {
       businessId,
       customerId,
       this.prisma,
+      viewer,
     );
     const summary = await this.creditSummary(
       businessId,
@@ -723,14 +726,21 @@ export class CreditSalesService {
     };
   }
 
-  async getBusinessOutstandingBalance(businessId: string) {
+  async getBusinessOutstandingBalance(
+    businessId: string,
+    viewer?: AuthenticatedUser,
+  ) {
     await this.refreshDefaultedCredits(businessId, this.prisma);
 
     const [active, partiallyPaid, defaulted] = await Promise.all([
       this.prisma.creditSale.aggregate({
         where: {
           deletedAt: null,
-          sale: { businessId, deletedAt: null },
+          sale: {
+            businessId,
+            deletedAt: null,
+            ...this.userActivityScope(viewer),
+          },
           status: CreditSaleStatus.ACTIVE,
           balance: { gt: 0 },
         },
@@ -740,7 +750,11 @@ export class CreditSalesService {
       this.prisma.creditSale.aggregate({
         where: {
           deletedAt: null,
-          sale: { businessId, deletedAt: null },
+          sale: {
+            businessId,
+            deletedAt: null,
+            ...this.userActivityScope(viewer),
+          },
           status: CreditSaleStatus.PARTIALLY_PAID,
           balance: { gt: 0 },
         },
@@ -750,7 +764,11 @@ export class CreditSalesService {
       this.prisma.creditSale.aggregate({
         where: {
           deletedAt: null,
-          sale: { businessId, deletedAt: null },
+          sale: {
+            businessId,
+            deletedAt: null,
+            ...this.userActivityScope(viewer),
+          },
           status: CreditSaleStatus.DEFAULTED,
           balance: { gt: 0 },
         },
@@ -960,6 +978,7 @@ export class CreditSalesService {
       businessId,
       customerId,
       this.prisma,
+      viewer,
     );
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -1005,6 +1024,7 @@ export class CreditSalesService {
       businessId,
       customerId,
       this.prisma,
+      viewer,
     );
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
@@ -1677,9 +1697,7 @@ export class CreditSalesService {
       sale: {
         businessId,
         deletedAt: null,
-        ...(viewer && !this.canViewAllCreditActivity(viewer)
-          ? { userId: viewer.id }
-          : {}),
+        ...this.userActivityScope(viewer),
       },
     };
     const openCreditWhere: Prisma.CreditSaleWhereInput = {
@@ -1933,9 +1951,15 @@ export class CreditSalesService {
     businessId: string,
     customerId: string,
     tx: Tx | PrismaService,
+    viewer?: AuthenticatedUser,
   ) {
     const customer = await tx.customer.findFirst({
-      where: { id: customerId, businessId, deletedAt: null },
+      where: {
+        id: customerId,
+        businessId,
+        deletedAt: null,
+        ...this.customerOwnershipScope(businessId, viewer),
+      },
     });
 
     if (!customer) {
@@ -1949,8 +1973,14 @@ export class CreditSalesService {
     businessId: string,
     customerId: string,
     tx: Tx,
+    viewer?: AuthenticatedUser,
   ) {
-    const customer = await this.getCustomerOrThrow(businessId, customerId, tx);
+    const customer = await this.getCustomerOrThrow(
+      businessId,
+      customerId,
+      tx,
+      viewer,
+    );
 
     if (customer.status !== CustomerStatus.ACTIVE) {
       throw new BadRequestException('Customer must be active');
@@ -2641,9 +2671,45 @@ export class CreditSalesService {
   }
 
   private userActivityScope(user?: AuthenticatedUser) {
-    return this.canViewAllCreditActivity(user) || !user
-      ? {}
-      : { userId: user.id };
+    return user ? { userId: user.id } : {};
+  }
+
+  private customerOwnershipScope(
+    businessId: string,
+    viewer?: AuthenticatedUser,
+  ): Prisma.CustomerWhereInput {
+    if (!viewer) {
+      return {};
+    }
+
+    return {
+      OR: [
+        { createdById: viewer.id },
+        {
+          createdById: null,
+          sales: {
+            some: {
+              businessId,
+              deletedAt: null,
+              userId: viewer.id,
+            },
+          },
+        },
+        {
+          createdById: null,
+          creditSales: {
+            some: {
+              deletedAt: null,
+              sale: {
+                businessId,
+                deletedAt: null,
+                userId: viewer.id,
+              },
+            },
+          },
+        },
+      ],
+    };
   }
 
   private assertAllowedCreditPaymentMethod(paymentMethod: PaymentMethod) {

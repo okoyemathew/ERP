@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 const businessId = '11111111-1111-1111-1111-111111111111';
 const customerId = '22222222-2222-2222-2222-222222222222';
 const employeeUserId = '33333333-3333-3333-3333-333333333333';
+const ownerUserId = '55555555-5555-5555-5555-555555555555';
 
 const employee: AuthenticatedUser = {
   id: employeeUserId,
@@ -13,6 +14,14 @@ const employee: AuthenticatedUser = {
   roleId: null,
   roleName: 'Cashier',
   employeeId: '44444444-4444-4444-4444-444444444444',
+};
+
+const owner: AuthenticatedUser = {
+  ...employee,
+  id: ownerUserId,
+  username: 'owner',
+  roleName: 'Owner',
+  employeeId: null,
 };
 
 function createPrismaMock() {
@@ -37,6 +46,40 @@ function createPrismaMock() {
 }
 
 describe('CustomerService activity scoping', () => {
+  it('stores the authenticated user as the customer registrar when creating customers', async () => {
+    const prisma = {
+      customer: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation(({ data }: { data: Record<string, unknown> }) => ({
+          id: customerId,
+          ...data,
+        })),
+      },
+      auditLog: {
+        create: jest.fn(),
+      },
+    };
+    const service = new CustomerService(prisma as never, {} as never);
+
+    await service.create(
+      businessId,
+      {
+        firstName: 'Ada',
+        phone: '08000000000',
+      },
+      employee,
+    );
+
+    expect(prisma.customer.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          businessId,
+          createdById: employeeUserId,
+        }),
+      }),
+    );
+  });
+
   it('scopes nested customer activity to the authenticated employee', async () => {
     const prisma = createPrismaMock();
     const service = new CustomerService(prisma as never, {} as never);
@@ -45,7 +88,14 @@ describe('CustomerService activity scoping', () => {
 
     expect(prisma.customer.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: customerId, businessId, deletedAt: null },
+        where: expect.objectContaining({
+          id: customerId,
+          businessId,
+          deletedAt: null,
+          OR: expect.arrayContaining([
+            { createdById: employeeUserId },
+          ]),
+        }),
         include: expect.objectContaining({
           sales: expect.objectContaining({
             where: expect.objectContaining({ userId: employeeUserId }),
@@ -88,6 +138,16 @@ describe('CustomerService activity scoping', () => {
 
     expect(prisma.customer.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: expect.objectContaining({
+          businessId,
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              OR: expect.arrayContaining([
+                { createdById: employeeUserId },
+              ]),
+            }),
+          ]),
+        }),
         include: {
           _count: {
             select: expect.objectContaining({
@@ -102,6 +162,29 @@ describe('CustomerService activity scoping', () => {
             }),
           },
         },
+      }),
+    );
+  });
+
+  it('scopes owner customer lists to customers registered or sold by the owner', async () => {
+    const prisma = createPrismaMock();
+    prisma.customer.count.mockResolvedValue(0);
+    const service = new CustomerService(prisma as never, {} as never);
+
+    await service.findAll(businessId, {}, owner);
+
+    expect(prisma.customer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessId,
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              OR: expect.arrayContaining([
+                { createdById: ownerUserId },
+              ]),
+            }),
+          ]),
+        }),
       }),
     );
   });

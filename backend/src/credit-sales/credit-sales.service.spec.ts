@@ -36,7 +36,7 @@ describe('CreditSalesService authenticated ownership', () => {
     );
   });
 
-  it('allows owners to query business-wide credit sales', () => {
+  it('scopes owner credit sale queries to the owner sale records', () => {
     const service = new CreditSalesService({} as never);
     const owner: AuthenticatedUser = {
       ...employee,
@@ -57,8 +57,40 @@ describe('CreditSalesService authenticated ownership', () => {
     expect(where.sale).toEqual(
       expect.objectContaining({
         businessId,
+        userId: ownerUserId,
       }),
     );
-    expect(where.sale?.userId).toBeUndefined();
+  });
+
+  it('scopes owner outstanding credit totals to owner sale records', async () => {
+    const prisma = {
+      creditSale: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        aggregate: jest.fn().mockResolvedValue({
+          _count: 0,
+          _sum: { balance: null, totalCredit: null },
+        }),
+      },
+    };
+    const service = new CreditSalesService(prisma as never);
+    const owner: AuthenticatedUser = {
+      ...employee,
+      id: ownerUserId,
+      roleName: 'Owner',
+      employeeId: null,
+    };
+
+    await service.getBusinessOutstandingBalance(businessId, owner);
+
+    expect(prisma.creditSale.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sale: expect.objectContaining({
+            businessId,
+            userId: ownerUserId,
+          }),
+        }),
+      }),
+    );
   });
 });

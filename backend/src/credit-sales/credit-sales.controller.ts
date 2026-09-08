@@ -101,6 +101,7 @@ export class CreditSalesController {
   outstandingBalance(@CurrentUser() user: AuthenticatedUser) {
     return this.creditSalesService.getBusinessOutstandingBalance(
       user.businessId,
+      user,
     );
   }
 
