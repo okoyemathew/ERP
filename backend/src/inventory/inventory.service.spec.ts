@@ -205,6 +205,9 @@ function createPrismaMock() {
     creditSale: {
       update: jest.fn(),
     },
+    sale: {
+      update: jest.fn(),
+    },
     customer: {
       findFirst: jest
         .fn()
@@ -406,6 +409,37 @@ describe('InventoryService product returns', () => {
         }),
       }),
     );
+    expect(prisma.sale.update).toHaveBeenCalledWith({
+      where: { id: saleId },
+      data: { status: SaleStatus.REFUNDED },
+    });
+  });
+
+  it('allows additional return requests from sales already marked refunded', async () => {
+    const { service, prisma } = createService();
+    const item = saleItemForSeller();
+    item.sale.status = SaleStatus.REFUNDED;
+    prisma.saleItem.findFirst.mockResolvedValue(item);
+    prisma.productReturnRequest.create.mockImplementation(
+      ({ data }: { data: any }) => pendingReturn('Cashier', data),
+    );
+
+    await service.createReturnRequest(
+      businessId,
+      { productId, saleItemId, quantity: 1 },
+      employee,
+    );
+
+    expect(prisma.saleItem.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sale: expect.objectContaining({
+            status: { in: [SaleStatus.COMPLETED, SaleStatus.REFUNDED] },
+          }),
+        }),
+      }),
+    );
+    expect(prisma.productReturnRequest.create).toHaveBeenCalled();
   });
 
   it('rejects an employee return without adding stock anywhere', async () => {

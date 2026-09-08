@@ -32,6 +32,7 @@ export interface CreateSalePayload {
 
 export interface ApiSale {
   id: string;
+  localSyncStatus?: "PENDING" | "SYNCING" | "FAILED" | "SYNCED";
   saleNumber: string;
   customerId?: string | null;
   userId: string;

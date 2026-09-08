@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { Check, CreditCard, Edit3, HandCoins, Printer, RotateCcw, Search, Trash2, X } from "lucide-react-native";
+import { Check, CreditCard, Edit3, FileDown, HandCoins, Printer, RotateCcw, Search, Send, Trash2, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReceiptTicket } from "@/components/receipt";
 import { AppBottomSheet, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
@@ -447,7 +447,26 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
   const handlePrintInvoice = async () => {
     if (!activeReceipt) return;
     await printingService.print(activeReceipt);
-    setActiveReceipt({ ...activeReceipt, printed: true });
+    setActiveReceipt(null);
+    setReceiptVisible(false);
+  };
+
+  const handleSaveInvoicePdf = async () => {
+    if (!activeReceipt) return;
+    try {
+      await printingService.savePdf(activeReceipt);
+    } catch (pdfError) {
+      Alert.alert("PDF failed", pdfError instanceof Error ? pdfError.message : "Unable to save invoice PDF.");
+    }
+  };
+
+  const handleShareInvoiceWhatsApp = async () => {
+    if (!activeReceipt) return;
+    try {
+      await printingService.sharePdfToWhatsApp(activeReceipt);
+    } catch (shareError) {
+      Alert.alert("Share failed", shareError instanceof Error ? shareError.message : "Unable to share invoice PDF.");
+    }
   };
 
   if (loading && !response) {
@@ -824,7 +843,11 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
             <View style={styles.modalHandle} />
             <View style={styles.receiptHeader}>
               <Text style={styles.sheetTitle}>Invoice Preview</Text>
-              <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void handlePrintInvoice()} style={styles.printButton} />
+              <View style={styles.receiptActions}>
+                <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void handleSaveInvoicePdf()} style={styles.printButton} />
+                <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void handleShareInvoiceWhatsApp()} style={styles.printButton} />
+                <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void handlePrintInvoice()} style={styles.printButton} />
+              </View>
             </View>
             <ScrollView
               style={styles.sheetScroller}
@@ -989,6 +1012,7 @@ const styles = StyleSheet.create({
   balanceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: colors.borderLighter, paddingTop: 10 },
   detailActions: { gap: 8 },
   receiptHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  receiptActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, flexShrink: 1 },
   printButton: { minHeight: 44, paddingHorizontal: 14 },
   totalCard: { alignItems: "center" },
   largeAmount: { color: colors.primary, fontSize: 28, fontWeight: "900", marginTop: 4 },

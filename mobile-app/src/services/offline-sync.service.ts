@@ -4,6 +4,7 @@ import { endpoints } from "@/api/endpoints";
 import { AppApiError } from "@/api/errors";
 import { getRequiredBusinessId } from "@/api/session";
 import { deviceService } from "@/services/device.service";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 import type { CreateExpensePayload } from "@/types/expense";
 import type { CreateSalePayload } from "@/types/sales";
 import type { ApiMutationPayload, SyncQueueItem, SyncResult } from "@/types/sync";
@@ -53,12 +54,29 @@ export const offlineSyncService = {
     for (const operation of operations) {
       const payload = operation.payload as ApiMutationPayload;
       try {
-        await api.request({
+        const response = await api.request({
           method: payload.method,
           url: payload.url,
           data: payload.data,
           params: payload.params
         });
+        if (
+          payload.method === "POST" &&
+          payload.url.includes("/customers") &&
+          payload.data &&
+          typeof payload.data === "object" &&
+          "phone" in payload.data &&
+          response.data &&
+          typeof response.data === "object" &&
+          "id" in response.data
+        ) {
+          const businessId = await getRequiredBusinessId();
+          await offlineDbService.replaceQueuedSaleCustomerByPhone(
+            businessId,
+            String((payload.data as { phone?: unknown }).phone ?? ""),
+            response.data as import("@/types/customer").ApiCustomer
+          );
+        }
         await offlineDbService.markSynced(operation.id);
         synced += 1;
       } catch (error) {
@@ -113,6 +131,9 @@ export const offlineSyncService = {
     for (const result of data.results) {
       if (result.status === "SYNCED" || result.status === "DUPLICATE_CONFIRMED") {
         await offlineDbService.markSynced(result.operationId);
+        if (result.type === "SALE_CREATE") {
+          dashboardEvents.notifySaleChanged();
+        }
         synced += 1;
       } else {
         await offlineDbService.markFailed(result.operationId, result.error ?? "Sync failed");

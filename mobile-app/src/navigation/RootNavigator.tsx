@@ -4,6 +4,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
 import { AppNavigator } from "./AppNavigator";
 import { AuthStack } from "./AuthStack";
+import { deviceNotificationsService } from "@/services/device-notifications.service";
 import { offlineSyncService } from "@/services/offline-sync.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors } from "@/theme";
@@ -22,6 +23,11 @@ export function RootNavigator() {
   useEffect(() => {
     if (!user) return undefined;
     return offlineSyncService.startAutoSync();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    return deviceNotificationsService.start(user.businessId, user.id);
   }, [user]);
 
   if (!hasRestored && isLoading) {

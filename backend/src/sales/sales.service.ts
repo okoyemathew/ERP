@@ -3,6 +3,8 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import {
   AuditAction,
@@ -48,16 +50,34 @@ type ReceiptLine = {
 };
 
 const RECEIPT_BUSINESS_NAME = 'EST JP MOTORS';
+const PENDING_SALE_TTL_MS = 48 * 60 * 60 * 1000;
 
 @Injectable()
-export class SalesService {
+export class SalesService implements OnModuleInit, OnModuleDestroy {
+  private pendingSaleCleanupTimer?: NodeJS.Timeout;
+
   constructor(private readonly prisma: PrismaService) {}
+
+  onModuleInit() {
+    this.pendingSaleCleanupTimer = setInterval(() => {
+      void this.clearExpiredPendingSales();
+    }, 60 * 60 * 1000);
+    this.pendingSaleCleanupTimer.unref?.();
+    void this.clearExpiredPendingSales();
+  }
+
+  onModuleDestroy() {
+    if (this.pendingSaleCleanupTimer) {
+      clearInterval(this.pendingSaleCleanupTimer);
+    }
+  }
 
   async create(
     businessId: string,
     dto: CreateSaleDto,
     user: AuthenticatedUser,
   ) {
+    await this.clearExpiredPendingSales(businessId);
     const seller = await this.getSellerStockScope(businessId, user);
     this.assertDiscountAllowed(dto.items ?? [], user);
     await this.assertCustomer(businessId, dto.customerId);
@@ -136,6 +156,7 @@ export class SalesService {
     query: SaleQueryDto = {},
     user?: AuthenticatedUser,
   ) {
+    await this.clearExpiredPendingSales(businessId);
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'saleDate';
@@ -160,6 +181,7 @@ export class SalesService {
   }
 
   async findOne(businessId: string, id: string, user?: AuthenticatedUser) {
+    await this.clearExpiredPendingSales(businessId);
     return this.getSaleOrThrow(businessId, id, this.prisma, user);
   }
 
@@ -185,6 +207,7 @@ export class SalesService {
   }
 
   async validateCart(businessId: string, id: string, user?: AuthenticatedUser) {
+    await this.clearExpiredPendingSales(businessId);
     const sale = await this.getSaleOrThrow(businessId, id, this.prisma, user);
     this.assertPending(sale.status);
     const issues = await this.cartIssues(businessId, sale.items, this.prisma);
@@ -301,6 +324,7 @@ export class SalesService {
     dto: UpdateSaleCustomerDto,
     user: AuthenticatedUser,
   ) {
+    await this.clearExpiredPendingSales(businessId);
     await this.getSellerStockScope(businessId, user);
     await this.assertCustomer(businessId, dto.customerId ?? undefined);
 
@@ -339,6 +363,7 @@ export class SalesService {
     dto: AddSaleItemDto,
     user: AuthenticatedUser,
   ) {
+    await this.clearExpiredPendingSales(businessId);
     const seller = await this.getSellerStockScope(businessId, user);
     this.assertDiscountAllowed([dto], user);
 
@@ -382,6 +407,7 @@ export class SalesService {
     saleItemId: string,
     user: AuthenticatedUser,
   ) {
+    await this.clearExpiredPendingSales(businessId);
     await this.getSellerStockScope(businessId, user);
 
     return this.prisma.$transaction(async (tx) => {
@@ -405,6 +431,7 @@ export class SalesService {
     dto: CompleteSaleDto,
     user: AuthenticatedUser,
   ) {
+    await this.clearExpiredPendingSales(businessId);
     const seller = await this.getSellerStockScope(businessId, user);
 
     return this.prisma.$transaction((tx) =>
@@ -413,6 +440,7 @@ export class SalesService {
   }
 
   async cancelPending(businessId: string, id: string, user: AuthenticatedUser) {
+    await this.clearExpiredPendingSales(businessId);
     if (
       ![SYSTEM_ROLES.OWNER, SYSTEM_ROLES.ADMIN, SYSTEM_ROLES.MANAGER].includes(
         user.roleName as never,
@@ -1716,6 +1744,27 @@ export class SalesService {
     return `${prefix}-${String(count + 1).padStart(6, '0')}`;
   }
 
+  private async clearExpiredPendingSales(
+    businessId?: string,
+    tx: Tx | PrismaService = this.prisma,
+  ) {
+    const now = new Date();
+    const expiresBefore = new Date(now.getTime() - PENDING_SALE_TTL_MS);
+
+    await tx.sale.updateMany({
+      where: {
+        ...(businessId ? { businessId } : {}),
+        status: SaleStatus.PENDING,
+        deletedAt: null,
+        createdAt: { lt: expiresBefore },
+      },
+      data: {
+        status: SaleStatus.CANCELLED,
+        deletedAt: now,
+      },
+    });
+  }
+
   private buildWhere(
     businessId: string,
     query: SaleQueryDto,
@@ -1725,13 +1774,71 @@ export class SalesService {
     const scopedUserId = this.canViewAllUserActivity(user)
       ? query.userId
       : user?.id;
+    const filters: Prisma.SaleWhereInput[] = [];
+
+    if (query.status === SaleStatus.REFUNDED) {
+      filters.push({
+        OR: [
+          { status: SaleStatus.REFUNDED },
+          {
+            productReturnRequests: {
+              some: { status: ProductReturnRequestStatus.APPROVED },
+            },
+          },
+        ],
+      });
+    } else if (query.status) {
+      filters.push({ status: query.status });
+    }
+
+    if (search) {
+      filters.push({
+        OR: [
+          {
+            saleNumber: {
+              contains: search,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          {
+            remarks: {
+              contains: search,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          {
+            customer: {
+              firstName: {
+                contains: search,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+          },
+          {
+            customer: {
+              lastName: {
+                contains: search,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+          },
+          {
+            customer: {
+              phone: {
+                contains: search,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+          },
+        ],
+      });
+    }
 
     return {
       businessId,
       deletedAt: null,
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(scopedUserId ? { userId: scopedUserId } : {}),
-      ...(query.status ? { status: query.status } : {}),
       ...(query.paymentStatus ? { paymentStatus: query.paymentStatus } : {}),
       ...(query.startDate || query.endDate
         ? {
@@ -1741,48 +1848,7 @@ export class SalesService {
             },
           }
         : {}),
-      ...(search
-        ? {
-            OR: [
-              {
-                saleNumber: {
-                  contains: search,
-                  mode: Prisma.QueryMode.insensitive,
-                },
-              },
-              {
-                remarks: {
-                  contains: search,
-                  mode: Prisma.QueryMode.insensitive,
-                },
-              },
-              {
-                customer: {
-                  firstName: {
-                    contains: search,
-                    mode: Prisma.QueryMode.insensitive,
-                  },
-                },
-              },
-              {
-                customer: {
-                  lastName: {
-                    contains: search,
-                    mode: Prisma.QueryMode.insensitive,
-                  },
-                },
-              },
-              {
-                customer: {
-                  phone: {
-                    contains: search,
-                    mode: Prisma.QueryMode.insensitive,
-                  },
-                },
-              },
-            ],
-          }
-        : {}),
+      ...(filters.length ? { AND: filters } : {}),
     };
   }
 

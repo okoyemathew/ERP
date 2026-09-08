@@ -1,5 +1,8 @@
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
+import { AppApiError } from "@/api/errors";
+import { getRequiredBusinessId } from "@/api/session";
+import { offlineDbService } from "@/services/offline-db.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import type { ApiSale, CreatePaymentPayload, CreateSalePayload, PrintReadyReceipt } from "@/types/sales";
 
@@ -46,9 +49,71 @@ function saleFallback(payload: CreateSalePayload, id = `sale-${Date.now().toStri
   };
 }
 
+function customerName(sale: ApiSale) {
+  return sale.customer
+    ? sale.customer.companyName ||
+        [sale.customer.firstName, sale.customer.lastName].filter(Boolean).join(" ")
+    : "Walk-in Customer";
+}
+
+function saleMatchesParams(sale: ApiSale, params: Record<string, string | number>) {
+  const status = params.status ? String(params.status).toUpperCase() : null;
+  const paymentStatus = params.paymentStatus ? String(params.paymentStatus).toUpperCase() : null;
+  const search = params.search ? String(params.search).trim().toLowerCase() : "";
+
+  if (status && sale.status.toUpperCase() !== status) return false;
+  if (paymentStatus && sale.paymentStatus.toUpperCase() !== paymentStatus) return false;
+  if (params.customerId && sale.customerId !== String(params.customerId)) return false;
+  if (params.userId && sale.userId !== String(params.userId)) return false;
+  if (params.startDate && new Date(sale.saleDate) < new Date(String(params.startDate))) return false;
+  if (params.endDate && new Date(sale.saleDate) > new Date(String(params.endDate))) return false;
+  if (!search) return true;
+
+  return [
+    sale.saleNumber,
+    customerName(sale),
+    sale.customer?.phone,
+    sale.user?.username,
+    sale.user?.firstName,
+    sale.user?.lastName,
+    ...sale.items.map((item) => item.product.name)
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(search));
+}
+
+async function queuedSalesForParams(params: Record<string, string | number> = {}) {
+  const businessId = await getRequiredBusinessId();
+  const limit = Number(params.limit ?? 50);
+  return (await offlineDbService.getQueuedOfflineSales(businessId))
+    .filter((sale) => saleMatchesParams(sale, params))
+    .slice(0, Number.isFinite(limit) && limit > 0 ? limit : 50);
+}
+
+function mergeSales(remoteSales: ApiSale[], queuedSales: ApiSale[]) {
+  const salesById = new Map<string, ApiSale>();
+  queuedSales.forEach((sale) => salesById.set(sale.id, sale));
+  remoteSales.forEach((sale) => salesById.set(sale.id, sale));
+  return Array.from(salesById.values()).sort((left, right) => new Date(right.saleDate).getTime() - new Date(left.saleDate).getTime());
+}
+
 export const salesService = {
   async list(params?: Record<string, string | number>): Promise<{ data: ApiSale[] }> {
-    const { data } = await api.get<{ data: ApiSale[] }>("/sales", { params });
+    const normalizedParams = params ?? {};
+    try {
+      const { data } = await api.get<{ data: ApiSale[] }>("/sales", { params: normalizedParams });
+      const queuedSales = await queuedSalesForParams(normalizedParams);
+      return { ...data, data: mergeSales(data.data, queuedSales) };
+    } catch (error) {
+      if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
+        return { data: await queuedSalesForParams(normalizedParams) };
+      }
+      throw error;
+    }
+  },
+
+  async detail(id: string): Promise<ApiSale> {
+    const { data } = await api.get<ApiSale>(`/sales/${id}`);
     return data;
   },
 

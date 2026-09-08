@@ -462,6 +462,13 @@ export class InventoryService {
 
       await this.applyCreditReturnAdjustment(businessId, request, dto, tx);
 
+      if (request.saleId) {
+        await tx.sale.update({
+          where: { id: request.saleId },
+          data: { status: SaleStatus.REFUNDED },
+        });
+      }
+
       const updated = await tx.productReturnRequest.update({
         where: { id: request.id },
         data: {
@@ -567,7 +574,7 @@ export class InventoryService {
         sale: {
           businessId,
           deletedAt: null,
-          status: SaleStatus.COMPLETED,
+          status: { in: [SaleStatus.COMPLETED, SaleStatus.REFUNDED] },
         },
       },
       include: {

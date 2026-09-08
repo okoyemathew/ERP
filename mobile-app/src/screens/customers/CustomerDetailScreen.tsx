@@ -4,17 +4,20 @@ import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
-import { Banknote, CreditCard, Pencil, Printer, RotateCcw, Smartphone, X } from "lucide-react-native";
+import { Banknote, CreditCard, FileDown, Pencil, Printer, RotateCcw, Send, Smartphone, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReceiptTicket } from "@/components/receipt";
 import { AppBottomSheet, Avatar, Badge, Button, Card, ErrorState, LoadingState, ScreenHeader } from "@/components/common";
+import { creditSalesService } from "@/services/credit-sales.service";
 import { customersService } from "@/services/customers.service";
 import { productsService } from "@/services/products.service";
 import { printingService } from "@/services/printing.service";
+import { useAuth } from "@/hooks/useAuth";
 import { colors } from "@/theme";
 import type { ReceiptDocument, SaleItem } from "@/types/domain.types";
 import type { CustomerCreditSale, CustomerPaymentMethod, CustomerPaymentHistoryItem, CustomerProfileResponse, CustomerSale } from "@/types/customer";
 import { customerDisplayName } from "@/types/customer";
+import type { ApiCreditSale } from "@/types/creditSale";
 import { formatCurrency } from "@/utils/format";
 
 type CustomerSaleItem = NonNullable<CustomerSale["items"]>[number];
@@ -50,9 +53,50 @@ function receiptMethodFromPayment(method: CustomerPaymentMethod): ReceiptDocumen
   return "cash";
 }
 
+function mapCreditSaleToCustomerCreditSale(creditSale: ApiCreditSale): CustomerCreditSale {
+  return {
+    id: creditSale.id,
+    totalCredit: creditSale.totalCredit,
+    amountPaid: creditSale.amountPaid,
+    balance: creditSale.balance,
+    status: creditSale.status,
+    createdAt: creditSale.createdAt,
+    sale: {
+      id: creditSale.sale.id,
+      saleNumber: creditSale.sale.saleNumber,
+      saleDate: creditSale.sale.saleDate,
+      totalAmount: creditSale.sale.totalAmount,
+      amountPaid: creditSale.sale.amountPaid,
+      balanceDue: creditSale.sale.balanceDue,
+      paymentStatus: creditSale.sale.paymentStatus,
+      items: creditSale.sale.items.map((item) => ({
+        id: item.id,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalAmount,
+        product: {
+          id: item.productId,
+          name: item.productName,
+          sku: item.sku
+        }
+      }))
+    },
+    payments: creditSale.payments?.map((payment) => ({
+      id: payment.id,
+      amount: payment.amount,
+      paymentMethod: payment.paymentMethod,
+      paymentDate: payment.paymentDate,
+      referenceNumber: payment.referenceNumber
+    })) ?? []
+  };
+}
+
 export function CustomerDetailScreen({ route, navigation }: { route: any; navigation: any }) {
   const insets = useSafeAreaInsets();
   const customerId = route.params?.customerId as string;
+  const user = useAuth((state) => state.user);
+  const roleName = user?.roleName?.trim();
+  const canUseFinancialCredit = Boolean(user?.permissions?.includes("credit-sales.manage") || roleName === "Owner" || roleName === "Admin" || (!roleName && user?.role === "owner"));
   const [profile, setProfile] = useState<CustomerProfileResponse | null>(null);
   const [purchases, setPurchases] = useState<CustomerSale[]>([]);
   const [payments, setPayments] = useState<CustomerPaymentHistoryItem[]>([]);
@@ -80,11 +124,19 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
     setLoading(true);
     setError(null);
     try {
+      const loadCreditHistory = async () => {
+        const loader = canUseFinancialCredit ? creditSalesService.customerCredit : creditSalesService.posCustomerCredit;
+        const response = await loader(customerId, { limit: 10 });
+        return {
+          data: response.data.map(mapCreditSaleToCustomerCreditSale),
+          meta: response.meta
+        };
+      };
       const [profileResponse, purchaseResponse, paymentResponse, creditResponse] = await Promise.all([
         customersService.profile(customerId),
         customersService.purchaseHistory(customerId, { limit: 10 }),
         customersService.paymentHistory(customerId, { limit: 10 }),
-        customersService.creditHistory(customerId, { limit: 10 }).catch(() => ({ data: [], meta: { page: 1, limit: 10, total: 0, totalPages: 0 } }))
+        loadCreditHistory()
       ]);
       setProfile(profileResponse);
       setPurchases(purchaseResponse.data);
@@ -95,7 +147,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
     } finally {
       setLoading(false);
     }
-  }, [customerId]);
+  }, [canUseFinancialCredit, customerId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -312,7 +364,26 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
   const handlePrintInvoice = async () => {
     if (!activeReceipt) return;
     await printingService.print(activeReceipt);
-    setActiveReceipt({ ...activeReceipt, printed: true });
+    setActiveReceipt(null);
+    setReceiptSheetVisible(false);
+  };
+
+  const handleSaveInvoicePdf = async () => {
+    if (!activeReceipt) return;
+    try {
+      await printingService.savePdf(activeReceipt);
+    } catch (pdfError) {
+      Alert.alert("PDF failed", pdfError instanceof Error ? pdfError.message : "Unable to save invoice PDF.");
+    }
+  };
+
+  const handleShareInvoiceWhatsApp = async () => {
+    if (!activeReceipt) return;
+    try {
+      await printingService.sharePdfToWhatsApp(activeReceipt);
+    } catch (shareError) {
+      Alert.alert("Share failed", shareError instanceof Error ? shareError.message : "Unable to share invoice PDF.");
+    }
   };
 
   if (loading && !profile) {
@@ -364,6 +435,9 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
               </View>
               <Badge label={credit.status} variant={money(credit.balance) <= 0 ? "success" : credit.status === "PARTIALLY_PAID" ? "warning" : "error"} />
             </View>
+            {credit.sale?.items?.length ? (
+              <Text style={styles.meta}>{credit.sale.items.map((item) => item.product?.name ?? "Product").join(", ")}</Text>
+            ) : null}
             <View style={styles.balanceRow}>
               <Text style={styles.meta}>Total credit</Text>
               <Text style={styles.balance}>{formatCurrency(money(credit.totalCredit))}</Text>
@@ -481,16 +555,20 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
         <View style={styles.receiptSheet}>
           <View style={styles.receiptHeader}>
             <Text style={styles.sheetTitle}>Invoice Preview</Text>
-            <Button
-              label="Print"
-              variant="ghost"
-              icon={<Printer size={16} color={colors.primary} />}
-              onPress={() => {
-                console.log("CUSTOMER_DETAIL_PRINT_SUBMIT_PRESSED", activeReceipt?.id);
-                void handlePrintInvoice();
-              }}
-              style={styles.printButton}
-            />
+            <View style={styles.receiptActions}>
+              <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void handleSaveInvoicePdf()} style={styles.printButton} />
+              <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void handleShareInvoiceWhatsApp()} style={styles.printButton} />
+              <Button
+                label="Print"
+                variant="ghost"
+                icon={<Printer size={16} color={colors.primary} />}
+                onPress={() => {
+                  console.log("CUSTOMER_DETAIL_PRINT_SUBMIT_PRESSED", activeReceipt?.id);
+                  void handlePrintInvoice();
+                }}
+                style={styles.printButton}
+              />
+            </View>
           </View>
           <BottomSheetScrollView
             style={styles.sheetScroller}
@@ -606,6 +684,7 @@ const styles = StyleSheet.create({
   returnProductBody: { flex: 1 },
   receiptHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   iconButton: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  receiptActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, flexShrink: 1 },
   printButton: { minHeight: 44, paddingHorizontal: 14 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "900" },
   totalCard: { alignItems: "center" },

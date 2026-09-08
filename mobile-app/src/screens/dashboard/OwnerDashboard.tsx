@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { Text } from "@/i18n";
 import { Bell, DollarSign, Package, ShoppingBag, ShoppingCart, TrendingUp, Users } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +11,7 @@ import { reportsService } from "@/services/reports.service";
 import { useAuth } from "@/hooks/useAuth";
 import { colors, spacing } from "@/theme";
 import type { DashboardStatistics, DashboardSummary } from "@/types/report";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 import { formatCurrency } from "@/utils/format";
 
 const quickActions = [
@@ -29,10 +31,14 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
   const [statistics, setStatistics] = useState<DashboardStatistics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
-  const load = useCallback(async () => {
-    if (!businessId) return;
-    setLoading(true);
+  const load = useCallback(async (showSpinner = !hasLoadedRef.current) => {
+    if (!businessId) {
+      setLoading(false);
+      return;
+    }
+    if (showSpinner) setLoading(true);
     setError(null);
     try {
       const [nextSummary, nextStatistics] = await Promise.all([
@@ -44,12 +50,21 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load dashboard.");
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
     }
   }, [businessId]);
 
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load])
+  );
+
   useEffect(() => {
-    void load();
+    return dashboardEvents.subscribe(() => {
+      void load(false);
+    });
   }, [load]);
 
   const chartData = useMemo(

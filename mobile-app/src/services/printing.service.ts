@@ -122,6 +122,64 @@ export const printingService = {
     return this.printText(text, receipt.title);
   },
 
+  async createPdf(receipt: ReceiptDocument) {
+    const text = this.buildReceiptText(receipt);
+    const file = await Print.printToFileAsync({
+      html: buildPdfHtml(text, receipt.title)
+    });
+    return { ...file, text };
+  },
+
+  async savePdf(receipt: ReceiptDocument) {
+    const file = await this.createPdf(receipt);
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(file.uri, {
+        dialogTitle: "Save or open PDF",
+        mimeType: "application/pdf",
+        UTI: "com.adobe.pdf"
+      });
+      return { ok: true, uri: file.uri, text: file.text };
+    }
+
+    await Share.share(
+      {
+        title: receipt.title,
+        message: file.text
+      },
+      Platform.OS === "android"
+        ? {
+            dialogTitle: "Save or share receipt"
+          }
+        : undefined
+    );
+    return { ok: true, uri: file.uri, text: file.text };
+  },
+
+  async sharePdfToWhatsApp(receipt: ReceiptDocument) {
+    const file = await this.createPdf(receipt);
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(file.uri, {
+        dialogTitle: "Share to WhatsApp",
+        mimeType: "application/pdf",
+        UTI: "com.adobe.pdf"
+      });
+      return { ok: true, uri: file.uri, text: file.text };
+    }
+
+    await Share.share(
+      {
+        title: receipt.title,
+        message: file.text
+      },
+      Platform.OS === "android"
+        ? {
+            dialogTitle: "Share to WhatsApp"
+          }
+        : undefined
+    );
+    return { ok: true, uri: file.uri, text: file.text };
+  },
+
   async printText(text: string, title = "Receipt") {
     const html = buildPdfHtml(text, title);
 

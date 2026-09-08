@@ -26,7 +26,8 @@
       "expo-font",
       "expo-secure-store",
       "expo-asset",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-notifications"
     ],
     "owner": "eruditecoder99"
   }

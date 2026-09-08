@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { CreditCard, Grid2X2, HandCoins, List, Minus, Package, Plus, Printer, Search, Trash2, Wallet } from "lucide-react-native";
+import { CreditCard, FileDown, Grid2X2, HandCoins, List, Minus, Package, Plus, Printer, Search, Send, Trash2, Wallet } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Button, Card } from "@/components/common";
@@ -25,6 +25,7 @@ import { customerDisplayName } from "@/types/customer";
 import { mapApiProductToDomain } from "@/types/product";
 import type { CreatePaymentPayload, CreateSalePayload, PosPaymentMethod } from "@/types/sales";
 import { mapReceiptToDocument, toApiPaymentMethod } from "@/types/sales";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 import { formatCurrency } from "@/utils/format";
 
 const paymentMethods: Array<{ label: string; value: PosPaymentMethod }> = [
@@ -392,6 +393,46 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     }
   };
 
+  const createPendingCustomer = async () => {
+    const customerName = trimmedReceiptCustomerName || trimmedNewCustomerName;
+    const customerPhone = trimmedReceiptCustomerPhone || trimmedNewCustomerPhone;
+    const rememberCustomer = (customer: ApiCustomer) => {
+      setCustomers((current) => {
+        if (current.some((item) => item.id === customer.id)) return current;
+        return [customer, ...current];
+      });
+      setSelectedCustomerId(customer.id);
+      return customer;
+    };
+    const findExistingPendingCustomer = async () => {
+      const targetPhone = normalizeCustomerPhone(customerPhone);
+      const cachedMatch = customers.find((customer) => normalizeCustomerPhone(customer.phone) === targetPhone);
+      if (cachedMatch) return cachedMatch;
+
+      try {
+        const response = await customersService.search(customerPhone, { limit: 10, isActive: true });
+        return response.data.find((customer) => normalizeCustomerPhone(customer.phone) === targetPhone);
+      } catch (error) {
+        if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) return undefined;
+        throw error;
+      }
+    };
+
+    const existingCustomer = await findExistingPendingCustomer();
+    if (existingCustomer) return rememberCustomer(existingCustomer);
+
+    const [firstName, ...lastNameParts] = customerName.split(/\s+/);
+    const customer = await customersService.create({
+      firstName,
+      lastName: lastNameParts.join(" ") || undefined,
+      phone: customerPhone,
+      creditLimit: 0,
+      outstandingBalance: 0,
+      notes: "Created from POS pending sale"
+    });
+    return rememberCustomer(customer);
+  };
+
   const openReceipt = (receipt: ReceiptDocument) => {
     setActiveReceipt(receipt);
     setReceiptVisible(true);
@@ -597,6 +638,60 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     updateProductQty(product, nextQty);
   };
 
+  const handleSavePendingSale = async () => {
+    if (cartItems.length === 0) return;
+    if (Number.isNaN(discountAmount) || Number.isNaN(taxAmount)) {
+      Alert.alert("Check amounts", "Discount and tax must be valid numbers.");
+      return;
+    }
+    if (discountAmount > cartSubtotal) {
+      Alert.alert("Check discount", "Discount cannot exceed the subtotal.");
+      return;
+    }
+    if (!selectedCustomer && (!(trimmedReceiptCustomerName || trimmedNewCustomerName) || !(trimmedReceiptCustomerPhone || trimmedNewCustomerPhone))) {
+      Alert.alert("Pending sale", "Enter the customer's name and phone number before saving the cart as pending.");
+      return;
+    }
+
+    setProcessingSale(true);
+    try {
+      if (!(await offlineSyncService.isOnline())) {
+        Alert.alert("Pending sale", "Connect to the internet before saving a pending sale.");
+        return;
+      }
+
+      const checkoutCustomer = selectedCustomer ?? await createPendingCustomer();
+      const saleItems = cartItems.map((item) => {
+        const lineSubtotal = item.qty * item.price;
+        return {
+          productId: item.productId,
+          quantity: item.qty,
+          unitPrice: item.price,
+          discountAmount: distributeAmount(discountAmount, lineSubtotal),
+          taxAmount: distributeAmount(taxAmount, lineSubtotal)
+        };
+      });
+
+      await salesService.create({
+        customerId: checkoutCustomer.id,
+        items: saleItems,
+        payments: [],
+        remarks: "Pending sale - auto-clears after 48 hours"
+      });
+
+      dashboardEvents.notifySaleChanged();
+      clearCart();
+      await loadProducts();
+      await loadCreditInvoices();
+      Alert.alert("Pending sale saved", "The selected products were saved under Sales Records > Pending.");
+    } catch (pendingError) {
+      const message = pendingError instanceof Error ? pendingError.message : "Unable to save pending sale.";
+      Alert.alert("Pending sale failed", message);
+    } finally {
+      setProcessingSale(false);
+    }
+  };
+
   const handleCheckout = async () => {
     if (cartItems.length === 0) return;
     if (Number.isNaN(discountAmount) || Number.isNaN(taxAmount) || Number.isNaN(paidAmount)) {
@@ -701,6 +796,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         setNewCustomerPhone("");
         setReceiptCustomerName("");
         setReceiptCustomerPhone("");
+        setQuantityInputs({});
         setCheckoutVisible(false);
         if (refreshCreditInvoices) {
           await loadCreditInvoices();
@@ -710,6 +806,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       const queueOfflineSale = async () => {
         const queued = await offlineSyncService.enqueueSale(salePayload);
         const offlineReceipt = buildOfflineReceipt(queued.id);
+        dashboardEvents.notifySaleChanged();
         await clearCheckout(false);
         await loadProducts();
         setPrintText(null);
@@ -723,6 +820,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       }
 
       const sale = await salesService.create(salePayload);
+      dashboardEvents.notifySaleChanged();
       const receipt = await salesService.receipt(sale.id);
       const printReady = sale.receipt?.id ? await salesService.printReceipt(sale.receipt.id) : null;
       setPrintText(printReady?.text ?? null);
@@ -765,6 +863,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
             remarks: paymentMethod === "credit" ? "Credit sale" : undefined
           });
           const offlineReceipt = buildOfflineReceipt(queued.id);
+          dashboardEvents.notifySaleChanged();
           if (role === "owner") ownerCart.clearCart();
           else employeeCart.clearCart();
           setPaidInput("");
@@ -776,6 +875,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           setNewCustomerPhone("");
           setReceiptCustomerName("");
           setReceiptCustomerPhone("");
+          setQuantityInputs({});
           setCheckoutVisible(false);
           await loadProducts();
           setPrintText(null);
@@ -868,7 +968,29 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     } else {
       await printingService.print(activeReceipt);
     }
-    setActiveReceipt({ ...activeReceipt, printed: true });
+    setActiveReceipt(null);
+    setPrintText(null);
+    setReceiptVisible(false);
+  };
+
+  const handleSavePdf = async () => {
+    if (!activeReceipt) return;
+    try {
+      await printingService.savePdf(activeReceipt);
+    } catch (pdfError) {
+      const message = pdfError instanceof Error ? pdfError.message : "Unable to save receipt PDF.";
+      Alert.alert("PDF failed", message);
+    }
+  };
+
+  const handleShareWhatsApp = async () => {
+    if (!activeReceipt) return;
+    try {
+      await printingService.sharePdfToWhatsApp(activeReceipt);
+    } catch (shareError) {
+      const message = shareError instanceof Error ? shareError.message : "Unable to share receipt PDF.";
+      Alert.alert("Share failed", message);
+    }
   };
 
   const handleAddSalePress = () => {
@@ -1153,7 +1275,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
             </Card>
             <View style={styles.checkoutActions}>
               <Button label={paymentMethod === "credit" ? "Confirm Credit Sale" : "Confirm Payment"} loading={processingSale} onPress={() => void handleCheckout()} />
-              <Button label="Clear Cart" variant="danger" icon={<Trash2 size={16} color={colors.error} />} onPress={clearCart} />
+              <Button label="Save Pending" variant="ghost" loading={processingSale} onPress={() => void handleSavePendingSale()} />
+              <Button label="Clear Cart" variant="danger" icon={<Trash2 size={16} color={colors.error} />} disabled={processingSale} onPress={clearCart} />
             </View>
             {needsCreditCustomer ? (
               <View style={styles.section}>
@@ -1248,7 +1371,11 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         <View style={styles.sheet}>
           <View style={styles.receiptHeader}>
             <Text style={styles.sheetTitle}>Receipt Preview</Text>
-            <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={handlePrint} style={styles.printButton} />
+            <View style={styles.receiptActions}>
+              <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void handleSavePdf()} style={styles.printButton} />
+              <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void handleShareWhatsApp()} style={styles.printButton} />
+              <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={handlePrint} style={styles.printButton} />
+            </View>
           </View>
           <BottomSheetScrollView
             style={styles.sheetScroller}
@@ -1466,5 +1593,6 @@ const styles = StyleSheet.create({
   quickText: { color: colors.primary, fontSize: 12, fontWeight: "900" },
   amountInput: { minHeight: 52, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, paddingHorizontal: 14, color: colors.foreground, fontSize: 20, fontWeight: "900" },
   receiptHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  receiptActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, flexShrink: 1 },
   printButton: { minHeight: 44, paddingHorizontal: 14 }
 });

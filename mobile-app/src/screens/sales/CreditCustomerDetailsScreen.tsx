@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
-import { Banknote, CreditCard, FileText, Phone, Printer, RotateCcw, Smartphone, X } from "lucide-react-native";
+import { Banknote, CreditCard, FileDown, FileText, Phone, Printer, RotateCcw, Send, Smartphone, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReceiptTicket } from "@/components/receipt";
 import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader } from "@/components/common";
@@ -202,6 +202,32 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
     setReturnRemarks("");
   };
 
+  const openReturnForCreditSale = async (creditSale: ApiCreditSale) => {
+    console.log("CREDIT_CUSTOMER_RETURN_PRODUCT_PRESSED", creditSale.id, creditSale.sale.saleNumber);
+    try {
+      const returnableCreditSale = creditSale.sale.items.length > 0
+        ? creditSale
+        : await creditSalesService.detail(creditSale.id);
+
+      setSelectedCredit(returnableCreditSale);
+
+      if (returnableCreditSale.sale.items.length === 0) {
+        Alert.alert("Return unavailable", "No products were found on this credit invoice.");
+        return;
+      }
+
+      if (returnableCreditSale.sale.items.length === 1) {
+        setDetailVisible(false);
+        openReturnForm(returnableCreditSale.sale.items[0]);
+        return;
+      }
+
+      setDetailVisible(true);
+    } catch (error) {
+      Alert.alert("Return unavailable", error instanceof Error ? error.message : "Unable to load invoice products.");
+    }
+  };
+
   const closeReturnForm = () => {
     if (returnSubmitting) return;
     setReturnItem(null);
@@ -297,7 +323,26 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
   const printInvoice = async () => {
     if (!activeReceipt) return;
     await printingService.print(activeReceipt);
-    setActiveReceipt({ ...activeReceipt, printed: true });
+    setActiveReceipt(null);
+    setReceiptVisible(false);
+  };
+
+  const saveInvoicePdf = async () => {
+    if (!activeReceipt) return;
+    try {
+      await printingService.savePdf(activeReceipt);
+    } catch (pdfError) {
+      Alert.alert("PDF failed", pdfError instanceof Error ? pdfError.message : "Unable to save invoice PDF.");
+    }
+  };
+
+  const shareInvoiceWhatsApp = async () => {
+    if (!activeReceipt) return;
+    try {
+      await printingService.sharePdfToWhatsApp(activeReceipt);
+    } catch (shareError) {
+      Alert.alert("Share failed", shareError instanceof Error ? shareError.message : "Unable to share invoice PDF.");
+    }
   };
 
   if (loading && !response) {
@@ -376,6 +421,7 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
               </Pressable>
               <View style={styles.actions}>
                 <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void openInvoice(creditSale)} />
+                <Button label="Return Product" variant="ghost" icon={<RotateCcw size={16} color={colors.primary} />} onPress={() => void openReturnForCreditSale(creditSale)} />
                 {totals.balance > 0 ? <Button label="Record Payment" variant="success" onPress={() => openPayment(creditSale)} /> : null}
               </View>
             </View>
@@ -579,7 +625,11 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
             <View style={styles.handle} />
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>Invoice Preview</Text>
-              <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printInvoice()} style={styles.printButton} />
+              <View style={styles.receiptActions}>
+                <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void saveInvoicePdf()} style={styles.printButton} />
+                <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void shareInvoiceWhatsApp()} style={styles.printButton} />
+                <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printInvoice()} style={styles.printButton} />
+              </View>
             </View>
             <ScrollView
               contentContainerStyle={{ paddingBottom: modalBottomPadding }}
@@ -641,6 +691,7 @@ const styles = StyleSheet.create({
   lineRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   productReturnActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   iconButton: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  receiptActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, flexShrink: 1 },
   printButton: { minHeight: 44, paddingHorizontal: 14 },
   largeAmount: { color: colors.primary, fontSize: 28, fontWeight: "900", marginTop: 4 },
   amountInput: { minHeight: 52, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, paddingHorizontal: 14, color: colors.foreground, fontSize: 18, fontWeight: "900" },

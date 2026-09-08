@@ -3,9 +3,13 @@ import type { ApiCustomer } from "@/types/customer";
 import type { ApiExpense, CreateExpensePayload, ExpenseCategory } from "@/types/expense";
 import type { ApiProduct, ProductReturnRequest } from "@/types/product";
 import type { ApiMutationPayload, SyncPayload, SyncQueueItem, SyncOperationType, SyncQueueStatus } from "@/types/sync";
-import type { CreateSalePayload } from "@/types/sales";
+import type { ApiSale, CreateSalePayload } from "@/types/sales";
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+
+function normalizePhone(phone?: string | null) {
+  return (phone ?? "").replace(/\D/g, "") || (phone ?? "").trim().toLowerCase();
+}
 
 async function getDb() {
   if (!dbPromise) {
@@ -132,6 +136,41 @@ export const offlineDbService = {
     await db.runAsync("DELETE FROM customer_cache WHERE businessId = ? AND id = ?", businessId, customerId);
   },
 
+  async replaceQueuedSaleCustomerByPhone(businessId: string, phone: string, serverCustomer: ApiCustomer) {
+    const db = await getDb();
+    const targetPhone = normalizePhone(phone);
+    const localCustomers = (await this.getCachedCustomers(businessId)).filter((customer) => normalizePhone(customer.phone) === targetPhone);
+    if (localCustomers.length === 0) {
+      await this.cacheCustomer(businessId, serverCustomer);
+      return;
+    }
+
+    const localCustomerIds = new Set(localCustomers.map((customer) => customer.id));
+    const rows = await db.getAllAsync<{ id: string; payload: string }>(
+      "SELECT id, payload FROM sync_queue WHERE type = 'SALE_CREATE' AND status IN ('PENDING', 'FAILED', 'SYNCING')"
+    );
+    const updatedAt = new Date().toISOString();
+
+    for (const row of rows) {
+      const payload = JSON.parse(row.payload) as CreateSalePayload;
+      if (!payload.customerId || !localCustomerIds.has(payload.customerId)) continue;
+
+      await db.runAsync(
+        "UPDATE sync_queue SET payload = ?, updatedAt = ? WHERE id = ?",
+        JSON.stringify({ ...payload, customerId: serverCustomer.id }),
+        updatedAt,
+        row.id
+      );
+    }
+
+    await this.cacheCustomer(businessId, serverCustomer);
+    for (const localCustomer of localCustomers) {
+      if (localCustomer.id !== serverCustomer.id) {
+        await this.removeCachedCustomer(businessId, localCustomer.id);
+      }
+    }
+  },
+
   async cacheExpenses(businessId: string, expenses: ApiExpense[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
@@ -212,6 +251,97 @@ export const offlineDbService = {
       businessId
     );
     return rows.map((row) => JSON.parse(row.payload) as ProductReturnRequest);
+  },
+
+  async getQueuedOfflineSales(businessId: string): Promise<ApiSale[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{
+      id: string;
+      payload: string;
+      status: SyncQueueStatus;
+      createdAt: string;
+      updatedAt: string;
+    }>(
+      "SELECT id, payload, status, createdAt, updatedAt FROM sync_queue WHERE type = 'SALE_CREATE' AND status IN ('PENDING', 'FAILED', 'SYNCING') ORDER BY createdAt DESC"
+    );
+    const [customers, products] = await Promise.all([
+      this.getCachedCustomers(businessId),
+      this.getCachedProducts(businessId)
+    ]);
+    const customersById = new Map(customers.map((customer) => [customer.id, customer]));
+    const productsById = new Map(products.map((product) => [product.id, product]));
+
+    return rows.map((row) => {
+      const payload = JSON.parse(row.payload) as CreateSalePayload;
+      const items = payload.items ?? [];
+      const payments = payload.payments ?? [];
+      const subtotal = items.reduce((sum, item) => sum + item.quantity * Number(item.unitPrice ?? 0), 0);
+      const discountAmount = items.reduce((sum, item) => sum + Number(item.discountAmount ?? 0), 0);
+      const taxAmount = items.reduce((sum, item) => sum + Number(item.taxAmount ?? 0), 0);
+      const totalAmount = Math.max(0, subtotal - discountAmount + taxAmount);
+      const nonCreditPaid = payments
+        .filter((payment) => payment.paymentMethod !== "CREDIT")
+        .reduce((sum, payment) => sum + payment.amount, 0);
+      const amountPaid = Math.min(totalAmount, nonCreditPaid);
+      const balanceDue = Math.max(0, totalAmount - amountPaid);
+      const customer = payload.customerId ? customersById.get(payload.customerId) : null;
+      const saleNumber = `OFF-${row.id.slice(-8).toUpperCase()}`;
+
+      return {
+        id: row.id,
+        localSyncStatus: row.status,
+        saleNumber,
+        customerId: payload.customerId ?? null,
+        userId: "offline-user",
+        subtotal,
+        discountAmount,
+        taxAmount,
+        totalAmount,
+        amountPaid,
+        balanceDue,
+        paymentStatus: amountPaid >= totalAmount ? "PAID" : amountPaid > 0 ? "PARTIAL" : "UNPAID",
+        status: payments.length > 0 ? "COMPLETED" : "PENDING",
+        saleDate: row.createdAt,
+        customer: customer ?? null,
+        user: {
+          id: "offline-user",
+          firstName: "Offline",
+          lastName: "Sale",
+          username: "offline"
+        },
+        items: items.map((item, index) => {
+          const product = productsById.get(item.productId);
+          const unitPrice = Number(item.unitPrice ?? product?.sellingPrice ?? 0);
+          const lineDiscount = Number(item.discountAmount ?? 0);
+          const lineTax = Number(item.taxAmount ?? 0);
+          return {
+            id: `${row.id}-item-${index}`,
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice,
+            discountAmount: lineDiscount,
+            taxAmount: lineTax,
+            totalAmount: Math.max(0, item.quantity * unitPrice - lineDiscount + lineTax),
+            product: {
+              id: item.productId,
+              name: product?.name ?? "Product",
+              sku: product?.sku ?? null,
+              barcode: product?.barcode ?? null
+            }
+          };
+        }),
+        payments: payments.map((payment, index) => ({
+          id: `${row.id}-payment-${index}`,
+          paymentMethod: payment.paymentMethod,
+          amount: payment.amount,
+          referenceNumber: payment.referenceNumber ?? null,
+          paymentDate: row.createdAt
+        })),
+        receipt: payments.length > 0
+          ? { id: row.id, receiptNumber: saleNumber }
+          : null
+      };
+    });
   },
 
   async applySaleToCachedProducts(businessId: string, items: CreateSalePayload["items"]) {

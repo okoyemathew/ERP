@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { Text } from "@/i18n";
 import { Bell, DollarSign, HandCoins, Receipt, ShoppingBag, ShoppingCart, TrendingUp, Truck, Users } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +11,7 @@ import { salesService } from "@/services/sales.service";
 import { useAuth } from "@/hooks/useAuth";
 import { colors, spacing } from "@/theme";
 import type { ApiSale } from "@/types/sales";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 import { formatCurrency } from "@/utils/format";
 
 const quickActions = [
@@ -66,8 +68,9 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
   const [recentSales, setRecentSales] = useState<ApiSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (showSpinner = !hasLoadedRef.current) => {
     if (!businessId || !user?.id) {
       setLoading(false);
       return;
@@ -80,7 +83,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
     const weekStart = new Date(todayStart);
     weekStart.setDate(todayStart.getDate() - 6);
 
-    setLoading(true);
+    if (showSpinner) setLoading(true);
     setError(null);
     try {
       const [nextTodaySales, nextWeeklySales, nextRecentSales] = await Promise.all([
@@ -111,12 +114,21 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load dashboard.");
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
     }
   }, [businessId, user?.id]);
 
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load])
+  );
+
   useEffect(() => {
-    void load();
+    return dashboardEvents.subscribe(() => {
+      void load(false);
+    });
   }, [load]);
 
   const chartData = useMemo(() => buildChartData(weeklySales), [weeklySales]);

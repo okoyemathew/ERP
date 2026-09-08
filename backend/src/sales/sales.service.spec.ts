@@ -5,6 +5,7 @@ import {
   CashTransactionType,
   PaymentStatus,
   Prisma,
+  ProductReturnRequestStatus,
   SaleStatus,
 } from '@prisma/client';
 import { SalesService } from './sales.service';
@@ -76,6 +77,7 @@ function createPrismaMock() {
       count: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
     },
@@ -181,6 +183,34 @@ describe('SalesService authenticated ownership', () => {
     );
   });
 
+  it('clears pending sale holds older than 48 hours before listing sales', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-30T10:00:00.000Z'));
+    const prisma = createPrismaMock();
+    const service = new SalesService(prisma as never);
+
+    prisma.sale.count.mockResolvedValue(0);
+    prisma.sale.findMany.mockResolvedValue([]);
+
+    try {
+      await service.findAll(businessId, { status: SaleStatus.PENDING } as never, authUser);
+
+      expect(prisma.sale.updateMany).toHaveBeenCalledWith({
+        where: {
+          businessId,
+          status: SaleStatus.PENDING,
+          deletedAt: null,
+          createdAt: { lt: new Date('2026-08-28T10:00:00.000Z') },
+        },
+        data: {
+          status: SaleStatus.CANCELLED,
+          deletedAt: new Date('2026-08-30T10:00:00.000Z'),
+        },
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('allows owners to view all sales or filter by a selected user', async () => {
     const prisma = createPrismaMock();
     const service = new SalesService(prisma as never);
@@ -205,6 +235,41 @@ describe('SalesService authenticated ownership', () => {
         where: expect.objectContaining({
           businessId,
           userId: spoofedUserId,
+        }),
+      }),
+    );
+  });
+
+  it('lists approved product returns under refunded sales', async () => {
+    const prisma = createPrismaMock();
+    const service = new SalesService(prisma as never);
+
+    prisma.sale.count.mockResolvedValue(0);
+    prisma.sale.findMany.mockResolvedValue([]);
+
+    await service.findAll(
+      businessId,
+      { status: SaleStatus.REFUNDED } as never,
+      authUser,
+    );
+
+    expect(prisma.sale.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessId,
+          userId: employeeUserId,
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              OR: expect.arrayContaining([
+                { status: SaleStatus.REFUNDED },
+                {
+                  productReturnRequests: {
+                    some: { status: ProductReturnRequestStatus.APPROVED },
+                  },
+                },
+              ]),
+            }),
+          ]),
         }),
       }),
     );
