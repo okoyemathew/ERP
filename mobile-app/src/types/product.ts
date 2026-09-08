@@ -67,6 +67,39 @@ export interface ProductAddedBy {
   firstName: string;
   lastName: string;
   username: string;
+  role?: { name: string } | null;
+}
+
+export interface ProductReturnCustomer {
+  id: string;
+  firstName: string;
+  lastName?: string | null;
+  companyName?: string | null;
+  phone?: string | null;
+}
+
+export interface ProductReturnSale {
+  id: string;
+  saleNumber: string;
+  saleDate: string;
+  customerId?: string | null;
+  userId: string;
+}
+
+export interface ProductReturnSaleItem {
+  id: string;
+  quantity: number;
+  unitPrice: string | number;
+  totalAmount: string | number;
+}
+
+export interface ProductReturnCreditSale {
+  id: string;
+  totalCredit: string | number;
+  amountPaid: string | number;
+  balance: string | number;
+  dueDate?: string | null;
+  status: string;
 }
 
 export interface ApiProduct {
@@ -113,6 +146,11 @@ export interface ProductReturnRequest {
   id: string;
   businessId: string;
   productId: string;
+  saleId?: string | null;
+  saleItemId?: string | null;
+  creditSaleId?: string | null;
+  customerId?: string | null;
+  originalSellerId?: string | null;
   requestedById: string;
   reviewedById?: string | null;
   quantity: number;
@@ -129,6 +167,11 @@ export interface ProductReturnRequest {
   product?: Pick<ApiProduct, "id" | "name" | "sku" | "barcode">;
   requestedBy?: ProductAddedBy;
   reviewedBy?: ProductAddedBy | null;
+  originalSeller?: ProductAddedBy | null;
+  customer?: ProductReturnCustomer | null;
+  sale?: ProductReturnSale | null;
+  saleItem?: ProductReturnSaleItem | null;
+  creditSale?: ProductReturnCreditSale | null;
 }
 
 export interface ProductReturnRequestListResponse {
@@ -138,6 +181,7 @@ export interface ProductReturnRequestListResponse {
 
 export interface ProductReturnRequestPayload {
   productId: string;
+  saleItemId?: string;
   quantity: number;
   unitCost?: number;
   referenceNumber?: string;

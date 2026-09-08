@@ -7,11 +7,17 @@ import {
 import {
   AdjustmentType,
   AuditAction,
+  CreditSaleStatus,
   InventoryTransactionType,
+  NotificationType,
   Prisma,
   ProductReturnRequestStatus,
+  SaleStatus,
 } from '@prisma/client';
-import { ADMIN_ROLE_NAMES } from '../auth/constants/roles.constant';
+import {
+  SYSTEM_ROLES,
+  normalizeSystemRoleName,
+} from '../auth/constants/roles.constant';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductReturnRequestDto } from './dto/create-product-return-request.dto';
@@ -243,19 +249,62 @@ export class InventoryService {
     );
 
     return this.prisma.$transaction(async (tx) => {
+      const saleItem = await this.getReturnableSaleItemOrThrow(
+        businessId,
+        dto,
+        tx,
+      );
+
+      if (saleItem.sale.userId !== user.id) {
+        throw new ForbiddenException(
+          'Only the original seller can initiate this product return',
+        );
+      }
+
+      const returned = await tx.productReturnRequest.aggregate({
+        where: {
+          businessId,
+          saleItemId: saleItem.id,
+          status: {
+            in: [
+              ProductReturnRequestStatus.PENDING,
+              ProductReturnRequestStatus.APPROVED,
+            ],
+          },
+        },
+        _sum: { quantity: true },
+      });
+      const remainingReturnable =
+        saleItem.quantity - (returned._sum.quantity ?? 0);
+
+      if (dto.quantity > remainingReturnable) {
+        throw new BadRequestException(
+          `Only ${Math.max(0, remainingReturnable)} unit(s) remain returnable for this sale item`,
+        );
+      }
+
       const request = await tx.productReturnRequest.create({
         data: {
           businessId,
-          productId: dto.productId,
+          productId: saleItem.productId,
+          saleId: saleItem.saleId,
+          saleItemId: saleItem.id,
+          creditSaleId: saleItem.sale.creditSale?.id ?? null,
+          customerId: saleItem.sale.customerId,
+          originalSellerId: saleItem.sale.userId,
           requestedById: user.id,
           quantity: dto.quantity,
-          unitCost: dto.unitCost ?? null,
-          referenceNumber: dto.referenceNumber ?? null,
+          unitCost: dto.unitCost ?? saleItem.unitPrice,
+          referenceNumber: dto.referenceNumber ?? saleItem.sale.saleNumber,
           remarks: dto.remarks ?? null,
           status: ProductReturnRequestStatus.PENDING,
         },
         include: this.returnRequestInclude(),
       });
+
+      if (!this.isOwnerUser(saleItem.sale.user)) {
+        await this.notifyOwnersOfReturnRequest(businessId, request, tx);
+      }
 
       await tx.auditLog.create({
         data: {
@@ -264,7 +313,7 @@ export class InventoryService {
           action: AuditAction.CREATE,
           entity: 'ProductReturnRequest',
           entityId: request.id,
-          description: `Requested return of ${dto.quantity} unit(s) for product ${dto.productId}`,
+          description: `Requested return of ${dto.quantity} unit(s) for ${saleItem.product.name} from sale ${saleItem.sale.saleNumber}`,
           deviceId: dto.deviceId ?? null,
         },
       });
@@ -281,15 +330,19 @@ export class InventoryService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const search = query.search?.trim();
-    const where: Prisma.ProductReturnRequestWhereInput = {
-      businessId,
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.productId ? { productId: query.productId } : {}),
-      ...(this.canViewAllReturnRequests(user)
+    const accessWhere: Prisma.ProductReturnRequestWhereInput =
+      this.canViewAllReturnRequests(user)
         ? query.requestedById
           ? { requestedById: query.requestedById }
           : {}
-        : { requestedById: user.id }),
+        : {
+            OR: [{ requestedById: user.id }, { originalSellerId: user.id }],
+          };
+    const where: Prisma.ProductReturnRequestWhereInput = {
+      businessId,
+      ...(Object.keys(accessWhere).length ? { AND: [accessWhere] } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.productId ? { productId: query.productId } : {}),
       ...(query.startDate || query.endDate
         ? {
             requestedAt: {
@@ -318,6 +371,42 @@ export class InventoryService {
               {
                 requestedBy: {
                   lastName: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                originalSeller: {
+                  username: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                originalSeller: {
+                  firstName: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                originalSeller: {
+                  lastName: { contains: search, mode: 'insensitive' },
+                },
+              },
+              { sale: { saleNumber: { contains: search, mode: 'insensitive' } } },
+              {
+                customer: {
+                  firstName: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                customer: {
+                  lastName: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                customer: {
+                  companyName: { contains: search, mode: 'insensitive' },
+                },
+              },
+              {
+                customer: {
+                  phone: { contains: search, mode: 'insensitive' },
                 },
               },
             ],
@@ -361,50 +450,16 @@ export class InventoryService {
         id,
         tx,
       );
-      const inventory = await tx.inventory.findFirst({
-        where: { businessId, productId: request.productId },
-      });
-
-      if (!inventory) {
-        throw new NotFoundException(
-          'Inventory record not found for this product',
-        );
-      }
-
-      const quantityBefore = inventory.quantityAvailable;
-      const quantityAfter = quantityBefore + request.quantity;
-      const updatedInventory = await tx.inventory.update({
-        where: { id: inventory.id },
-        data: {
-          quantityOnHand: inventory.quantityOnHand + request.quantity,
-          quantityReserved: inventory.quantityReserved,
-          quantityAvailable: quantityAfter,
-          lastStockUpdate: new Date(),
-          averageCost: request.unitCost ?? inventory.averageCost ?? null,
-          syncVersion: (inventory.syncVersion ?? 1) + 1,
-          isSynced: true,
-          deviceId: dto.deviceId ?? inventory.deviceId,
-        },
-      });
-
-      const transaction =
-        await this.inventoryTransactionService.createTransaction(
-          {
+      const transaction = this.shouldReturnToMainInventory(request)
+        ? await this.applyApprovedReturnToMainInventory(
             businessId,
-            inventoryId: updatedInventory.id,
-            productId: request.productId,
-            transactionType: InventoryTransactionType.RETURN,
-            quantity: request.quantity,
-            quantityBefore,
-            quantityAfter,
-            unitCost: request.unitCost ? request.unitCost.toNumber() : null,
-            referenceNumber: request.referenceNumber ?? `RETURN:${request.id}`,
-            remarks: request.remarks ?? 'Approved returned stock',
-            transactionDate: new Date(),
-            deviceId: dto.deviceId ?? null,
-          },
-          tx,
-        );
+            request,
+            dto,
+            tx,
+          )
+        : null;
+
+      await this.applyCreditReturnAdjustment(businessId, request, dto, tx);
 
       const updated = await tx.productReturnRequest.update({
         where: { id: request.id },
@@ -413,10 +468,22 @@ export class InventoryService {
           reviewedById: user.id,
           reviewedAt: new Date(),
           decisionNote: dto.note ?? null,
-          inventoryTransactionId: transaction.id,
+          inventoryTransactionId: transaction?.id ?? null,
         },
         include: this.returnRequestInclude(),
       });
+
+      if (request.requestedById !== user.id) {
+        await tx.notification.create({
+          data: {
+            businessId,
+            userId: request.requestedById,
+            title: 'Return approved',
+            message: `Return request for ${request.product.name} from ${request.sale?.saleNumber ?? request.referenceNumber ?? request.id} was approved.`,
+            type: NotificationType.SUCCESS,
+          },
+        });
+      }
 
       await tx.auditLog.create({
         data: {
@@ -459,6 +526,18 @@ export class InventoryService {
         include: this.returnRequestInclude(),
       });
 
+      if (request.requestedById !== user.id) {
+        await tx.notification.create({
+          data: {
+            businessId,
+            userId: request.requestedById,
+            title: 'Return rejected',
+            message: `Return request for ${request.product.name} from ${request.sale?.saleNumber ?? request.referenceNumber ?? request.id} was rejected.`,
+            type: NotificationType.WARNING,
+          },
+        });
+      }
+
       await tx.auditLog.create({
         data: {
           businessId,
@@ -473,6 +552,256 @@ export class InventoryService {
 
       return updated;
     });
+  }
+
+  private async getReturnableSaleItemOrThrow(
+    businessId: string,
+    dto: CreateProductReturnRequestDto,
+    tx: Prisma.TransactionClient,
+  ) {
+    const saleItem = await tx.saleItem.findFirst({
+      where: {
+        id: dto.saleItemId,
+        productId: dto.productId,
+        sale: {
+          businessId,
+          deletedAt: null,
+          status: SaleStatus.COMPLETED,
+        },
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        sale: {
+          include: {
+            creditSale: true,
+            customer: true,
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                username: true,
+                role: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!saleItem) {
+      throw new NotFoundException(
+        'Completed sale item not found for this product return',
+      );
+    }
+
+    return saleItem;
+  }
+
+  private shouldReturnToMainInventory(
+    request: Prisma.ProductReturnRequestGetPayload<{
+      include: ReturnType<InventoryService['returnRequestInclude']>;
+    }>,
+  ) {
+    return !request.originalSellerId || this.isOwnerUser(request.originalSeller);
+  }
+
+  private async applyApprovedReturnToMainInventory(
+    businessId: string,
+    request: Prisma.ProductReturnRequestGetPayload<{
+      include: ReturnType<InventoryService['returnRequestInclude']>;
+    }>,
+    dto: ProductReturnRequestDecisionDto,
+    tx: Prisma.TransactionClient,
+  ) {
+    const inventory = await tx.inventory.findFirst({
+      where: { businessId, productId: request.productId },
+    });
+
+    if (!inventory) {
+      throw new NotFoundException(
+        'Inventory record not found for this product',
+      );
+    }
+
+    const quantityBefore = inventory.quantityAvailable;
+    const quantityAfter = quantityBefore + request.quantity;
+    const updatedInventory = await tx.inventory.update({
+      where: { id: inventory.id },
+      data: {
+        quantityOnHand: inventory.quantityOnHand + request.quantity,
+        quantityReserved: inventory.quantityReserved,
+        quantityAvailable: quantityAfter,
+        lastStockUpdate: new Date(),
+        averageCost: request.unitCost ?? inventory.averageCost ?? null,
+        syncVersion: (inventory.syncVersion ?? 1) + 1,
+        isSynced: true,
+        deviceId: dto.deviceId ?? inventory.deviceId,
+      },
+    });
+
+    return this.inventoryTransactionService.createTransaction(
+      {
+        businessId,
+        inventoryId: updatedInventory.id,
+        productId: request.productId,
+        transactionType: InventoryTransactionType.RETURN,
+        quantity: request.quantity,
+        quantityBefore,
+        quantityAfter,
+        unitCost: request.unitCost ? request.unitCost.toNumber() : null,
+        referenceNumber: request.referenceNumber ?? `RETURN:${request.id}`,
+        remarks: request.remarks ?? 'Approved returned stock',
+        transactionDate: new Date(),
+        deviceId: dto.deviceId ?? null,
+      },
+      tx,
+    );
+  }
+
+  private async applyCreditReturnAdjustment(
+    businessId: string,
+    request: Prisma.ProductReturnRequestGetPayload<{
+      include: ReturnType<InventoryService['returnRequestInclude']>;
+    }>,
+    dto: ProductReturnRequestDecisionDto,
+    tx: Prisma.TransactionClient,
+  ) {
+    if (!request.creditSale) {
+      return;
+    }
+
+    const unitValue = new Prisma.Decimal(
+      request.unitCost ?? request.saleItem?.unitPrice ?? 0,
+    );
+    const returnValue = unitValue.mul(request.quantity);
+
+    if (returnValue.lte(0)) {
+      return;
+    }
+
+    const currentBalance = new Prisma.Decimal(request.creditSale.balance);
+    if (currentBalance.lte(0)) {
+      return;
+    }
+
+    const adjustment = Prisma.Decimal.min(returnValue, currentBalance);
+    const nextBalance = currentBalance.sub(adjustment);
+    const nextTotalCredit = Prisma.Decimal.max(
+      new Prisma.Decimal(request.creditSale.amountPaid),
+      new Prisma.Decimal(request.creditSale.totalCredit).sub(adjustment),
+    );
+
+    await tx.creditSale.update({
+      where: { id: request.creditSale.id },
+      data: {
+        totalCredit: nextTotalCredit,
+        balance: nextBalance,
+        status: this.creditStatus(
+          nextTotalCredit,
+          new Prisma.Decimal(request.creditSale.amountPaid),
+          request.creditSale.dueDate,
+        ),
+      },
+    });
+
+    if (request.customerId) {
+      const customer = await tx.customer.findFirst({
+        where: { id: request.customerId, businessId },
+        select: { outstandingBalance: true },
+      });
+
+      if (customer) {
+        await tx.customer.update({
+          where: { id: request.customerId },
+          data: {
+            outstandingBalance: Prisma.Decimal.max(
+              new Prisma.Decimal(0),
+              new Prisma.Decimal(customer.outstandingBalance).sub(adjustment),
+            ),
+            isSynced: true,
+            syncVersion: { increment: 1 },
+            deviceId: dto.deviceId ?? undefined,
+          },
+        });
+      }
+    }
+  }
+
+  private creditStatus(
+    totalCredit: Prisma.Decimal,
+    amountPaid: Prisma.Decimal,
+    dueDate?: Date | null,
+  ) {
+    const balance = totalCredit.sub(amountPaid);
+
+    if (balance.lte(0)) {
+      return CreditSaleStatus.PAID;
+    }
+
+    if (dueDate && dueDate.getTime() < Date.now()) {
+      return CreditSaleStatus.DEFAULTED;
+    }
+
+    if (amountPaid.gt(0)) {
+      return CreditSaleStatus.PARTIALLY_PAID;
+    }
+
+    return CreditSaleStatus.ACTIVE;
+  }
+
+  private async notifyOwnersOfReturnRequest(
+    businessId: string,
+    request: Prisma.ProductReturnRequestGetPayload<{
+      include: ReturnType<InventoryService['returnRequestInclude']>;
+    }>,
+    tx: Prisma.TransactionClient,
+  ) {
+    const owners = await tx.user.findMany({
+      where: {
+        businessId,
+        role: { name: SYSTEM_ROLES.OWNER },
+      },
+      select: { id: true },
+    });
+
+    if (owners.length === 0) {
+      return;
+    }
+
+    await tx.notification.createMany({
+      data: owners.map((owner) => ({
+        businessId,
+        userId: owner.id,
+        title: 'Return approval needed',
+        message: `${this.userName(request.requestedBy)} requested return approval for ${request.product.name} from ${request.sale?.saleNumber ?? request.referenceNumber ?? request.id}.`,
+        type: NotificationType.INFO,
+      })),
+    });
+  }
+
+  private userName(user: {
+    firstName: string;
+    lastName: string;
+    username: string;
+  }) {
+    return `${user.firstName} ${user.lastName}`.trim() || user.username;
+  }
+
+  private isOwnerUser(
+    user:
+      | {
+          role?: { name: string } | null;
+        }
+      | null
+      | undefined,
+  ) {
+    return normalizeSystemRoleName(user?.role?.name) === SYSTEM_ROLES.OWNER;
   }
 
   private returnRequestInclude() {
@@ -499,6 +828,51 @@ export class InventoryService {
           firstName: true,
           lastName: true,
           username: true,
+        },
+      },
+      originalSeller: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          username: true,
+          role: { select: { name: true } },
+        },
+      },
+      customer: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          companyName: true,
+          phone: true,
+        },
+      },
+      sale: {
+        select: {
+          id: true,
+          saleNumber: true,
+          saleDate: true,
+          customerId: true,
+          userId: true,
+        },
+      },
+      saleItem: {
+        select: {
+          id: true,
+          quantity: true,
+          unitPrice: true,
+          totalAmount: true,
+        },
+      },
+      creditSale: {
+        select: {
+          id: true,
+          totalCredit: true,
+          amountPaid: true,
+          balance: true,
+          dueDate: true,
+          status: true,
         },
       },
     } satisfies Prisma.ProductReturnRequestInclude;
@@ -528,15 +902,13 @@ export class InventoryService {
   private assertCanReviewReturnRequests(user: AuthenticatedUser) {
     if (!this.canViewAllReturnRequests(user)) {
       throw new ForbiddenException(
-        'Only the business owner or admin can approve returned products',
+        'Only the business owner can approve returned products',
       );
     }
   }
 
   private canViewAllReturnRequests(user: AuthenticatedUser) {
-    return Boolean(
-      user.roleName && ADMIN_ROLE_NAMES.includes(user.roleName as never),
-    );
+    return normalizeSystemRoleName(user.roleName) === SYSTEM_ROLES.OWNER;
   }
 
   private async assertInventoryContext(

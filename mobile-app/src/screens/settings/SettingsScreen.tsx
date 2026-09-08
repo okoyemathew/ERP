@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react-native";
 import { SimpleRow, ListScreen } from "@/screens/shared/ScreenKit";
 import { useAuthStore } from "@/store/authStore";
 import { colors } from "@/theme";
+import { appRoleForUser } from "@/utils/permissions";
 
 type SettingsRow = {
   label: string;
@@ -14,7 +15,7 @@ type SettingsRow = {
 
 export function SettingsScreen({ navigation }: { navigation: any }) {
   const user = useAuthStore((state) => state.user);
-  const role = user?.roleName ? (user.roleName === "Owner" ? "owner" : "employee") : user?.role ?? "owner";
+  const role = appRoleForUser(user);
   const logout = useAuthStore((state) => state.logout);
   const navigateStack = (route: string) => {
     const parent = navigation.getParent?.();

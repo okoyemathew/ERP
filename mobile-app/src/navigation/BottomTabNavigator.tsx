@@ -9,6 +9,7 @@ import { SalesRecordsScreen } from "@/screens/sales/SalesRecordsScreen";
 import { AddNewSalesScreen } from "@/screens/sales/AddNewSalesScreen";
 import { CustomersScreen } from "@/screens/customers/CustomersScreen";
 import { useAuthStore } from "@/store/authStore";
+import { appRoleForUser } from "@/utils/permissions";
 
 const Tabs = createBottomTabNavigator<BottomTabParamList>();
 
@@ -19,7 +20,7 @@ function EmptyMore() {
 export function BottomTabNavigator() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const user = useAuthStore((state) => state.user);
-  const role = user?.roleName ? (user.roleName === "Owner" ? "owner" : "employee") : user?.role ?? "owner";
+  const role = appRoleForUser(user);
   const logout = useAuthStore((state) => state.logout);
   const Dashboard = role === "owner" ? OwnerDashboard : EmployeeDashboard;
 

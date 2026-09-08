@@ -184,6 +184,7 @@ model User {
   approvedCreditSaleActions  CreditSaleActionRequest[] @relation("CreditSaleActionApprover")
   requestedProductReturns    ProductReturnRequest[]    @relation("ProductReturnRequester")
   reviewedProductReturns     ProductReturnRequest[]    @relation("ProductReturnReviewer")
+  originalSellerProductReturns ProductReturnRequest[]  @relation("ProductReturnOriginalSeller")
 
   @@index([businessId])
   @@index([branchId])
@@ -621,6 +622,21 @@ model ProductReturnRequest {
   productId String  @db.Uuid
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
+  saleId String? @db.Uuid
+  sale   Sale?   @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  saleItemId String?   @db.Uuid
+  saleItem   SaleItem? @relation(fields: [saleItemId], references: [id], onDelete: SetNull)
+
+  creditSaleId String?     @db.Uuid
+  creditSale   CreditSale? @relation(fields: [creditSaleId], references: [id], onDelete: SetNull)
+
+  customerId String?   @db.Uuid
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  originalSellerId String? @db.Uuid
+  originalSeller   User?   @relation("ProductReturnOriginalSeller", fields: [originalSellerId], references: [id], onDelete: SetNull)
+
   requestedById String @db.Uuid
   requestedBy   User   @relation("ProductReturnRequester", fields: [requestedById], references: [id])
 
@@ -645,6 +661,11 @@ model ProductReturnRequest {
 
   @@index([businessId])
   @@index([productId])
+  @@index([saleId])
+  @@index([saleItemId])
+  @@index([creditSaleId])
+  @@index([customerId])
+  @@index([originalSellerId])
   @@index([requestedById])
   @@index([reviewedById])
   @@index([status])
@@ -748,6 +769,7 @@ model Customer {
   payments       Payment[]
   creditPayments CreditPayment[]
   creditSales    CreditSale[]
+  productReturnRequests ProductReturnRequest[]
 
   @@unique([businessId, phone])
   @@index([businessId])
@@ -1061,14 +1083,15 @@ model Sale {
   deletedAt   DateTime?
   receipt     Receipt?
 
-  creditSale CreditSale?
+  creditSale            CreditSale?
+  productReturnRequests ProductReturnRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   items SaleItem[]
 
-  payments Payment[]
+  payments              Payment[]
 
   @@unique([businessId, saleNumber])
   @@unique([businessId, idempotencyKey])
@@ -1100,6 +1123,8 @@ model SaleItem {
   taxAmount Decimal @default(0) @db.Decimal(12, 2)
 
   totalAmount Decimal @db.Decimal(12, 2)
+
+  productReturnRequests ProductReturnRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1257,6 +1282,7 @@ model CreditSale {
 
   payments       CreditPayment[]
   actionRequests CreditSaleActionRequest[]
+  productReturnRequests ProductReturnRequest[]
 
   @@index([customerId])
   @@index([status])

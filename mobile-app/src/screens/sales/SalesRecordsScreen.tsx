@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, FlatList, Pressable, StyleSheet, View } from "react-native";
+import { Alert, FlatList, Modal, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { Clock, CreditCard, Printer, Search, ShoppingBag } from "lucide-react-native";
+import { Clock, CreditCard, Printer, RotateCcw, Search, ShoppingBag, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
 import { printingService } from "@/services/printing.service";
+import { productsService } from "@/services/products.service";
 import { salesService } from "@/services/sales.service";
 import { colors, spacing } from "@/theme";
 import type { ApiSale } from "@/types/sales";
@@ -14,6 +15,7 @@ import { formatCurrency } from "@/utils/format";
 
 const filters = ["All", "Completed", "Pending", "Refunded"] as const;
 type SaleFilter = (typeof filters)[number];
+type SaleLineItem = ApiSale["items"][number];
 
 function customerName(sale: ApiSale) {
   return sale.customer
@@ -37,6 +39,10 @@ export function SalesRecordsScreen() {
   const [filter, setFilter] = useState<SaleFilter>("All");
   const [sales, setSales] = useState<ApiSale[]>([]);
   const [selectedSale, setSelectedSale] = useState<ApiSale | null>(null);
+  const [returnItem, setReturnItem] = useState<SaleLineItem | null>(null);
+  const [returnQuantity, setReturnQuantity] = useState("1");
+  const [returnRemarks, setReturnRemarks] = useState("");
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,6 +95,56 @@ export function SalesRecordsScreen() {
       Alert.alert("Unable to print", message);
     } finally {
       setPrinting(false);
+    }
+  };
+
+  const openReturnForm = (item: SaleLineItem) => {
+    setReturnItem(item);
+    setReturnQuantity(item.quantity > 0 ? "1" : "0");
+    setReturnRemarks("");
+  };
+
+  const closeReturnForm = () => {
+    if (returnSubmitting) return;
+    setReturnItem(null);
+    setReturnQuantity("1");
+    setReturnRemarks("");
+  };
+
+  const submitReturnRequest = async () => {
+    if (!selectedSale || !returnItem || returnSubmitting) return;
+
+    const quantity = Number.parseInt(returnQuantity, 10);
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
+      return;
+    }
+
+    if (quantity > returnItem.quantity) {
+      Alert.alert("Invalid quantity", `This sale only has ${returnItem.quantity} unit(s) of ${returnItem.product.name}.`);
+      return;
+    }
+
+    setReturnSubmitting(true);
+    try {
+      await productsService.createReturnRequest({
+        productId: returnItem.productId,
+        saleItemId: returnItem.id,
+        quantity,
+        unitCost: Number(returnItem.unitPrice),
+        referenceNumber: selectedSale.saleNumber,
+        remarks: returnRemarks.trim() || `Customer return from sale ${selectedSale.saleNumber}`
+      });
+      const productName = returnItem.product.name;
+      setReturnItem(null);
+      setReturnQuantity("1");
+      setReturnRemarks("");
+      Alert.alert("Return submitted", `${productName} is now waiting for owner approval.`);
+    } catch (returnError) {
+      const message = returnError instanceof Error ? returnError.message : "Unable to submit return request.";
+      Alert.alert("Return failed", message);
+    } finally {
+      setReturnSubmitting(false);
     }
   };
 
@@ -201,7 +257,19 @@ export function SalesRecordsScreen() {
                     <Text style={styles.itemTitle}>{item.product.name}</Text>
                     <Text style={styles.meta}>Qty {item.quantity} x {formatCurrency(Number(item.unitPrice))}</Text>
                   </View>
-                  <Text style={styles.amount}>{formatCurrency(Number(item.totalAmount))}</Text>
+                  <View style={styles.itemActions}>
+                    <Text style={styles.amount}>{formatCurrency(Number(item.totalAmount))}</Text>
+                    <Pressable
+                      onPress={() => openReturnForm(item)}
+                      disabled={item.quantity <= 0}
+                      style={[styles.returnButton, item.quantity <= 0 && styles.disabledAction]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Return ${item.product.name}`}
+                    >
+                      <RotateCcw size={14} color={colors.primary} />
+                      <Text style={styles.returnText}>Return</Text>
+                    </Pressable>
+                  </View>
                 </View>
               ))}
             </Card>
@@ -220,6 +288,48 @@ export function SalesRecordsScreen() {
           </BottomSheetScrollView>
         </AppBottomSheet>
       ) : null}
+      <Modal
+        visible={Boolean(returnItem)}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={closeReturnForm}
+      >
+        <View style={styles.modal}>
+          <Pressable style={styles.backdrop} onPress={closeReturnForm} accessibilityRole="button" accessibilityLabel="Close product return" />
+          <View style={[styles.returnSheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+            <View style={styles.returnHeader}>
+              <View style={styles.body}>
+                <Text style={styles.returnTitle}>Return Product</Text>
+                <Text style={styles.meta}>{returnItem?.product.name ?? ""}</Text>
+                <Text style={styles.meta}>{selectedSale ? `${selectedSale.saleNumber} | ${customerName(selectedSale)}` : ""}</Text>
+              </View>
+              <Pressable style={styles.closeButton} onPress={closeReturnForm} accessibilityRole="button" accessibilityLabel="Close product return">
+                <X size={16} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <TextInput
+              value={returnQuantity}
+              onChangeText={setReturnQuantity}
+              keyboardType="number-pad"
+              style={styles.input}
+              placeholder="Quantity"
+              placeholderTextColor={colors.textPlaceholder}
+              accessibilityLabel="Return quantity"
+            />
+            <TextInput
+              value={returnRemarks}
+              onChangeText={setReturnRemarks}
+              style={[styles.input, styles.remarksInput]}
+              placeholder="Reason or condition"
+              placeholderTextColor={colors.textPlaceholder}
+              multiline
+              accessibilityLabel="Return reason"
+            />
+            <Button label="Submit Return" loading={returnSubmitting} onPress={() => void submitReturnRequest()} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -250,5 +360,17 @@ const styles = StyleSheet.create({
   detailTotal: { color: colors.primary, fontSize: 13, fontWeight: "800" },
   sectionTitle: { color: colors.foreground, fontSize: 13, fontWeight: "800" },
   itemRow: { flexDirection: "row", justifyContent: "space-between", gap: 12, alignItems: "center" },
-  itemTitle: { color: colors.textSecondary, fontSize: 12, fontWeight: "700" }
+  itemTitle: { color: colors.textSecondary, fontSize: 12, fontWeight: "700" },
+  itemActions: { alignItems: "flex-end", gap: 8 },
+  returnButton: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: colors.borderLight, borderRadius: 8, paddingHorizontal: 10, backgroundColor: colors.secondaryBg },
+  returnText: { color: colors.primary, fontSize: 11, fontWeight: "800" },
+  disabledAction: { opacity: 0.5 },
+  modal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },
+  backdrop: { ...StyleSheet.absoluteFillObject },
+  returnSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, gap: 12 },
+  returnHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  returnTitle: { color: colors.foreground, fontSize: 16, fontWeight: "800" },
+  closeButton: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  input: { minHeight: 48, borderWidth: 1, borderColor: colors.borderLight, borderRadius: 8, paddingHorizontal: 12, color: colors.foreground, backgroundColor: colors.inputBg },
+  remarksInput: { minHeight: 82, paddingTop: 12, textAlignVertical: "top" }
 });

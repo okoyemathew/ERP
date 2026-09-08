@@ -17,6 +17,7 @@ import { InventoryScreen } from "@/screens/inventory/InventoryScreen";
 import { ProductDetailScreen } from "@/screens/inventory/ProductDetailScreen";
 import { ProductFormScreen } from "@/screens/inventory/ProductFormScreen";
 import { ProductOptionManagerScreen } from "@/screens/inventory/ProductOptionManagerScreen";
+import { ReturnedProductsScreen } from "@/screens/inventory/ReturnedProductsScreen";
 import { ReportsScreen } from "@/screens/reports/ReportsScreen";
 import { CreditCustomerDetailsScreen } from "@/screens/sales/CreditCustomerDetailsScreen";
 import { CreditSalesScreen } from "@/screens/sales/CreditSalesScreen";
@@ -34,7 +35,7 @@ import { LanguageSettingsScreen } from "@/screens/settings/LanguageSettingsScree
 import { ThemeSettingsScreen } from "@/screens/settings/ThemeSettingsScreen";
 import { EmployeeFormScreen } from "@/screens/employees/EmployeeFormScreen";
 import { useAuthStore } from "@/store/authStore";
-import { canAccess } from "@/utils/permissions";
+import { appRoleForUser, canAccess } from "@/utils/permissions";
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
@@ -53,6 +54,7 @@ const appScreens: Array<{
   { name: "ProductDetail", component: ProductDetailScreen },
   { name: "ProductForm", component: ProductFormScreen },
   { name: "ProductOptionManager", component: ProductOptionManagerScreen },
+  { name: "ReturnedProducts", component: ReturnedProductsScreen },
   { name: "Expenses", component: ExpensesScreen },
   { name: "Supplied", component: SuppliedScreen },
   { name: "SupplierDetail", component: SupplierDetailScreen },
@@ -77,7 +79,7 @@ const appScreens: Array<{
 
 export function AppNavigator() {
   const user = useAuthStore((state) => state.user);
-  const role = user?.roleName ? (user.roleName === "Owner" ? "owner" : "employee") : user?.role ?? "owner";
+  const role = appRoleForUser(user);
   const screens = appScreens.filter((screen) => canAccess(role, screen.name));
 
   return (

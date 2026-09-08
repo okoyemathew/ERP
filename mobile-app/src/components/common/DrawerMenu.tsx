@@ -12,6 +12,7 @@ import {
   HandCoins,
   LogOut,
   Receipt,
+  RotateCcw,
   Settings,
   Truck,
   User,
@@ -42,6 +43,7 @@ const ownerOnly: Array<{ icon: LucideIcon; label: string; route: RouteName; colo
 
 const shared: Array<{ icon: LucideIcon; label: string; route: RouteName; color: string; bg: string }> = [
   { icon: HandCoins, label: "Credit Sales", route: "CreditSales", color: "#0891B2", bg: "#E0F2FE" },
+  { icon: RotateCcw, label: "Returned", route: "ReturnedProducts", color: colors.primary, bg: colors.secondaryBg },
   { icon: Receipt, label: "Expenses", route: "Expenses", color: colors.orange, bg: colors.orangeBg },
   { icon: Truck, label: "Supplied Products", route: "Supplied", color: "#00838F", bg: "#E0F7FA" },
   { icon: Bell, label: "Notifications", route: "Notifications", color: "#5C6BC0", bg: "#E8EAF6" },

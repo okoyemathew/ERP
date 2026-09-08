@@ -123,6 +123,11 @@ async function returnRequestFallback(
     id,
     businessId,
     productId: payload.productId,
+    saleId: null,
+    saleItemId: payload.saleItemId ?? null,
+    creditSaleId: null,
+    customerId: null,
+    originalSellerId: null,
     requestedById: "offline-user",
     reviewedById: null,
     quantity: payload.quantity,
@@ -138,7 +143,12 @@ async function returnRequestFallback(
     updatedAt: now,
     product: product ? { id: product.id, name: product.name, sku: product.sku, barcode: product.barcode } : undefined,
     requestedBy: undefined,
-    reviewedBy: null
+    reviewedBy: null,
+    originalSeller: null,
+    customer: null,
+    sale: null,
+    saleItem: null,
+    creditSale: null
   };
 }
 
@@ -154,6 +164,11 @@ function decidedReturnRequestFallback(
     id: requestId,
     businessId,
     productId: current?.productId ?? "offline-product",
+    saleId: current?.saleId ?? null,
+    saleItemId: current?.saleItemId ?? null,
+    creditSaleId: current?.creditSaleId ?? null,
+    customerId: current?.customerId ?? null,
+    originalSellerId: current?.originalSellerId ?? null,
     requestedById: current?.requestedById ?? "offline-user",
     reviewedById: "offline-reviewer",
     quantity: current?.quantity ?? 0,
@@ -169,7 +184,12 @@ function decidedReturnRequestFallback(
     updatedAt: now,
     product: current?.product,
     requestedBy: current?.requestedBy,
-    reviewedBy: current?.reviewedBy ?? null
+    reviewedBy: current?.reviewedBy ?? null,
+    originalSeller: current?.originalSeller ?? null,
+    customer: current?.customer ?? null,
+    sale: current?.sale ?? null,
+    saleItem: current?.saleItem ?? null,
+    creditSale: current?.creditSale ?? null
   };
 }
 

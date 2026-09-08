@@ -1,4 +1,4 @@
-import type { Role } from "@/types/domain.types";
+import type { Role, User } from "@/types/domain.types";
 
 const ownerOnly = new Set([
   "OwnerDashboard",
@@ -32,6 +32,7 @@ const employeeAllowed = new Set([
   "CreditCustomerDetails",
   "CustomerForm",
   "CreditSales",
+  "ReturnedProducts",
   "Expenses",
   "Supplied",
   "SupplierDetail",
@@ -47,4 +48,27 @@ const employeeAllowed = new Set([
 export const canAccess = (role: Role, feature: string): boolean => {
   if (role === "owner") return !employeeOnly.has(feature);
   return employeeOnly.has(feature) || (employeeAllowed.has(feature) && !ownerOnly.has(feature));
+};
+
+export const appRoleForUser = (user: User | null | undefined): Role => {
+  const normalizedRoleName = user?.roleName?.trim().toLowerCase();
+
+  if (normalizedRoleName === "owner") {
+    return "owner";
+  }
+
+  if (normalizedRoleName) {
+    return "employee";
+  }
+
+  return user?.role ?? "employee";
+};
+
+export const canReviewProductReturns = (user: User | null | undefined): boolean => {
+  const normalizedRoleName = user?.roleName?.trim().toLowerCase();
+
+  return Boolean(
+    normalizedRoleName === "owner" ||
+      (!normalizedRoleName && user?.role === "owner")
+  );
 };

@@ -86,6 +86,9 @@ function createPrismaMock() {
     goodsDisbursementItem: {
       aggregate: jest.fn(),
     },
+    productReturnRequest: {
+      aggregate: jest.fn(),
+    },
     product: {
       findFirst: jest.fn(),
     },
@@ -310,6 +313,9 @@ describe('SalesService sale item price and quantity validation', () => {
     prisma.saleItem.aggregate.mockResolvedValue({
       _sum: { quantity: 9 },
     });
+    prisma.productReturnRequest.aggregate.mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
 
     const item = await (service as unknown as {
       buildItemData: (
@@ -348,6 +354,52 @@ describe('SalesService sale item price and quantity validation', () => {
         }),
       }),
     );
+  });
+
+  it('counts approved employee returns back into employee sellable stock', async () => {
+    prisma.product.findFirst.mockResolvedValue(
+      sellableProduct({
+        inventory: {
+          businessId,
+          quantityAvailable: 0,
+          quantityOnHand: 0,
+          deletedAt: null,
+        },
+      }),
+    );
+    prisma.goodsDisbursementItem.aggregate.mockResolvedValue({
+      _sum: { quantity: 60 },
+    });
+    prisma.saleItem.aggregate.mockResolvedValue({
+      _sum: { quantity: 59 },
+    });
+    prisma.productReturnRequest.aggregate.mockResolvedValue({
+      _sum: { quantity: 2 },
+    });
+
+    const item = await (service as unknown as {
+      buildItemData: (
+        businessId: string,
+        dto: { productId: string; quantity: number; unitPrice: number },
+        tx: unknown,
+        seller: {
+          useEmployeeStock: boolean;
+          userId: string;
+          stockMatch: Array<{ employeeId: string }>;
+        },
+      ) => Promise<{ quantity: number }>;
+    }).buildItemData(
+      businessId,
+      { productId, quantity: 3, unitPrice: 12000 },
+      prisma,
+      {
+        useEmployeeStock: true,
+        userId: employeeUserId,
+        stockMatch: [{ employeeId: authUser.employeeId! }],
+      },
+    );
+
+    expect(item.quantity).toBe(3);
   });
 
   it('stores the actual sale item price independent of later base price changes', async () => {

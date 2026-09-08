@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, Pressable, StyleSheet, View } from "react-native";
+import { Alert, FlatList, Modal, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
-import { Plus, Truck } from "lucide-react-native";
+import { Plus, RotateCcw, Truck, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
+import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
 import { goodsDisbursementService } from "@/services/goods-disbursement.service";
+import { productsService } from "@/services/products.service";
 import { suppliersService } from "@/services/suppliers.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
@@ -72,6 +73,10 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [returnProduct, setReturnProduct] = useState<EmployeeSuppliedProduct | null>(null);
+  const [returnQuantity, setReturnQuantity] = useState("1");
+  const [returnRemarks, setReturnRemarks] = useState("");
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
 
   const navigateStack = (route: string, params?: Record<string, string>) => {
     const parent = navigation.getParent?.();
@@ -137,6 +142,54 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   };
   const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
+  const openReturnSheet = (product: EmployeeSuppliedProduct) => {
+    setReturnProduct(product);
+    setReturnQuantity(product.quantityInHand > 0 ? "1" : "0");
+    setReturnRemarks("");
+  };
+
+  const closeReturnSheet = () => {
+    if (returnSubmitting) return;
+    setReturnProduct(null);
+    setReturnQuantity("1");
+    setReturnRemarks("");
+  };
+
+  const submitReturnRequest = async () => {
+    if (!returnProduct || returnSubmitting) return;
+
+    const quantity = Number.parseInt(returnQuantity, 10);
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
+      return;
+    }
+
+    if (quantity > returnProduct.quantityInHand) {
+      Alert.alert("Invalid quantity", `You only have ${returnProduct.quantityInHand} unit(s) in hand.`);
+      return;
+    }
+
+    setReturnSubmitting(true);
+    try {
+      await productsService.createReturnRequest({
+        productId: returnProduct.productId,
+        quantity,
+        remarks: returnRemarks.trim() || undefined
+      });
+      const returnedName = returnProduct.productName;
+      setReturnProduct(null);
+      setReturnQuantity("1");
+      setReturnRemarks("");
+      await loadSupplied(query, false);
+      Alert.alert("Return submitted", `${returnedName} is now waiting for owner approval.`);
+    } catch (returnError) {
+      const message = returnError instanceof Error ? returnError.message : "Unable to submit return request.";
+      Alert.alert("Return failed", message);
+    } finally {
+      setReturnSubmitting(false);
+    }
+  };
+
   if (loading && dataIsEmpty) {
     return (
       <View style={styles.screen}>
@@ -181,7 +234,18 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
                 <Text style={styles.title}>{item.productName}</Text>
                 <Text style={styles.meta}>{item.sku ?? item.barcode ?? "No SKU"} | In hand: {item.quantityInHand}</Text>
               </View>
-              <Badge label={String(item.suppliedQuantity)} variant={item.quantityInHand > 0 ? "success" : "neutral"} />
+              <View style={styles.productActions}>
+                <Badge label={String(item.suppliedQuantity)} variant={item.quantityInHand > 0 ? "success" : "neutral"} />
+                <Pressable
+                  onPress={() => openReturnSheet(item)}
+                  disabled={item.quantityInHand <= 0}
+                  style={[styles.returnButton, item.quantityInHand <= 0 && styles.disabledAction]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Return ${item.productName}`}
+                >
+                  <RotateCcw size={16} color={colors.primary} />
+                </Pressable>
+              </View>
             </Card>
           ) : (
             <Pressable onPress={() => navigateStack("SupplierDetail", { supplierId: item.id })} accessibilityLabel={`Open ${item.companyName}`}>
@@ -201,6 +265,47 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
         showsVerticalScrollIndicator
         persistentScrollbar
       />
+      <Modal
+        visible={Boolean(returnProduct)}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={closeReturnSheet}
+      >
+        <View style={styles.modal}>
+          <Pressable style={styles.backdrop} onPress={closeReturnSheet} accessibilityRole="button" accessibilityLabel="Close return request" />
+          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+            <View style={styles.sheetHeader}>
+              <View style={styles.sheetTitleBlock}>
+                <Text style={styles.sheetTitle}>Return Product</Text>
+                <Text style={styles.meta}>{returnProduct?.productName ?? ""}</Text>
+              </View>
+              <Pressable style={styles.closeButton} onPress={closeReturnSheet} accessibilityRole="button" accessibilityLabel="Close return request">
+                <X size={16} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <TextInput
+              value={returnQuantity}
+              onChangeText={setReturnQuantity}
+              keyboardType="number-pad"
+              style={styles.input}
+              placeholder="Quantity"
+              placeholderTextColor={colors.textPlaceholder}
+              accessibilityLabel="Return quantity"
+            />
+            <TextInput
+              value={returnRemarks}
+              onChangeText={setReturnRemarks}
+              style={[styles.input, styles.remarksInput]}
+              placeholder="Remarks"
+              placeholderTextColor={colors.textPlaceholder}
+              multiline
+              accessibilityLabel="Return remarks"
+            />
+            <Button label="Submit Return" loading={returnSubmitting} onPress={() => void submitReturnRequest()} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -217,5 +322,17 @@ const styles = StyleSheet.create({
   icon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.secondaryBg },
   body: { flex: 1 },
   title: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
-  meta: { color: colors.textPlaceholder, fontSize: 11, marginTop: 3 }
+  meta: { color: colors.textPlaceholder, fontSize: 11, marginTop: 3 },
+  productActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  returnButton: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.secondaryBg },
+  disabledAction: { opacity: 0.5 },
+  modal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },
+  backdrop: { ...StyleSheet.absoluteFillObject },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, gap: 12 },
+  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  sheetTitleBlock: { flex: 1 },
+  sheetTitle: { color: colors.foreground, fontSize: 16, fontWeight: "800" },
+  closeButton: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  input: { minHeight: 48, borderWidth: 1, borderColor: colors.borderLight, borderRadius: 8, paddingHorizontal: 12, color: colors.foreground, backgroundColor: colors.inputBg },
+  remarksInput: { minHeight: 82, paddingTop: 12, textAlignVertical: "top" }
 });

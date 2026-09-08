@@ -2,11 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { Check, CreditCard, Edit3, HandCoins, Printer, Search, Trash2, X } from "lucide-react-native";
+import { Check, CreditCard, Edit3, HandCoins, Printer, RotateCcw, Search, Trash2, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ReceiptTicket } from "@/components/receipt";
 import { AppBottomSheet, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
 import { creditSalesService } from "@/services/credit-sales.service";
+import { productsService } from "@/services/products.service";
 import { printingService } from "@/services/printing.service";
 import { useAuth } from "@/hooks/useAuth";
 import { borderRadius, colors, shadows, spacing } from "@/theme";
@@ -15,6 +16,8 @@ import type { ApiCreditSale, CreditSaleActionRequest, CreditSaleEmployeeAction, 
 import type { PosPaymentMethod } from "@/types/sales";
 import { toApiPaymentMethod } from "@/types/sales";
 import { formatCurrency } from "@/utils/format";
+
+type CreditSaleProductItem = ApiCreditSale["sale"]["items"][number];
 
 const paymentMethods: Array<{ label: string; value: Exclude<PosPaymentMethod, "credit"> }> = [
   { label: "Cash", value: "cash" },
@@ -87,6 +90,10 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
   const [actionProcessing, setActionProcessing] = useState<string | null>(null);
   const [approvalProcessing, setApprovalProcessing] = useState<string | null>(null);
   const [editingProcessing, setEditingProcessing] = useState(false);
+  const [returnItem, setReturnItem] = useState<CreditSaleProductItem | null>(null);
+  const [returnQuantity, setReturnQuantity] = useState("1");
+  const [returnRemarks, setReturnRemarks] = useState("");
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const paymentRef = useRef<BottomSheet>(null);
   const editRef = useRef<BottomSheet>(null);
@@ -222,6 +229,56 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
       setReceiptVisible(true);
     } catch (error) {
       Alert.alert("Invoice", error instanceof Error ? error.message : "Unable to load invoice products.");
+    }
+  };
+
+  const openReturnForm = (item: CreditSaleProductItem) => {
+    setReturnItem(item);
+    setReturnQuantity(item.quantity > 0 ? "1" : "0");
+    setReturnRemarks("");
+  };
+
+  const closeReturnForm = () => {
+    if (returnSubmitting) return;
+    setReturnItem(null);
+    setReturnQuantity("1");
+    setReturnRemarks("");
+  };
+
+  const submitReturnRequest = async () => {
+    if (!selectedDetail || !returnItem || returnSubmitting) return;
+
+    const quantity = Number.parseInt(returnQuantity, 10);
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
+      return;
+    }
+
+    if (quantity > returnItem.quantity) {
+      Alert.alert("Invalid quantity", `This credit sale only has ${returnItem.quantity} unit(s) of ${returnItem.productName}.`);
+      return;
+    }
+
+    setReturnSubmitting(true);
+    try {
+      await productsService.createReturnRequest({
+        productId: returnItem.productId,
+        saleItemId: returnItem.id,
+        quantity,
+        unitCost: money(returnItem.unitPrice),
+        referenceNumber: selectedDetail.sale.saleNumber,
+        remarks: returnRemarks.trim() || `Customer return from credit sale ${selectedDetail.sale.saleNumber}`
+      });
+      const productName = returnItem.productName;
+      setReturnItem(null);
+      setReturnQuantity("1");
+      setReturnRemarks("");
+      Alert.alert("Return submitted", `${productName} is now waiting for owner approval.`);
+    } catch (returnError) {
+      const message = returnError instanceof Error ? returnError.message : "Unable to submit return request.";
+      Alert.alert("Return failed", message);
+    } finally {
+      setReturnSubmitting(false);
     }
   };
 
@@ -631,7 +688,17 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
                       <Text style={styles.title}>{item.productName}</Text>
                       <Text style={styles.meta}>{item.quantity} x {formatCurrency(money(item.unitPrice))}</Text>
                     </View>
-                    <Text style={styles.amount}>{formatCurrency(money(item.totalAmount))}</Text>
+                    <View style={styles.productReturnActions}>
+                      <Text style={styles.amount}>{formatCurrency(money(item.totalAmount))}</Text>
+                      <Pressable
+                        onPress={() => openReturnForm(item)}
+                        style={styles.iconButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Return ${item.productName}`}
+                      >
+                        <RotateCcw size={14} color={colors.primary} />
+                      </Pressable>
+                    </View>
                   </Card>
                 ))}
 
@@ -755,6 +822,59 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
         </View>
       </Modal>
 
+      <Modal
+        visible={Boolean(returnItem)}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={closeReturnForm}
+      >
+        <View style={styles.detailModal}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={closeReturnForm}
+            accessibilityRole="button"
+            accessibilityLabel="Close product return"
+          />
+          <View style={[styles.returnSheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+            <View style={styles.returnHeader}>
+              <View style={styles.body}>
+                <Text style={styles.sheetTitle}>Return Product</Text>
+                <Text style={styles.meta}>{returnItem?.productName ?? ""}</Text>
+                <Text style={styles.meta}>{selectedDetail ? `${selectedDetail.sale.saleNumber} | ${selectedDetail.customer.name}` : ""}</Text>
+              </View>
+              <Pressable
+                style={styles.iconButton}
+                onPress={closeReturnForm}
+                accessibilityRole="button"
+                accessibilityLabel="Close product return"
+              >
+                <X size={15} color={colors.textMuted} />
+              </Pressable>
+            </View>
+            <TextInput
+              value={returnQuantity}
+              onChangeText={setReturnQuantity}
+              keyboardType="number-pad"
+              style={styles.amountInput}
+              placeholder="Quantity"
+              placeholderTextColor={colors.textPlaceholder}
+              accessibilityLabel="Return quantity"
+            />
+            <TextInput
+              value={returnRemarks}
+              onChangeText={setReturnRemarks}
+              style={[styles.amountInput, styles.remarksInput]}
+              placeholder="Reason or condition"
+              placeholderTextColor={colors.textPlaceholder}
+              multiline
+              accessibilityLabel="Return reason"
+            />
+            <Button label="Submit Return" loading={returnSubmitting} onPress={() => void submitReturnRequest()} />
+          </View>
+        </View>
+      </Modal>
+
       {editSheetVisible ? <AppBottomSheet ref={editRef} snapPoints={["55%"]} initialIndex={0} onClose={() => {
         setEditSheetVisible(false);
         setEditing(null);
@@ -819,6 +939,7 @@ const styles = StyleSheet.create({
   deleteButton: { backgroundColor: colors.errorBg, borderColor: colors.errorBorder },
   disabledAction: { opacity: 0.55 },
   amount: { color: colors.foreground, fontSize: 13, fontWeight: "800" },
+  productReturnActions: { alignItems: "flex-end", gap: 6 },
   detailModal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },
   modalBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
   detailSheet: {
@@ -832,6 +953,8 @@ const styles = StyleSheet.create({
     zIndex: 1
   },
   modalHandle: { alignSelf: "center", width: 34, height: 4, borderRadius: 999, backgroundColor: colors.borderLight },
+  returnSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, gap: 12, zIndex: 1 },
+  returnHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   sheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 16, gap: 12 },
   sheetScroller: { flex: 1 },
   sheetScroll: { gap: 12, paddingBottom: 16 },

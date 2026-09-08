@@ -10,6 +10,7 @@ import {
   EmployeeStatus,
   PaymentMethod,
   Prisma,
+  ProductReturnRequestStatus,
   SaleStatus,
   SessionStatus,
   UserStatus,
@@ -842,7 +843,7 @@ export class EmployeeService {
       ]),
     ];
 
-    const [soldItems, disbursements, salesTodayCount, salesTodayValue] =
+    const [soldItems, disbursements, returnedItems, salesTodayCount, salesTodayValue] =
       await Promise.all([
         this.prisma.saleItem.findMany({
           where: {
@@ -902,6 +903,31 @@ export class EmployeeService {
           orderBy: { disbursementDate: 'desc' },
           take: 100,
         }),
+        this.prisma.productReturnRequest.findMany({
+          where: {
+            businessId,
+            originalSellerId: userId,
+            status: ProductReturnRequestStatus.APPROVED,
+            product: {
+              businessId,
+              isActive: true,
+            },
+          },
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                barcode: true,
+                sellingPrice: true,
+                isActive: true,
+              },
+            },
+          },
+          orderBy: { reviewedAt: 'desc' },
+          take: 500,
+        }),
         this.prisma.sale.count({
           where: {
             businessId,
@@ -924,6 +950,14 @@ export class EmployeeService {
       ]);
 
     const suppliedByProduct = new Map<string, number>();
+    const returnedByProduct = new Map<string, number>();
+    for (const item of returnedItems) {
+      returnedByProduct.set(
+        item.productId,
+        (returnedByProduct.get(item.productId) ?? 0) + item.quantity,
+      );
+    }
+
     const supplyRecords = disbursements
       .map((run) => {
         let totalQuantity = 0;
@@ -979,6 +1013,7 @@ export class EmployeeService {
         barcode: string | null;
         quantityInHand: number;
         quantitySold: number;
+        quantityReturned: number;
         suppliedQuantity: number;
         unitValue: Prisma.Decimal;
         totalSoldValue: Prisma.Decimal;
@@ -1002,6 +1037,8 @@ export class EmployeeService {
         barcode: item.product.barcode,
         quantityInHand: existing?.quantityInHand ?? 0,
         quantitySold: (existing?.quantitySold ?? 0) + item.quantity,
+        quantityReturned:
+          existing?.quantityReturned ?? returnedByProduct.get(item.productId) ?? 0,
         suppliedQuantity: suppliedByProduct.get(item.productId) ?? 0,
         unitValue,
         totalSoldValue: (existing?.totalSoldValue ?? new Prisma.Decimal(0)).add(
@@ -1028,6 +1065,7 @@ export class EmployeeService {
         barcode: suppliedItem.product.barcode,
         quantityInHand: Math.max(0, quantity),
         quantitySold: 0,
+        quantityReturned: returnedByProduct.get(productId) ?? 0,
         suppliedQuantity: quantity,
         unitValue: new Prisma.Decimal(suppliedItem.product.sellingPrice),
         totalSoldValue: new Prisma.Decimal(0),
@@ -1035,10 +1073,33 @@ export class EmployeeService {
       });
     }
 
+    for (const item of returnedItems) {
+      if (stockByProduct.has(item.productId)) {
+        continue;
+      }
+
+      stockByProduct.set(item.productId, {
+        productId: item.productId,
+        productName: item.product.name,
+        sku: item.product.sku,
+        barcode: item.product.barcode,
+        quantityInHand: 0,
+        quantitySold: 0,
+        quantityReturned: returnedByProduct.get(item.productId) ?? 0,
+        suppliedQuantity: suppliedByProduct.get(item.productId) ?? 0,
+        unitValue: new Prisma.Decimal(item.product.sellingPrice),
+        totalSoldValue: new Prisma.Decimal(0),
+        lastActivityAt: item.reviewedAt ?? item.requestedAt,
+      });
+    }
+
     const stockItems = Array.from(stockByProduct.values())
       .map((item) => ({
         ...item,
-        quantityInHand: Math.max(0, item.suppliedQuantity - item.quantitySold),
+        quantityInHand: Math.max(
+          0,
+          item.suppliedQuantity - item.quantitySold + item.quantityReturned,
+        ),
       }))
       .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime());
     const stockValue = stockItems.reduce(

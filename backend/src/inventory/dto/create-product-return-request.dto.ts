@@ -14,6 +14,13 @@ export class CreateProductReturnRequestDto {
   @IsUUID()
   productId!: string;
 
+  @ApiProperty({
+    description: 'Original sale item id for the product being returned',
+    format: 'uuid',
+  })
+  @IsUUID()
+  saleItemId!: string;
+
   @ApiProperty({ description: 'Quantity being returned', minimum: 1 })
   @IsInt()
   @Min(1)

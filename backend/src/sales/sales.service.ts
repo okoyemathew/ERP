@@ -14,6 +14,7 @@ import {
   PaymentMethod,
   PaymentStatus,
   Prisma,
+  ProductReturnRequestStatus,
   SaleStatus,
 } from '@prisma/client';
 import {
@@ -1069,7 +1070,7 @@ export class SalesService {
       return 0;
     }
 
-    const [supplied, sold] = await Promise.all([
+    const [supplied, sold, returned] = await Promise.all([
       tx.goodsDisbursementItem.aggregate({
         where: {
           productId,
@@ -1093,11 +1094,22 @@ export class SalesService {
         },
         _sum: { quantity: true },
       }),
+      tx.productReturnRequest.aggregate({
+        where: {
+          businessId,
+          productId,
+          originalSellerId: seller.userId,
+          status: ProductReturnRequestStatus.APPROVED,
+        },
+        _sum: { quantity: true },
+      }),
     ]);
 
     return Math.max(
       0,
-      (supplied._sum.quantity ?? 0) - (sold._sum.quantity ?? 0),
+      (supplied._sum.quantity ?? 0) -
+        (sold._sum.quantity ?? 0) +
+        (returned._sum.quantity ?? 0),
     );
   }
 

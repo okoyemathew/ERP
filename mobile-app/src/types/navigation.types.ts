@@ -39,6 +39,7 @@ export type AppStackParamList = {
   ProductDetail: { productId: string };
   ProductForm: { productId?: string } | undefined;
   ProductOptionManager: { kind: "category" | "brand" | "unit" };
+  ReturnedProducts: undefined;
   Expenses: undefined;
   Supplied: undefined;
   SupplierDetail: { supplierId: string };

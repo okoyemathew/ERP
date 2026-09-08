@@ -9,6 +9,7 @@ import { productsService } from "@/services/products.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
 import type { ApiProduct, ProductReturnRequest } from "@/types/product";
+import { canReviewProductReturns } from "@/utils/permissions";
 import { formatCurrency } from "@/utils/format";
 
 const stockStatus = (stock: number) => {
@@ -39,8 +40,7 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const canManage = useAuthStore((state) => state.can("products.manage"));
   const user = useAuthStore((state) => state.user);
-  const roleName = user?.roleName?.trim();
-  const canReviewReturns = Boolean(roleName === "Owner" || roleName === "Admin" || (!roleName && user?.role === "owner"));
+  const canReviewReturns = canReviewProductReturns(user);
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState<ApiProduct[]>([]);
   const [returnRequests, setReturnRequests] = useState<ProductReturnRequest[]>([]);
