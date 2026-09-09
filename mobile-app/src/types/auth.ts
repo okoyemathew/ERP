@@ -155,7 +155,7 @@ export interface StoredAuthSession {
 
 export function mapBackendRoleToAppRole(roleName?: string | null): Role {
   const normalized = roleName?.trim().toLowerCase();
-  if (normalized === "owner" || normalized === "admin" || normalized === "administrator" || normalized === "manager") {
+  if (normalized === "owner") {
     return "owner";
   }
 
