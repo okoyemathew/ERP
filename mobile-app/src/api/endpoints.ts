@@ -31,6 +31,8 @@ export const endpoints = {
     list: "/employees",
     create: "/employees",
     myProfile: "/employees/me/profile",
+    mySales: "/employees/me/sales",
+    mySalesPrint: "/employees/me/sales/print",
     detail: (employeeId: string) => `/employees/${employeeId}`,
     profile: (employeeId: string) => `/employees/${employeeId}/profile`,
     sales: (employeeId: string) => `/employees/${employeeId}/sales`,

@@ -82,6 +82,38 @@ export class EmployeeController {
     return this.employeeService.getProfile(user.businessId, user.employeeId);
   }
 
+  @Get('me/sales')
+  @Permissions()
+  @ApiOperation({ summary: 'View current employee sales' })
+  mySales(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: EmployeeActivityQueryDto,
+  ) {
+    if (!user.employeeId) {
+      throw new BadRequestException('Employee profile is not available');
+    }
+
+    return this.employeeService.getSales(user.businessId, user.employeeId, query);
+  }
+
+  @Get('me/sales/print')
+  @Permissions()
+  @ApiOperation({ summary: 'Print current employee sales record' })
+  printMySales(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: EmployeeActivityQueryDto,
+  ) {
+    if (!user.employeeId) {
+      throw new BadRequestException('Employee profile is not available');
+    }
+
+    return this.employeeService.printSalesRecord(
+      user.businessId,
+      user.employeeId,
+      query,
+    );
+  }
+
   @Get(':id')
   @Roles(...EMPLOYEE_READ_ROLES)
   @ApiOperation({ summary: 'View employee' })

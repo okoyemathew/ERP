@@ -98,8 +98,18 @@ export const employeesService = {
     return data;
   },
 
+  async mySales(params: EmployeeSalesParams = {}): Promise<EmployeeSalesResponse> {
+    const { data } = await api.get<EmployeeSalesResponse>(endpoints.employees.mySales, { params });
+    return data;
+  },
+
   async printSales(id: string, params: EmployeeSalesParams = {}): Promise<EmployeeSalesPrintResponse> {
     const { data } = await api.get<EmployeeSalesPrintResponse>(endpoints.employees.salesPrint(id), { params });
+    return data;
+  },
+
+  async printMySales(params: EmployeeSalesParams = {}): Promise<EmployeeSalesPrintResponse> {
+    const { data } = await api.get<EmployeeSalesPrintResponse>(endpoints.employees.mySalesPrint, { params });
     return data;
   },
 

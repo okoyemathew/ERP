@@ -49,6 +49,7 @@ const appScreens: Array<{
   { name: "CreditSales", component: CreditSalesScreen },
   { name: "Employees", component: EmployeesScreen },
   { name: "EmployeeDetail", component: EmployeeDetailScreen },
+  { name: "EmployeeSelfProfile", component: EmployeeDetailScreen },
   { name: "EmployeeForm", component: EmployeeFormScreen },
   { name: "Inventory", component: InventoryScreen },
   { name: "ProductDetail", component: ProductDetailScreen },

@@ -55,10 +55,11 @@ function employeeName(employee: ApiEmployee) {
 }
 
 export function EmployeeDetailScreen({ route, navigation }: { route: any; navigation: any }) {
-  const employeeId = route.params?.employeeId as string;
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
   const canManageProducts = useAuthStore((state) => state.can("products.manage"));
+  const isSelfProfile = route.name === "EmployeeSelfProfile";
+  const employeeId = isSelfProfile ? user?.employeeId ?? "" : (route.params?.employeeId as string | undefined) ?? "";
   const saleSheetRef = useRef<GorhomBottomSheet>(null);
   const supplySheetRef = useRef<GorhomBottomSheet>(null);
   const [profile, setProfile] = useState<EmployeeProfileResponse | null>(null);
@@ -83,27 +84,30 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     setLoading(true);
     setError(false);
     try {
-      const response = await employeesService.profile(employeeId);
+      if (!employeeId && !isSelfProfile) throw new Error("Employee profile is not available");
+      const response = isSelfProfile ? await employeesService.myProfile() : await employeesService.profile(employeeId);
       setProfile(response);
     } catch {
       setError(true);
     } finally {
       setLoading(false);
     }
-  }, [employeeId]);
+  }, [employeeId, isSelfProfile]);
 
   const loadSales = useCallback(async (page = 1, showSpinner = true) => {
     if (showSpinner) setSalesLoading(true);
     if (page > 1) setLoadingMoreSales(true);
     setSalesError(false);
     try {
-      const response = await employeesService.sales(employeeId, {
+      if (!employeeId && !isSelfProfile) throw new Error("Employee profile is not available");
+      const params = {
         page,
         limit: 10,
         search: salesQuery.trim() || undefined,
         sortBy: "saleDate",
         sortOrder: "desc"
-      });
+      } as const;
+      const response = isSelfProfile ? await employeesService.mySales(params) : await employeesService.sales(employeeId, params);
       setSales((current) =>
         page > 1 && current
           ? { ...response, data: [...current.data, ...response.data] }
@@ -115,7 +119,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       setSalesLoading(false);
       setLoadingMoreSales(false);
     }
-  }, [employeeId, salesQuery]);
+  }, [employeeId, isSelfProfile, salesQuery]);
 
   useFocusEffect(
     useCallback(() => {
@@ -183,6 +187,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   };
 
   const openSupplySheet = async () => {
+    if (isSelfProfile) return;
     setSupplySheetVisible(true);
     if (supplyProducts.length) {
       setSelectedSupplyProductId((current) => current ?? supplyProducts[0]?.id ?? null);
@@ -208,7 +213,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   };
 
   const submitSupply = async () => {
-    if (!profile || supplying) return;
+    if (!profile || supplying || isSelfProfile) return;
     const quantity = Number.parseInt(supplyQuantity, 10);
     const selectedProduct = supplyProducts.find((product) => product.id === selectedSupplyProductId);
     const targetName = employeeName(profile.employee);
@@ -249,11 +254,12 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const printSalesRecord = async () => {
     if (!profile) return;
     try {
-      const response = await employeesService.printSales(profile.employee.id, {
+      const params = {
         search: salesQuery.trim() || undefined,
         sortBy: "saleDate",
         sortOrder: "desc"
-      });
+      } as const;
+      const response = isSelfProfile ? await employeesService.printMySales(params) : await employeesService.printSales(profile.employee.id, params);
       await printingService.printText(response.text);
     } catch (printError) {
       const message = printError instanceof Error ? printError.message : "Unable to print sales record.";
@@ -283,7 +289,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const displayStatus = employee.canLogin ? employee.status : "DISABLED";
   const normalizedUserRole = user?.roleName?.trim().toLowerCase();
   const isOwner = normalizedUserRole ? normalizedUserRole === "owner" : user?.role === "owner";
-  const canManageStockProducts = isOwner || canManageProducts;
+  const canManageStockProducts = !isSelfProfile && (isOwner || canManageProducts);
   const salesToday = activity?.stats.salesToday ?? 0;
   const totalSupplied = activity?.stats.totalSupplied ?? 0;
   const stockItems = activity?.stock ?? [];
@@ -435,12 +441,12 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       <ScreenHeader
         title={name}
         onBack={() => navigation.goBack()}
-        right={
+        right={!isSelfProfile ? (
           <Pressable style={styles.supplyButton} onPress={() => void openSupplySheet()} accessibilityRole="button" accessibilityLabel={`Supply products to ${name}`} hitSlop={8}>
             <PackagePlus size={14} color={colors.surface} />
             <Text style={styles.supplyButtonText}>Supply</Text>
           </Pressable>
-        }
+        ) : undefined}
       />
       <ScrollView
         style={styles.scroller}
@@ -539,7 +545,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
         </AppBottomSheet>
       ) : null}
 
-      {supplySheetVisible ? (
+      {!isSelfProfile && supplySheetVisible ? (
         <AppBottomSheet ref={supplySheetRef} snapPoints={["82%"]} onClose={() => setSupplySheetVisible(false)}>
           <BottomSheetScrollView
             contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}

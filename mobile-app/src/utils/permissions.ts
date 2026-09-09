@@ -20,7 +20,7 @@ const ownerOnly = new Set([
   "ThemeSettings"
 ]);
 
-const employeeOnly = new Set(["EmployeeDashboard"]);
+const employeeOnly = new Set(["EmployeeDashboard", "EmployeeSelfProfile"]);
 
 const employeeAllowed = new Set([
   "Tabs",

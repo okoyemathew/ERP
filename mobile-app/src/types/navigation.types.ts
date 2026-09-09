@@ -34,6 +34,7 @@ export type AppStackParamList = {
   CreditSales: undefined;
   Employees: undefined;
   EmployeeDetail: { employeeId: string };
+  EmployeeSelfProfile: undefined;
   EmployeeForm: { employeeId?: string } | undefined;
   Inventory: undefined;
   ProductDetail: { productId: string };

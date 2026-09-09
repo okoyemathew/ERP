@@ -41,6 +41,10 @@ const ownerOnly: Array<{ icon: LucideIcon; label: string; route: RouteName; colo
   { icon: Archive, label: "Disbursed Products", route: "Disbursed", color: "#546E7A", bg: "#ECEFF1" }
 ];
 
+const employeeOnlyMenu: Array<{ icon: LucideIcon; label: string; route: RouteName; color: string; bg: string }> = [
+  { icon: User, label: "My Activities", route: "EmployeeSelfProfile", color: colors.primary, bg: colors.secondaryBg }
+];
+
 const shared: Array<{ icon: LucideIcon; label: string; route: RouteName; color: string; bg: string }> = [
   { icon: HandCoins, label: "Credit Sales", route: "CreditSales", color: "#0891B2", bg: "#E0F2FE" },
   { icon: RotateCcw, label: "Returned", route: "ReturnedProducts", color: colors.primary, bg: colors.secondaryBg },
@@ -69,7 +73,7 @@ export function DrawerMenu({
   const translateX = useRef(new Animated.Value(-286)).current;
   const name = user?.name || [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.username || (role === "owner" ? "Business Owner" : "Employee");
   const roleLabel = user?.roleName ?? (role === "owner" ? "Business Owner" : "Employee");
-  const items = role === "owner" ? [...ownerOnly, ...shared] : shared.filter((item) => canAccess(role, item.route));
+  const items = role === "owner" ? [...ownerOnly, ...shared] : [...employeeOnlyMenu, ...shared.filter((item) => canAccess(role, item.route))];
 
   useEffect(() => {
     Animated.spring(translateX, {
