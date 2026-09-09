@@ -91,8 +91,16 @@ function createPrismaMock() {
     productReturnRequest: {
       aggregate: jest.fn(),
     },
+    notificationSettings: {
+      findUnique: jest.fn(),
+    },
+    notification: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+    },
     product: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
     },
     cashRegister: {
       findFirst: jest.fn(),
@@ -465,6 +473,143 @@ describe('SalesService sale item price and quantity validation', () => {
     );
 
     expect(item.quantity).toBe(3);
+  });
+
+  it('requires owners to sell from their supplied user stock instead of warehouse stock', async () => {
+    prisma.product.findFirst.mockResolvedValue(
+      sellableProduct({
+        inventory: {
+          businessId,
+          quantityAvailable: 100,
+          quantityOnHand: 100,
+          deletedAt: null,
+        },
+      }),
+    );
+    prisma.goodsDisbursementItem.aggregate.mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+    prisma.saleItem.aggregate.mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+    prisma.productReturnRequest.aggregate.mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+
+    await expect(
+      (service as unknown as {
+        buildItemData: (
+          businessId: string,
+          dto: { productId: string; quantity: number; unitPrice: number },
+          tx: unknown,
+          seller: {
+            useEmployeeStock: boolean;
+            userId: string;
+            stockMatch: Array<{ employeeId: string }>;
+          },
+        ) => Promise<{ quantity: number }>;
+      }).buildItemData(
+        businessId,
+        { productId, quantity: 1, unitPrice: 12000 },
+        prisma,
+        {
+          useEmployeeStock: true,
+          userId: '77777777-7777-7777-7777-777777777777',
+          stockMatch: [{ employeeId: '88888888-8888-8888-8888-888888888888' }],
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('resolves owner sellers to their own supplied employee stock scope', async () => {
+    const ownerUser: AuthenticatedUser = {
+      ...authUser,
+      id: '77777777-7777-7777-7777-777777777777',
+      roleName: 'Owner',
+      employeeId: '88888888-8888-8888-8888-888888888888',
+    };
+    prisma.employee.findFirst.mockResolvedValue({
+      id: ownerUser.employeeId,
+      employeeCode: 'OWNER-0001',
+      firstName: 'Ada',
+      lastName: 'Owner',
+      user: { username: 'ada' },
+    });
+
+    const seller = await (service as unknown as {
+      getSellerStockScope: (
+        businessId: string,
+        user: AuthenticatedUser,
+      ) => Promise<{
+        useEmployeeStock: boolean;
+        employeeId?: string;
+        userId: string;
+      }>;
+    }).getSellerStockScope(businessId, ownerUser);
+
+    expect(seller).toEqual(
+      expect.objectContaining({
+        useEmployeeStock: true,
+        employeeId: ownerUser.employeeId,
+        userId: ownerUser.id,
+      }),
+    );
+  });
+
+  it('creates a low-stock notification for the seller after stock drops below threshold', async () => {
+    prisma.notificationSettings.findUnique.mockResolvedValue({
+      lowStockAlert: true,
+      lowStockLevel: 5,
+    });
+    prisma.product.findMany.mockResolvedValue([
+      { id: productId, name: 'Engine Oil', minimumStock: 2 },
+    ]);
+    prisma.goodsDisbursementItem.aggregate.mockResolvedValue({
+      _sum: { quantity: 10 },
+    });
+    prisma.saleItem.aggregate.mockResolvedValue({
+      _sum: { quantity: 8 },
+    });
+    prisma.productReturnRequest.aggregate.mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+    prisma.notification.findFirst.mockResolvedValue(null);
+
+    await (service as unknown as {
+      notifySellerLowStockAfterSale: (
+        businessId: string,
+        seller: {
+          useEmployeeStock: boolean;
+          userId: string;
+          displayName: string;
+          stockMatch: Array<{ employeeId: string }>;
+        },
+        items: Array<{ productId: string }>,
+        tx: unknown,
+      ) => Promise<void>;
+    }).notifySellerLowStockAfterSale(
+      businessId,
+      {
+        useEmployeeStock: true,
+        userId: employeeUserId,
+        displayName: 'Jane Cashier',
+        stockMatch: [{ employeeId: authUser.employeeId! }],
+      },
+      [{ productId }],
+      prisma,
+    );
+
+    expect(prisma.notification.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          businessId,
+          userId: employeeUserId,
+          title: 'Low stock',
+          message: 'Engine Oil is at 2 units for Jane Cashier',
+          type: 'WARNING',
+        }),
+      }),
+    );
   });
 
   it('stores the actual sale item price independent of later base price changes', async () => {

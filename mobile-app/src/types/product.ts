@@ -239,6 +239,7 @@ export function mapApiProductToDomain(product: ApiProduct): Product {
     id: product.id,
     name: product.name,
     sku: product.sku,
+    barcode: product.barcode,
     category: product.category?.name ?? "Uncategorized",
     price: Number(product.sellingPrice ?? 0),
     cost: Number(product.purchasePrice ?? 0),

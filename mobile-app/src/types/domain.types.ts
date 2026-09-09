@@ -25,6 +25,7 @@ export interface Product {
   id: string;
   name: string;
   sku: string;
+  barcode?: string | null;
   category: string;
   price: number;
   cost: number;
@@ -48,6 +49,8 @@ export interface Employee {
 export interface EmployeeStockItem {
   productId: string;
   name: string;
+  sku?: string | null;
+  barcode?: string | null;
   qtyInHand: number;
   floorPrice: number;
   iconColor: string;

@@ -10,19 +10,17 @@ import { AppApiError } from "@/api/errors";
 import { ReceiptTicket } from "@/components/receipt";
 import { creditSalesService } from "@/services/credit-sales.service";
 import { customersService } from "@/services/customers.service";
+import { employeesService } from "@/services/employees.service";
 import { offlineSyncService } from "@/services/offline-sync.service";
 import { printingService } from "@/services/printing.service";
-import { productsService } from "@/services/products.service";
 import { salesService } from "@/services/sales.service";
 import { useAuthStore } from "@/store/authStore";
-import { useCartStore } from "@/store/cartStore";
 import { useEmployeeCartStore } from "@/store/employeeCartStore";
 import { colors, shadows, spacing } from "@/theme";
 import type { EmployeeStockItem, Product, ReceiptDocument, SaleItem } from "@/types/domain.types";
 import type { ApiCustomer } from "@/types/customer";
 import type { ApiCreditSale } from "@/types/creditSale";
 import { customerDisplayName } from "@/types/customer";
-import { mapApiProductToDomain } from "@/types/product";
 import type { CreatePaymentPayload, CreateSalePayload, PosPaymentMethod } from "@/types/sales";
 import { mapReceiptToDocument, toApiPaymentMethod } from "@/types/sales";
 import { dashboardEvents } from "@/utils/dashboardEvents";
@@ -47,12 +45,13 @@ type ProductTile = {
   id: string;
   name: string;
   sku: string;
+  barcode?: string | null;
   category: string;
   price: number;
   stock: number;
   iconColor: string;
   floorPrice?: number;
-  source: Product | EmployeeStockItem;
+  source: EmployeeStockItem;
 };
 
 type CreditInvoiceView = {
@@ -91,6 +90,13 @@ const normalizeCustomerPhone = (phone?: string | null) => (phone ?? "").replace(
 const moneyValue = (value: string | number | null | undefined) => {
   const amount = Number(value ?? 0);
   return Number.isFinite(amount) ? amount : 0;
+};
+
+const productColors = ["#1565C0", "#2E7D32", "#FB8C00", "#6A1B9A", "#E65100", "#00838F", "#C62828", "#00695C"];
+
+const productIconColor = (name: string) => {
+  const index = name.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) % productColors.length;
+  return productColors[index];
 };
 
 const creditInvoicePaid = (invoiceTotal: number, remainingBalance: number) =>
@@ -140,8 +146,6 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const sheetBottomPadding = spacing.bottomNavHeight + bottomInset + (Platform.OS === "android" ? 180 : 96);
   const checkoutScrollBottomPadding = spacing.bottomNavHeight + bottomInset + (Platform.OS === "android" ? 420 : 280);
   const user = useAuthStore((state) => state.user);
-  const normalizedRoleName = user?.roleName?.trim().toLowerCase();
-  const role = normalizedRoleName ? (normalizedRoleName === "owner" ? "owner" : "employee") : user?.role ?? "owner";
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
@@ -174,13 +178,32 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const [referenceInput, setReferenceInput] = useState("");
   const collectRef = useRef<BottomSheet>(null);
   const receiptRef = useRef<BottomSheet>(null);
-  const ownerCart = useCartStore();
   const employeeCart = useEmployeeCartStore();
   const loadProducts = useCallback(async () => {
     setLoadingProducts(true);
     try {
-      const response = await productsService.list({ limit: 100, available: true });
-      setProducts(response.data.map(mapApiProductToDomain));
+      const response = await employeesService.myProfile();
+      const stock = response.profileActivity?.stock ?? [];
+      setProducts(
+        stock
+          .filter((item) => item.quantityInHand > 0)
+          .map((item) => {
+            const unitValue = moneyValue(item.unitValue);
+            const name = item.productName || "Product";
+            return {
+              id: item.productId,
+              name,
+              sku: item.sku ?? item.barcode ?? item.productId.slice(0, 8),
+              barcode: item.barcode,
+              category: "Supplied Products",
+              price: unitValue,
+              cost: unitValue,
+              stock: item.quantityInHand,
+              floorPrice: unitValue,
+              iconColor: productIconColor(name)
+            };
+          })
+      );
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : "Unable to load products.";
       Alert.alert("Products", message);
@@ -233,24 +256,12 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   }, [receiptVisible]);
 
   const productTiles: ProductTile[] = useMemo(() => {
-    if (role === "owner") {
-      return products.map((product) => ({
-        id: product.id,
-        name: product.name,
-        sku: product.sku,
-        category: product.category,
-        price: Number(product.price),
-        stock: product.stock,
-        iconColor: product.iconColor,
-        floorPrice: product.floorPrice,
-        source: product
-      }));
-    }
-
     return products.map((product) => {
       const stockItem: EmployeeStockItem = {
         productId: product.id,
         name: product.name,
+        sku: product.sku,
+        barcode: product.barcode,
         qtyInHand: product.stock,
         floorPrice: product.floorPrice ?? product.cost,
         iconColor: product.iconColor
@@ -259,6 +270,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         id: product.id,
         name: product.name,
         sku: product.sku,
+        barcode: product.barcode,
         category: product.category,
         price: Number(product.price),
         stock: product.stock,
@@ -267,20 +279,20 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         source: stockItem
       };
     });
-  }, [products, role]);
+  }, [products]);
 
   const categories = useMemo(() => ["All", ...Array.from(new Set(productTiles.map((product) => product.category)))], [productTiles]);
   const filteredProducts = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return productTiles.filter((product) => {
       const inCategory = activeCategory === "All" || product.category === activeCategory;
-      const matchesQuery = !normalized || [product.name, product.sku, product.category].some((value) => value.toLowerCase().includes(normalized));
+      const matchesQuery = !normalized || [product.name, product.sku, product.barcode, product.category].filter(Boolean).some((value) => String(value).toLowerCase().includes(normalized));
       return inCategory && matchesQuery;
     });
   }, [activeCategory, productTiles, query]);
 
-  const cartCount = role === "owner" ? ownerCart.items.reduce((sum, item) => sum + item.qty, 0) : employeeCart.items.reduce((sum, item) => sum + item.qty, 0);
-  const cartSubtotal = role === "owner" ? ownerCart.total : employeeCart.total;
+  const cartCount = employeeCart.items.reduce((sum, item) => sum + item.qty, 0);
+  const cartSubtotal = employeeCart.total;
   const discountAmount = Math.max(0, Number(discountInput || 0));
   const taxAmount = Math.max(0, Number(taxInput || 0));
   const grandTotal = Math.max(0, cartSubtotal - discountAmount + taxAmount);
@@ -295,13 +307,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const hasReceiptCustomerDetails = Boolean(trimmedReceiptCustomerName || trimmedReceiptCustomerPhone);
   const needsCreditCustomer = paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0;
   const openCreditInvoices = useMemo(() => creditInvoices.filter((invoice) => invoice.remaining > 0), [creditInvoices]);
-  const cartItems: SaleItem[] = role === "owner"
-    ? ownerCart.items.map((item) => ({ productId: item.product.id, name: item.product.name, qty: item.qty, price: item.product.price }))
-    : employeeCart.items.map((item) => ({ productId: item.stockItem.productId, name: item.stockItem.name, qty: item.qty, price: item.sellingPrice }));
+  const cartItems: SaleItem[] = employeeCart.items.map((item) => ({ productId: item.stockItem.productId, name: item.stockItem.name, qty: item.qty, price: item.sellingPrice }));
 
-  const cartQty = (productId: string) => role === "owner"
-    ? ownerCart.items.find((item) => item.product.id === productId)?.qty ?? 0
-    : employeeCart.items.find((item) => item.stockItem.productId === productId)?.qty ?? 0;
+  const cartQty = (productId: string) => employeeCart.items.find((item) => item.stockItem.productId === productId)?.qty ?? 0;
 
   const productPriceInput = (product: ProductTile) => prices[product.id] ?? "";
   const minimumSellingPrice = (product: ProductTile) => Math.max(0, Number(product.price || 0));
@@ -495,8 +503,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   };
 
   const clearCart = () => {
-    if (role === "owner") ownerCart.clearCart();
-    else employeeCart.clearCart();
+    employeeCart.clearCart();
     setQuantityInputs({});
     setSelectedCustomerId(undefined);
     setNewCustomerName("");
@@ -528,13 +535,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return false;
     }
 
-    if (role === "owner") {
-      ownerCart.addItem(product.source as Product, salePrice.price);
-      setQuantityInputs((current) => ({ ...current, [product.id]: String(currentQty + 1) }));
-      return true;
-    }
-
-    employeeCart.addItem(product.source as EmployeeStockItem, salePrice.price);
+    employeeCart.addItem(product.source, salePrice.price);
     setQuantityInputs((current) => ({ ...current, [product.id]: String(currentQty + 1) }));
     return true;
   };
@@ -543,30 +544,33 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     const barcode = query.trim();
     if (!barcode) return;
     try {
-      const matches = await productsService.searchByBarcode(barcode);
-      if (matches.length === 0) {
+      const normalizedBarcode = barcode.toLowerCase();
+      const matchedProduct = products.find((product) =>
+        [product.barcode, product.sku]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase() === normalizedBarcode)
+      );
+
+      if (!matchedProduct) {
         Alert.alert("Barcode", "No product found for this barcode.");
         return;
       }
-      const mapped = matches.map(mapApiProductToDomain);
-      setProducts((current) => {
-        const byId = new Map(current.map((item) => [item.id, item]));
-        mapped.forEach((item) => byId.set(item.id, item));
-        return Array.from(byId.values());
-      });
-      const matchedProduct = mapped[0];
+
       const tile: ProductTile = {
         id: matchedProduct.id,
         name: matchedProduct.name,
         sku: matchedProduct.sku,
+        barcode: matchedProduct.barcode,
         category: matchedProduct.category,
         price: Number(matchedProduct.price),
         stock: matchedProduct.stock,
         iconColor: matchedProduct.iconColor,
         floorPrice: matchedProduct.floorPrice,
-        source: role === "owner" ? matchedProduct : {
+        source: {
           productId: matchedProduct.id,
           name: matchedProduct.name,
+          sku: matchedProduct.sku,
+          barcode: matchedProduct.barcode,
           qtyInHand: matchedProduct.stock,
           floorPrice: matchedProduct.floorPrice ?? matchedProduct.cost,
           iconColor: matchedProduct.iconColor
@@ -583,8 +587,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const updateProductQty = (product: ProductTile, nextQty: number) => {
     if (nextQty <= 0) {
-      if (role === "owner") ownerCart.removeItem(product.id);
-      else employeeCart.removeItem(product.id);
+      employeeCart.removeItem(product.id);
       setQuantityInputs((current) => ({ ...current, [product.id]: "0" }));
       return;
     }
@@ -600,12 +603,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         return;
       }
 
-      if (role === "owner") ownerCart.addItem(product.source as Product, salePrice.price);
-      else employeeCart.addItem(product.source as EmployeeStockItem, salePrice.price);
+      employeeCart.addItem(product.source, salePrice.price);
     }
 
-    if (role === "owner") ownerCart.updateQty(product.id, nextQty);
-    else employeeCart.updateQty(product.id, nextQty);
+    employeeCart.updateQty(product.id, nextQty);
     setQuantityInputs((current) => ({ ...current, [product.id]: String(nextQty) }));
   };
 
@@ -614,8 +615,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     const sellingPrice = parsePositiveMoney(value);
     if (!sellingPrice) return;
     if (sellingPrice < minimumSellingPrice(product)) return;
-    if (role === "owner") ownerCart.updateSellingPrice(product.id, sellingPrice);
-    else employeeCart.updateSellingPrice(product.id, sellingPrice);
+    employeeCart.updateSellingPrice(product.id, sellingPrice);
   };
 
   const submitQuantityInput = (product: ProductTile, value: string) => {
@@ -785,8 +785,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       };
 
       const clearCheckout = async (refreshCreditInvoices = true) => {
-        if (role === "owner") ownerCart.clearCart();
-        else employeeCart.clearCart();
+        employeeCart.clearCart();
         setPaidInput("");
         setReferenceInput("");
         setDiscountInput("0");
@@ -864,8 +863,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           });
           const offlineReceipt = buildOfflineReceipt(queued.id);
           dashboardEvents.notifySaleChanged();
-          if (role === "owner") ownerCart.clearCart();
-          else employeeCart.clearCart();
+          employeeCart.clearCart();
           setPaidInput("");
           setReferenceInput("");
           setDiscountInput("0");
@@ -1012,18 +1010,6 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     }
 
     if (products.length === 0) {
-      if (role === "owner") {
-        Alert.alert("No products", "Create a product before starting a sale.", [
-          { text: "Cancel", style: "cancel" },
-          { text: "Add Product", onPress: () => {
-            const parent = navigation.getParent?.();
-            if (parent) parent.navigate("ProductForm");
-            else navigation.navigate("ProductForm");
-          } }
-        ]);
-        return;
-      }
-
       Alert.alert("No products", "No products are available for sale.");
       return;
     }

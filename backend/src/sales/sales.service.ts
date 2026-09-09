@@ -40,6 +40,7 @@ type SellerStockScope = {
   useEmployeeStock: boolean;
   employeeId?: string;
   userId: string;
+  displayName?: string;
   stockMatch?: Prisma.GoodsDisbursementWhereInput[];
 };
 type ReceiptLine = {
@@ -601,6 +602,15 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
+    if (seller.useEmployeeStock) {
+      await this.notifySellerLowStockAfterSale(
+        businessId,
+        seller,
+        sale.items,
+        tx,
+      );
+    }
+
     await this.createReceipt(id, sale.saleNumber, tx);
 
     const business = await tx.business.findUnique({
@@ -886,18 +896,10 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    const normalizedRole = user.roleName?.trim().toLowerCase();
-    const adminRole = [
-      SYSTEM_ROLES.OWNER,
-      SYSTEM_ROLES.ADMIN,
-      SYSTEM_ROLES.MANAGER,
-    ].some((role) => role.toLowerCase() === normalizedRole);
-    if (!employee && !adminRole) {
-      throw new ForbiddenException('User is not allowed to perform sales');
-    }
-
-    if (adminRole) {
-      return { useEmployeeStock: false, userId: user.id };
+    if (!employee) {
+      throw new ForbiddenException(
+        'User must have active supplied stock before performing sales',
+      );
     }
 
     const employeeName = employee
@@ -915,6 +917,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       useEmployeeStock: true,
       employeeId: employee?.id,
       userId: user.id,
+      displayName: employeeName,
       stockMatch: [
         ...(employee ? [{ employeeId: employee.id }] : []),
         ...matchTokens.flatMap((token) => [
@@ -1139,6 +1142,70 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         (sold._sum.quantity ?? 0) +
         (returned._sum.quantity ?? 0),
     );
+  }
+
+  private async notifySellerLowStockAfterSale(
+    businessId: string,
+    seller: SellerStockScope,
+    items: Array<{ productId: string }>,
+    tx: Tx,
+  ) {
+    const productIds = [...new Set(items.map((item) => item.productId))];
+    if (!productIds.length) return;
+
+    const settings = await tx.notificationSettings.findUnique({
+      where: { businessId },
+      select: { lowStockAlert: true, lowStockLevel: true },
+    });
+
+    if (settings && !settings.lowStockAlert) {
+      return;
+    }
+
+    const products = await tx.product.findMany({
+      where: { businessId, id: { in: productIds }, isActive: true },
+      select: { id: true, name: true, minimumStock: true },
+    });
+
+    for (const product of products) {
+      const quantity = await this.employeeProductAvailableQuantity(
+        businessId,
+        product.id,
+        seller,
+        tx,
+      );
+      const threshold = Math.max(
+        product.minimumStock ?? 0,
+        settings?.lowStockLevel ?? 0,
+      );
+
+      if (quantity > threshold) {
+        continue;
+      }
+
+      const existing = await tx.notification.findFirst({
+        where: {
+          businessId,
+          userId: seller.userId,
+          title: 'Low stock',
+          message: { contains: product.name },
+          isRead: false,
+        },
+        select: { id: true },
+      });
+
+      if (!existing) {
+        await tx.notification.create({
+          data: {
+            businessId,
+            userId: seller.userId,
+            title: 'Low stock',
+            message: `${product.name} is at ${quantity} units for ${seller.displayName ?? 'this seller'}`,
+            type: 'WARNING',
+          },
+        });
+      }
+    }
   }
 
   private sumQuantitiesByProduct(
