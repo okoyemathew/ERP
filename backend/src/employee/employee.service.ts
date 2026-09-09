@@ -951,11 +951,22 @@ export class EmployeeService {
 
     const suppliedByProduct = new Map<string, number>();
     const returnedByProduct = new Map<string, number>();
+    const firstInboundAtByProduct = new Map<string, Date>();
+
+    const recordFirstInbound = (productId: string, date?: Date | null) => {
+      if (!date) return;
+      const current = firstInboundAtByProduct.get(productId);
+      if (!current || date < current) {
+        firstInboundAtByProduct.set(productId, date);
+      }
+    };
+
     for (const item of returnedItems) {
       returnedByProduct.set(
         item.productId,
         (returnedByProduct.get(item.productId) ?? 0) + item.quantity,
       );
+      recordFirstInbound(item.productId, item.reviewedAt ?? item.requestedAt);
     }
 
     const supplyRecords = disbursements
@@ -976,6 +987,7 @@ export class EmployeeService {
             item.productId,
             (suppliedByProduct.get(item.productId) ?? 0) + item.quantity,
           );
+          recordFirstInbound(item.productId, run.disbursementDate);
         }
 
         return {
@@ -1022,6 +1034,11 @@ export class EmployeeService {
     >();
 
     for (const item of soldItems) {
+      const firstInboundAt = firstInboundAtByProduct.get(item.productId);
+      if (!firstInboundAt || item.sale.saleDate < firstInboundAt) {
+        continue;
+      }
+
       const existing = stockByProduct.get(item.productId);
       const unitValue = new Prisma.Decimal(item.product.sellingPrice);
       const totalSoldValue = new Prisma.Decimal(item.totalAmount);

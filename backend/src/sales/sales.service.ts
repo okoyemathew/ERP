@@ -1097,12 +1097,33 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     seller: SellerStockScope,
     tx: Tx | PrismaService,
   ) {
+    const stock = await this.sellerProductStockSnapshot(
+      businessId,
+      productId,
+      seller,
+      tx,
+    );
+
+    return stock.availableQuantity;
+  }
+
+  private async sellerProductStockSnapshot(
+    businessId: string,
+    productId: string,
+    seller: SellerStockScope,
+    tx: Tx | PrismaService,
+  ) {
     if (!seller.useEmployeeStock || !seller.stockMatch?.length) {
-      return 0;
+      return {
+        availableQuantity: 0,
+        suppliedQuantity: 0,
+        soldQuantity: 0,
+        returnedQuantity: 0,
+      };
     }
 
-    const [supplied, sold, returned] = await Promise.all([
-      tx.goodsDisbursementItem.aggregate({
+    const [suppliedRows, returnedRows] = await Promise.all([
+      tx.goodsDisbursementItem.findMany({
         where: {
           productId,
           product: { businessId, isActive: true },
@@ -1111,37 +1132,77 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
             OR: seller.stockMatch,
           },
         },
-        _sum: { quantity: true },
-      }),
-      tx.saleItem.aggregate({
-        where: {
-          productId,
-          sale: {
-            businessId,
-            userId: seller.userId,
-            deletedAt: null,
-            status: SaleStatus.COMPLETED,
+        select: {
+          quantity: true,
+          goodsDisbursement: {
+            select: { disbursementDate: true },
           },
         },
-        _sum: { quantity: true },
       }),
-      tx.productReturnRequest.aggregate({
+      tx.productReturnRequest.findMany({
         where: {
           businessId,
           productId,
           originalSellerId: seller.userId,
           status: ProductReturnRequestStatus.APPROVED,
         },
-        _sum: { quantity: true },
+        select: {
+          quantity: true,
+          requestedAt: true,
+          reviewedAt: true,
+        },
       }),
     ]);
 
-    return Math.max(
+    const suppliedQuantity = suppliedRows.reduce(
+      (sum, row) => sum + row.quantity,
       0,
-      (supplied._sum.quantity ?? 0) -
-        (sold._sum.quantity ?? 0) +
-        (returned._sum.quantity ?? 0),
     );
+    const returnedQuantity = returnedRows.reduce(
+      (sum, row) => sum + row.quantity,
+      0,
+    );
+    const inboundDates = [
+      ...suppliedRows.map((row) => row.goodsDisbursement.disbursementDate),
+      ...returnedRows.map((row) => row.reviewedAt ?? row.requestedAt),
+    ].filter((value): value is Date => Boolean(value));
+    const firstInboundAt = inboundDates.sort(
+      (left, right) => left.getTime() - right.getTime(),
+    )[0];
+
+    if (!firstInboundAt) {
+      return {
+        availableQuantity: 0,
+        suppliedQuantity,
+        soldQuantity: 0,
+        returnedQuantity,
+      };
+    }
+
+    const sold = await tx.saleItem.aggregate({
+      where: {
+        productId,
+        sale: {
+          businessId,
+          userId: seller.userId,
+          deletedAt: null,
+          status: SaleStatus.COMPLETED,
+          saleDate: { gte: firstInboundAt },
+        },
+      },
+      _sum: { quantity: true },
+    });
+    const soldQuantity = sold._sum.quantity ?? 0;
+
+    return {
+      availableQuantity: Math.max(
+        0,
+        suppliedQuantity - soldQuantity + returnedQuantity,
+      ),
+      suppliedQuantity,
+      soldQuantity,
+      returnedQuantity,
+    };
   }
 
   private async notifySellerLowStockAfterSale(

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Alert, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import { useFocusEffect } from "@react-navigation/native";
 import { CreditCard, FileDown, Grid2X2, HandCoins, List, Minus, Package, Plus, Printer, Search, Send, Trash2, Wallet } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -242,6 +243,12 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     void loadCustomers();
     void loadCreditInvoices().catch(() => undefined);
   }, [loadCreditInvoices, loadCustomers, loadProducts]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadProducts();
+    }, [loadProducts])
+  );
 
   useEffect(() => {
     if (!collectVisible) return;

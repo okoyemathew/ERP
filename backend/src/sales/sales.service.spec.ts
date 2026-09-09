@@ -87,9 +87,11 @@ function createPrismaMock() {
     },
     goodsDisbursementItem: {
       aggregate: jest.fn(),
+      findMany: jest.fn(),
     },
     productReturnRequest: {
       aggregate: jest.fn(),
+      findMany: jest.fn(),
     },
     notificationSettings: {
       findUnique: jest.fn(),
@@ -380,15 +382,18 @@ describe('SalesService sale item price and quantity validation', () => {
         },
       }),
     );
-    prisma.goodsDisbursementItem.aggregate.mockResolvedValue({
-      _sum: { quantity: 60 },
-    });
+    prisma.goodsDisbursementItem.findMany.mockResolvedValue([
+      {
+        quantity: 60,
+        goodsDisbursement: {
+          disbursementDate: new Date('2026-09-09T08:00:00.000Z'),
+        },
+      },
+    ]);
     prisma.saleItem.aggregate.mockResolvedValue({
       _sum: { quantity: 9 },
     });
-    prisma.productReturnRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    prisma.productReturnRequest.findMany.mockResolvedValue([]);
 
     const item = await (service as unknown as {
       buildItemData: (
@@ -417,12 +422,17 @@ describe('SalesService sale item price and quantity validation', () => {
     );
 
     expect(item.quantity).toBe(51);
-    expect(prisma.goodsDisbursementItem.aggregate).toHaveBeenCalledWith(
+    expect(prisma.goodsDisbursementItem.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           productId,
           goodsDisbursement: expect.objectContaining({
             businessId,
+          }),
+        }),
+        select: expect.objectContaining({
+          goodsDisbursement: expect.objectContaining({
+            select: { disbursementDate: true },
           }),
         }),
       }),
@@ -440,15 +450,24 @@ describe('SalesService sale item price and quantity validation', () => {
         },
       }),
     );
-    prisma.goodsDisbursementItem.aggregate.mockResolvedValue({
-      _sum: { quantity: 60 },
-    });
+    prisma.goodsDisbursementItem.findMany.mockResolvedValue([
+      {
+        quantity: 60,
+        goodsDisbursement: {
+          disbursementDate: new Date('2026-09-09T08:00:00.000Z'),
+        },
+      },
+    ]);
     prisma.saleItem.aggregate.mockResolvedValue({
       _sum: { quantity: 59 },
     });
-    prisma.productReturnRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 2 },
-    });
+    prisma.productReturnRequest.findMany.mockResolvedValue([
+      {
+        quantity: 2,
+        requestedAt: new Date('2026-09-09T09:00:00.000Z'),
+        reviewedAt: new Date('2026-09-09T09:30:00.000Z'),
+      },
+    ]);
 
     const item = await (service as unknown as {
       buildItemData: (
@@ -486,15 +505,11 @@ describe('SalesService sale item price and quantity validation', () => {
         },
       }),
     );
-    prisma.goodsDisbursementItem.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    prisma.goodsDisbursementItem.findMany.mockResolvedValue([]);
     prisma.saleItem.aggregate.mockResolvedValue({
       _sum: { quantity: 0 },
     });
-    prisma.productReturnRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    prisma.productReturnRequest.findMany.mockResolvedValue([]);
 
     await expect(
       (service as unknown as {
@@ -519,6 +534,64 @@ describe('SalesService sale item price and quantity validation', () => {
         },
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('does not subtract sales that happened before the seller received supplied stock', async () => {
+    prisma.product.findFirst.mockResolvedValue(
+      sellableProduct({
+        inventory: {
+          businessId,
+          quantityAvailable: 0,
+          quantityOnHand: 0,
+          deletedAt: null,
+        },
+      }),
+    );
+    prisma.goodsDisbursementItem.findMany.mockResolvedValue([
+      {
+        quantity: 20,
+        goodsDisbursement: {
+          disbursementDate: new Date('2026-09-09T08:00:00.000Z'),
+        },
+      },
+    ]);
+    prisma.productReturnRequest.findMany.mockResolvedValue([]);
+    prisma.saleItem.aggregate.mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+
+    const item = await (service as unknown as {
+      buildItemData: (
+        businessId: string,
+        dto: { productId: string; quantity: number; unitPrice: number },
+        tx: unknown,
+        seller: {
+          useEmployeeStock: boolean;
+          userId: string;
+          stockMatch: Array<{ employeeId: string }>;
+        },
+      ) => Promise<{ quantity: number }>;
+    }).buildItemData(
+      businessId,
+      { productId, quantity: 20, unitPrice: 12000 },
+      prisma,
+      {
+        useEmployeeStock: true,
+        userId: employeeUserId,
+        stockMatch: [{ employeeId: authUser.employeeId! }],
+      },
+    );
+
+    expect(item.quantity).toBe(20);
+    expect(prisma.saleItem.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sale: expect.objectContaining({
+            saleDate: { gte: new Date('2026-09-09T08:00:00.000Z') },
+          }),
+        }),
+      }),
+    );
   });
 
   it('resolves owner sellers to their own supplied employee stock scope', async () => {
@@ -564,15 +637,18 @@ describe('SalesService sale item price and quantity validation', () => {
     prisma.product.findMany.mockResolvedValue([
       { id: productId, name: 'Engine Oil', minimumStock: 2 },
     ]);
-    prisma.goodsDisbursementItem.aggregate.mockResolvedValue({
-      _sum: { quantity: 10 },
-    });
+    prisma.goodsDisbursementItem.findMany.mockResolvedValue([
+      {
+        quantity: 10,
+        goodsDisbursement: {
+          disbursementDate: new Date('2026-09-09T08:00:00.000Z'),
+        },
+      },
+    ]);
     prisma.saleItem.aggregate.mockResolvedValue({
       _sum: { quantity: 8 },
     });
-    prisma.productReturnRequest.aggregate.mockResolvedValue({
-      _sum: { quantity: 0 },
-    });
+    prisma.productReturnRequest.findMany.mockResolvedValue([]);
     prisma.notification.findFirst.mockResolvedValue(null);
 
     await (service as unknown as {
