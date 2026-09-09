@@ -77,4 +77,17 @@ describe('RolesGuard', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(auth.userHasPermissions).not.toHaveBeenCalled();
   });
+
+  it('allows a custom employee role through non-admin role-only routes', async () => {
+    const auth = authorizationService(false);
+    const guard = new RolesGuard(
+      reflector([SYSTEM_ROLES.CASHIER, SYSTEM_ROLES.SALESPERSON], undefined) as Reflector,
+      auth as never,
+    );
+
+    await expect(
+      guard.canActivate(context({ roleName: 'Caissier' })),
+    ).resolves.toBe(true);
+    expect(auth.userHasPermissions).not.toHaveBeenCalled();
+  });
 });

@@ -52,7 +52,8 @@ export class RolesGuard implements CanActivate {
     }
 
     const rawRoleName =
-      user.roleName ?? (await this.authorizationService.getRoleName(user.roleId));
+      user.roleName ??
+      (await this.authorizationService.getRoleName(user.roleId));
     const roleName = normalizeSystemRoleName(rawRoleName);
 
     if (!roleName || !requiredRoles.includes(roleName)) {
@@ -75,6 +76,10 @@ export class RolesGuard implements CanActivate {
           requiredPermissions,
         ))
       ) {
+        return true;
+      }
+
+      if (!isAdminOnlyRoute && requiredPermissions.length === 0 && rawRoleName) {
         return true;
       }
 
