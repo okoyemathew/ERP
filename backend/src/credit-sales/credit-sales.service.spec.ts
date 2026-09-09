@@ -93,4 +93,37 @@ describe('CreditSalesService authenticated ownership', () => {
       }),
     );
   });
+
+  it('allows credit-sale management for a roleless active employee who can sell', async () => {
+    const prisma = {
+      employee: {
+        findFirst: jest.fn().mockResolvedValue({ id: employee.employeeId }),
+      },
+    };
+    const service = new CreditSalesService(prisma as never);
+
+    await expect(
+      (
+        service as unknown as {
+          assertCanManageCredit: (user: AuthenticatedUser) => Promise<void>;
+        }
+      ).assertCanManageCredit({
+        ...employee,
+        roleId: null,
+        roleName: null,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(prisma.employee.findFirst).toHaveBeenCalledWith({
+      where: {
+        businessId,
+        userId: employeeUserId,
+        status: 'ACTIVE',
+        canLogin: true,
+        canSell: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+  });
 });

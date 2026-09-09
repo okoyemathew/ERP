@@ -1,6 +1,9 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
-import { PERMISSIONS_KEY, ROLES_KEY } from '../constants/auth-metadata.constant';
+import {
+  PERMISSIONS_KEY,
+  ROLES_KEY,
+} from '../constants/auth-metadata.constant';
 import { SYSTEM_ROLES } from '../constants/roles.constant';
 import { RolesGuard } from './roles.guard';
 
@@ -42,6 +45,8 @@ function authorizationService(hasPermissions = true) {
   return {
     getRoleName: jest.fn(),
     userHasPermissions: jest.fn().mockResolvedValue(hasPermissions),
+    employeeHasFallbackPermissions: jest.fn().mockResolvedValue(false),
+    hasActiveEmployeeAccount: jest.fn().mockResolvedValue(false),
   };
 }
 
@@ -49,9 +54,10 @@ describe('RolesGuard', () => {
   it('allows a custom employee role through non-admin routes when required permissions match', async () => {
     const auth = authorizationService(true);
     const guard = new RolesGuard(
-      reflector([SYSTEM_ROLES.CASHIER, SYSTEM_ROLES.SALESPERSON], [
-        'sales.manage',
-      ]) as Reflector,
+      reflector(
+        [SYSTEM_ROLES.CASHIER, SYSTEM_ROLES.SALESPERSON],
+        ['sales.manage'],
+      ) as Reflector,
       auth as never,
     );
 
@@ -66,9 +72,10 @@ describe('RolesGuard', () => {
   it('rejects a custom employee role when the route is owner/admin only', async () => {
     const auth = authorizationService(true);
     const guard = new RolesGuard(
-      reflector([SYSTEM_ROLES.OWNER, SYSTEM_ROLES.ADMIN], [
-        'employees.manage',
-      ]) as Reflector,
+      reflector(
+        [SYSTEM_ROLES.OWNER, SYSTEM_ROLES.ADMIN],
+        ['employees.manage'],
+      ) as Reflector,
       auth as never,
     );
 
@@ -81,7 +88,10 @@ describe('RolesGuard', () => {
   it('allows a custom employee role through non-admin role-only routes', async () => {
     const auth = authorizationService(false);
     const guard = new RolesGuard(
-      reflector([SYSTEM_ROLES.CASHIER, SYSTEM_ROLES.SALESPERSON], undefined) as Reflector,
+      reflector(
+        [SYSTEM_ROLES.CASHIER, SYSTEM_ROLES.SALESPERSON],
+        undefined,
+      ) as Reflector,
       auth as never,
     );
 
@@ -89,5 +99,61 @@ describe('RolesGuard', () => {
       guard.canActivate(context({ roleName: 'Caissier' })),
     ).resolves.toBe(true);
     expect(auth.userHasPermissions).not.toHaveBeenCalled();
+  });
+
+  it('allows a roleless active employee through non-admin routes when employee flags match', async () => {
+    const auth = authorizationService(false);
+    auth.employeeHasFallbackPermissions.mockResolvedValue(true);
+    const guard = new RolesGuard(
+      reflector(
+        [SYSTEM_ROLES.CASHIER, SYSTEM_ROLES.SALESPERSON],
+        ['sales.manage'],
+      ) as Reflector,
+      auth as never,
+    );
+
+    await expect(
+      guard.canActivate(context({ roleId: null, roleName: null })),
+    ).resolves.toBe(true);
+    expect(auth.employeeHasFallbackPermissions).toHaveBeenCalledWith(
+      businessId,
+      '33333333-3333-3333-3333-333333333333',
+      ['sales.manage'],
+    );
+  });
+
+  it('allows a roleless active employee through non-admin role-only routes', async () => {
+    const auth = authorizationService(false);
+    auth.hasActiveEmployeeAccount.mockResolvedValue(true);
+    const guard = new RolesGuard(
+      reflector(
+        [SYSTEM_ROLES.CASHIER, SYSTEM_ROLES.SALESPERSON],
+        undefined,
+      ) as Reflector,
+      auth as never,
+    );
+
+    await expect(
+      guard.canActivate(context({ roleId: null, roleName: null })),
+    ).resolves.toBe(true);
+    expect(auth.hasActiveEmployeeAccount).toHaveBeenCalledWith(
+      businessId,
+      '33333333-3333-3333-3333-333333333333',
+    );
+  });
+
+  it('rejects a roleless user without an active employee account', async () => {
+    const auth = authorizationService(false);
+    const guard = new RolesGuard(
+      reflector(
+        [SYSTEM_ROLES.CASHIER, SYSTEM_ROLES.SALESPERSON],
+        undefined,
+      ) as Reflector,
+      auth as never,
+    );
+
+    await expect(
+      guard.canActivate(context({ roleId: null, roleName: null })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

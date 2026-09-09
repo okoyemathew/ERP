@@ -1,6 +1,28 @@
 import { Injectable } from '@nestjs/common';
+import { EmployeeStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SecurityUtil } from '../utils/security.util';
+
+type EmployeeAccess = {
+  canSell: boolean;
+  canManageStock: boolean;
+  canManageExpenses: boolean;
+  canPrintReceipt: boolean;
+};
+
+const EMPLOYEE_PERMISSION_FALLBACKS: Record<
+  string,
+  (employee: EmployeeAccess) => boolean
+> = {
+  'sales.manage': (employee) => employee.canSell,
+  'credit-sales.manage': (employee) => employee.canSell,
+  'customers.manage': (employee) => employee.canSell,
+  'receipt.manage': (employee) => employee.canPrintReceipt,
+  'inventory.manage': (employee) => employee.canManageStock,
+  'goods-supplied.manage': (employee) => employee.canManageStock,
+  'goods-disbursement.manage': (employee) => employee.canManageStock,
+  'expenses.manage': (employee) => employee.canManageExpenses,
+};
 
 @Injectable()
 export class AuthorizationService {
@@ -55,5 +77,58 @@ export class AuthorizationService {
       rolePermissions.map((rolePermission) => rolePermission.permission.name),
       [...new Set(requiredPermissions)],
     );
+  }
+
+  async hasActiveEmployeeAccount(
+    businessId: string,
+    userId: string,
+  ): Promise<boolean> {
+    return Boolean(await this.getActiveEmployeeAccess(businessId, userId));
+  }
+
+  async employeeHasFallbackPermissions(
+    businessId: string,
+    userId: string,
+    requiredPermissions: readonly string[],
+  ): Promise<boolean> {
+    const uniquePermissions = [...new Set(requiredPermissions)];
+
+    if (uniquePermissions.length === 0) {
+      return true;
+    }
+
+    const employee = await this.getActiveEmployeeAccess(businessId, userId);
+
+    if (!employee) {
+      return false;
+    }
+
+    return uniquePermissions.every((permission) => {
+      const canUsePermission = EMPLOYEE_PERMISSION_FALLBACKS[permission];
+      return canUsePermission ? canUsePermission(employee) : false;
+    });
+  }
+
+  private async getActiveEmployeeAccess(
+    businessId: string,
+    userId: string,
+  ): Promise<EmployeeAccess | null> {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        businessId,
+        userId,
+        status: EmployeeStatus.ACTIVE,
+        canLogin: true,
+        deletedAt: null,
+      },
+      select: {
+        canSell: true,
+        canManageStock: true,
+        canManageExpenses: true,
+        canPrintReceipt: true,
+      },
+    });
+
+    return employee ?? null;
   }
 }

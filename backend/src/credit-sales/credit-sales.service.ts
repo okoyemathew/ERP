@@ -11,6 +11,7 @@ import {
   CreditSaleActionApprovalStatus,
   CreditSaleEmployeeAction,
   CreditSaleStatus,
+  EmployeeStatus,
   CustomerStatus,
   InventoryTransactionType,
   NotificationType,
@@ -62,7 +63,7 @@ export class CreditSalesService {
     dto: CreateCreditSaleDto,
     user: AuthenticatedUser,
   ) {
-    this.assertCanCreateCreditSale(user);
+    await this.assertCanCreateCreditSale(user);
 
     return this.prisma.$transaction(async (tx) => {
       const customer = await this.getActiveCustomerOrThrow(
@@ -251,7 +252,7 @@ export class CreditSalesService {
     reason: string | undefined,
     user: AuthenticatedUser,
   ) {
-    this.assertCanManageCredit(user);
+    await this.assertCanManageCredit(user);
     await this.refreshCreditStatus(businessId, id, this.prisma);
 
     return this.prisma.$transaction(async (tx) => {
@@ -326,7 +327,9 @@ export class CreditSalesService {
       take: 100,
     });
 
-    return { data: requests.map((item) => this.formatCreditSaleActionRequest(item)) };
+    return {
+      data: requests.map((item) => this.formatCreditSaleActionRequest(item)),
+    };
   }
 
   async approveEmployeeActionRequest(
@@ -443,7 +446,7 @@ export class CreditSalesService {
     dto: { dueDate?: Date; remarks?: string },
     user: AuthenticatedUser,
   ) {
-    this.assertCanManageCredit(user);
+    await this.assertCanManageCredit(user);
     await this.refreshCreditStatus(businessId, id, this.prisma);
 
     if (dto.dueDate === undefined && dto.remarks === undefined) {
@@ -516,7 +519,7 @@ export class CreditSalesService {
     id: string,
     user: AuthenticatedUser,
   ) {
-    this.assertCanManageCredit(user);
+    await this.assertCanManageCredit(user);
     await this.refreshCreditStatus(businessId, id, this.prisma);
 
     return this.prisma.$transaction(async (tx) => {
@@ -692,7 +695,9 @@ export class CreditSalesService {
         storedOutstandingBalance: customer.outstandingBalance,
       },
       summary,
-      data: creditSales.map((creditSale) => this.formatCreditSale(creditSale, viewer)),
+      data: creditSales.map((creditSale) =>
+        this.formatCreditSale(creditSale, viewer),
+      ),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -870,11 +875,7 @@ export class CreditSalesService {
     };
   }
 
-  async getDueDate(
-    businessId: string,
-    id: string,
-    viewer?: AuthenticatedUser,
-  ) {
+  async getDueDate(businessId: string, id: string, viewer?: AuthenticatedUser) {
     await this.refreshCreditStatus(businessId, id, this.prisma);
     const creditSale = await this.getCreditSaleOrThrow(
       businessId,
@@ -946,9 +947,14 @@ export class CreditSalesService {
     );
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
-    const where = this.buildPaymentWhere(businessId, query, {
-      creditSaleId: id,
-    }, viewer);
+    const where = this.buildPaymentWhere(
+      businessId,
+      query,
+      {
+        creditSaleId: id,
+      },
+      viewer,
+    );
 
     const [total, payments] = await Promise.all([
       this.prisma.creditPayment.count({ where }),
@@ -1061,7 +1067,12 @@ export class CreditSalesService {
         include: { sale: { select: { saleNumber: true, saleDate: true } } },
       }),
       this.prisma.creditPayment.findMany({
-        where: this.buildPaymentWhere(businessId, query, { customerId }, viewer),
+        where: this.buildPaymentWhere(
+          businessId,
+          query,
+          { customerId },
+          viewer,
+        ),
         include: this.creditPaymentInclude(),
       }),
     ]);
@@ -1116,7 +1127,7 @@ export class CreditSalesService {
     dto: CreateCreditPaymentDto,
     user: AuthenticatedUser,
   ) {
-    this.assertCanManageCredit(user);
+    await this.assertCanManageCredit(user);
     this.assertAllowedCreditPaymentMethod(dto.paymentMethod);
     const idempotencyKey = dto.idempotencyKey?.trim();
 
@@ -1753,10 +1764,7 @@ export class CreditSalesService {
         }),
         tx.creditSale.findFirst({
           where: {
-            AND: [
-              openCreditWhere,
-              { dueDate: { not: null } },
-            ],
+            AND: [openCreditWhere, { dueDate: { not: null } }],
           },
           orderBy: { dueDate: 'asc' },
           select: { dueDate: true },
@@ -1794,8 +1802,7 @@ export class CreditSalesService {
       totalCreditPaid = totalCreditPaid.add(credit.amountPaid);
     }
 
-    const outstandingBalance =
-      totalOutstanding;
+    const outstandingBalance = totalOutstanding;
     const creditLimit = customer?.creditLimit ?? new Prisma.Decimal(0);
 
     return {
@@ -2490,11 +2497,11 @@ export class CreditSalesService {
     }
   }
 
-  private assertPendingActionRequest(
-    status: CreditSaleActionApprovalStatus,
-  ) {
+  private assertPendingActionRequest(status: CreditSaleActionApprovalStatus) {
     if (status !== CreditSaleActionApprovalStatus.PENDING) {
-      throw new BadRequestException('Credit sale action request is not pending');
+      throw new BadRequestException(
+        'Credit sale action request is not pending',
+      );
     }
   }
 
@@ -2621,16 +2628,38 @@ export class CreditSalesService {
     });
   }
 
-  private assertCanCreateCreditSale(user: AuthenticatedUser) {
-    this.assertCanManageCredit(user);
+  private async assertCanCreateCreditSale(user: AuthenticatedUser) {
+    await this.assertCanManageCredit(user);
   }
 
-  private assertCanManageCredit(user: AuthenticatedUser) {
-    if (!CREDIT_SALE_ROLES.includes(user.roleName as never)) {
+  private async assertCanManageCredit(user: AuthenticatedUser) {
+    const canManageByRole = CREDIT_SALE_ROLES.includes(user.roleName as never);
+
+    if (canManageByRole) {
+      return;
+    }
+
+    if (!(await this.activeEmployeeCanSell(user))) {
       throw new ForbiddenException(
         'User is not allowed to manage credit sales',
       );
     }
+  }
+
+  private async activeEmployeeCanSell(user: AuthenticatedUser) {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        businessId: user.businessId,
+        userId: user.id,
+        status: EmployeeStatus.ACTIVE,
+        canLogin: true,
+        canSell: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    return Boolean(employee);
   }
 
   private async userHasPermission(

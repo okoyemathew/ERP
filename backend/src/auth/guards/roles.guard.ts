@@ -70,16 +70,29 @@ export class RolesGuard implements CanActivate {
       if (
         !isAdminOnlyRoute &&
         requiredPermissions.length > 0 &&
-        (await this.authorizationService.userHasPermissions(
+        ((await this.authorizationService.userHasPermissions(
           user.roleId,
           user.businessId,
           requiredPermissions,
-        ))
+        )) ||
+          (await this.authorizationService.employeeHasFallbackPermissions(
+            user.businessId,
+            user.id,
+            requiredPermissions,
+          )))
       ) {
         return true;
       }
 
-      if (!isAdminOnlyRoute && requiredPermissions.length === 0 && rawRoleName) {
+      if (
+        !isAdminOnlyRoute &&
+        requiredPermissions.length === 0 &&
+        (rawRoleName ||
+          (await this.authorizationService.hasActiveEmployeeAccount(
+            user.businessId,
+            user.id,
+          )))
+      ) {
         return true;
       }
 

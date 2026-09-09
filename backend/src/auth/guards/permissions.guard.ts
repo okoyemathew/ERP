@@ -23,63 +23,64 @@ import {
 import type { RequestUserInterface } from '../interfaces/request-user.interface';
 import { AuthorizationService } from '../services/authorization.service';
 
-const BUILT_IN_ROLE_PERMISSIONS: Partial<Record<SystemRole, readonly string[]>> =
-  {
-    [SYSTEM_ROLES.ADMIN]: [
-      'dashboard.view',
-      'users.manage',
-      'employees.manage',
-      'roles.manage',
-      'products.manage',
-      'categories.manage',
-      'brands.manage',
-      'units.manage',
-      'inventory.manage',
-      'suppliers.manage',
-      'customers.manage',
-      'sales.manage',
-      'credit-sales.manage',
-      'credit-sales.edit',
-      'credit-sales.delete',
-      'expenses.manage',
-      'reports.view',
-      'notifications.manage',
-      'settings.manage',
-      'receipt.manage',
-      'goods-supplied.manage',
-      'goods-disbursement.manage',
-      'audit-logs.view',
-    ],
-    [SYSTEM_ROLES.MANAGER]: [
-      'sales.manage',
-      'inventory.manage',
-      'customers.manage',
-      'reports.view',
-      'receipt.manage',
-    ],
-    [SYSTEM_ROLES.CASHIER]: [
-      'sales.manage',
-      'receipt.manage',
-      'customers.manage',
-    ],
-    [SYSTEM_ROLES.SALESPERSON]: ['sales.manage', 'receipt.manage'],
-    [SYSTEM_ROLES.INVENTORY_OFFICER]: [
-      'inventory.manage',
-      'goods-supplied.manage',
-      'goods-disbursement.manage',
-    ],
-    [SYSTEM_ROLES.ACCOUNTANT]: [
-      'expenses.manage',
-      'reports.view',
-      'credit-sales.manage',
-    ],
-    [SYSTEM_ROLES.SUPERVISOR]: [
-      'reports.view',
-      'inventory.manage',
-      'sales.manage',
-      'receipt.manage',
-    ],
-  };
+const BUILT_IN_ROLE_PERMISSIONS: Partial<
+  Record<SystemRole, readonly string[]>
+> = {
+  [SYSTEM_ROLES.ADMIN]: [
+    'dashboard.view',
+    'users.manage',
+    'employees.manage',
+    'roles.manage',
+    'products.manage',
+    'categories.manage',
+    'brands.manage',
+    'units.manage',
+    'inventory.manage',
+    'suppliers.manage',
+    'customers.manage',
+    'sales.manage',
+    'credit-sales.manage',
+    'credit-sales.edit',
+    'credit-sales.delete',
+    'expenses.manage',
+    'reports.view',
+    'notifications.manage',
+    'settings.manage',
+    'receipt.manage',
+    'goods-supplied.manage',
+    'goods-disbursement.manage',
+    'audit-logs.view',
+  ],
+  [SYSTEM_ROLES.MANAGER]: [
+    'sales.manage',
+    'inventory.manage',
+    'customers.manage',
+    'reports.view',
+    'receipt.manage',
+  ],
+  [SYSTEM_ROLES.CASHIER]: [
+    'sales.manage',
+    'receipt.manage',
+    'customers.manage',
+  ],
+  [SYSTEM_ROLES.SALESPERSON]: ['sales.manage', 'receipt.manage'],
+  [SYSTEM_ROLES.INVENTORY_OFFICER]: [
+    'inventory.manage',
+    'goods-supplied.manage',
+    'goods-disbursement.manage',
+  ],
+  [SYSTEM_ROLES.ACCOUNTANT]: [
+    'expenses.manage',
+    'reports.view',
+    'credit-sales.manage',
+  ],
+  [SYSTEM_ROLES.SUPERVISOR]: [
+    'reports.view',
+    'inventory.manage',
+    'sales.manage',
+    'receipt.manage',
+  ],
+};
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -133,7 +134,12 @@ export class PermissionsGuard implements CanActivate {
 
     if (
       !hasPermissions &&
-      !this.builtInRoleHasPermissions(roleName, requiredPermissions)
+      !this.builtInRoleHasPermissions(roleName, requiredPermissions) &&
+      !(await this.authorizationService.employeeHasFallbackPermissions(
+        user.businessId,
+        user.id,
+        requiredPermissions,
+      ))
     ) {
       throw new ForbiddenException('Insufficient permissions');
     }
@@ -149,8 +155,7 @@ export class PermissionsGuard implements CanActivate {
       return false;
     }
 
-    const rolePermissions =
-      BUILT_IN_ROLE_PERMISSIONS[roleName] ?? [];
+    const rolePermissions = BUILT_IN_ROLE_PERMISSIONS[roleName] ?? [];
 
     return requiredPermissions.every((permission) =>
       rolePermissions.includes(permission),
