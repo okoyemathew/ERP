@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { Alert } from "react-native";
 import { Bell } from "lucide-react-native";
 import { SimpleRow, ListScreen } from "@/screens/shared/ScreenKit";
 import { EmptyState, ErrorState, LoadingState } from "@/components/common";
@@ -28,7 +29,7 @@ export function NotificationsScreen() {
     void loadNotifications();
   }, [loadNotifications]);
 
-  const handleRead = async (notification: ApiNotification) => {
+  const markNotificationRead = async (notification: ApiNotification) => {
     if (notification.isRead) return;
     setItems((current) => current.map((item) => (item.id === notification.id ? { ...item, isRead: true } : item)));
     try {
@@ -36,6 +37,14 @@ export function NotificationsScreen() {
     } catch {
       setItems((current) => current.map((item) => (item.id === notification.id ? { ...item, isRead: false } : item)));
     }
+  };
+
+  const openNotification = (notification: ApiNotification) => {
+    Alert.alert(
+      notification.title,
+      `${notification.message}\n\n${new Date(notification.createdAt).toLocaleString()}`,
+      [{ text: "OK", onPress: () => void markNotificationRead(notification) }]
+    );
   };
 
   return (
@@ -58,7 +67,7 @@ export function NotificationsScreen() {
           subtitle={`${item.message} | ${new Date(item.createdAt).toLocaleString()}`}
           status={item.isRead ? "read" : "unread"}
           icon={<Bell size={17} color={colors.primary} />}
-          onPress={() => void handleRead(item)}
+          onPress={() => openNotification(item)}
         />
       )}
     />

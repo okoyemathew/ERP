@@ -40,7 +40,7 @@ export class NotificationsController {
   }
 
   @Patch(':id/read')
-  @Permissions('notifications.manage')
+  @Permissions()
   @ApiOperation({ summary: 'Mark notification as read' })
   markRead(
     @CurrentUser() user: AuthenticatedUser,
@@ -50,7 +50,7 @@ export class NotificationsController {
   }
 
   @Patch('read-all')
-  @Permissions('notifications.manage')
+  @Permissions()
   @ApiOperation({ summary: 'Mark all notifications as read' })
   markAllRead(@CurrentUser() user: AuthenticatedUser) {
     return this.notificationsService.markAllRead(user.businessId, user);

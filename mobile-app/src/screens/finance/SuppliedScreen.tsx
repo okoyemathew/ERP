@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, FlatList, Modal, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import { Plus, RotateCcw, Truck, X } from "lucide-react-native";
@@ -77,6 +77,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const [returnQuantity, setReturnQuantity] = useState("1");
   const [returnRemarks, setReturnRemarks] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
 
   const navigateStack = (route: string, params?: Record<string, string>) => {
     const parent = navigation.getParent?.();
@@ -128,6 +129,22 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
       void loadSupplied(query);
     }, [loadSupplied, query])
   );
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setReturnKeyboardOffset(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setReturnKeyboardOffset(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   const totalCredit = useMemo(() => suppliers.reduce((sum, supplier) => sum + money(supplier.outstandingBalance), 0), [suppliers]);
   const totalSupplied = employeeProducts.reduce((sum, product) => sum + product.suppliedQuantity, 0);
@@ -272,9 +289,17 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
         statusBarTranslucent
         onRequestClose={closeReturnSheet}
       >
-        <View style={styles.modal}>
+        <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <Pressable style={styles.backdrop} onPress={closeReturnSheet} accessibilityRole="button" accessibilityLabel="Close return request" />
-          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+          <View
+            style={[
+              styles.sheet,
+              {
+                paddingBottom: Math.max(insets.bottom, 24),
+                marginBottom: Platform.OS === "android" ? returnKeyboardOffset : 0
+              }
+            ]}
+          >
             <View style={styles.sheetHeader}>
               <View style={styles.sheetTitleBlock}>
                 <Text style={styles.sheetTitle}>Return Product</Text>
@@ -304,7 +329,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
             />
             <Button label="Submit Return" loading={returnSubmitting} onPress={() => void submitReturnRequest()} />
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

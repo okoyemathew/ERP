@@ -5,7 +5,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from "react
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Archive, DollarSign, Package, PackagePlus, Printer, Search, ShoppingBag } from "lucide-react-native";
+import { Archive, DollarSign, FileDown, Package, PackagePlus, Printer, Search, Send, ShoppingBag } from "lucide-react-native";
 import { AppBottomSheet, Avatar, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
 import { employeesService } from "@/services/employees.service";
 import { goodsDisbursementService } from "@/services/goods-disbursement.service";
@@ -17,6 +17,7 @@ import { colors, spacing } from "@/theme";
 import type { ApiEmployee, EmployeeProfileResponse, EmployeeSalesResponse } from "@/types/employee";
 import type { ApiProduct } from "@/types/product";
 import type { ApiSale } from "@/types/sales";
+import { mapReceiptToDocument } from "@/types/sales";
 import { formatCurrency } from "@/utils/format";
 
 type ProfileTab = "stock" | "supplies" | "sales";
@@ -268,13 +269,47 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   };
 
   const printReceipt = async () => {
-    if (!selectedSale?.receipt?.id) return;
+    if (!selectedSale) return;
     try {
-      const response = await salesService.printReceipt(selectedSale.receipt.id);
-      await printingService.printText(response.text);
+      if (selectedSale.receipt?.id) {
+        const response = await salesService.printReceipt(selectedSale.receipt.id);
+        await printingService.printText(response.text);
+        return;
+      }
+
+      const receipt = await salesService.receipt(selectedSale.id);
+      await printingService.print(mapReceiptToDocument(receipt));
     } catch (printError) {
       const message = printError instanceof Error ? printError.message : "Unable to print receipt.";
       Alert.alert("Unable to print", message);
+    }
+  };
+
+  const selectedReceiptDocument = async () => {
+    if (!selectedSale) return null;
+    const receipt = await salesService.receipt(selectedSale.id);
+    return mapReceiptToDocument(receipt);
+  };
+
+  const saveReceiptPdf = async () => {
+    try {
+      const receipt = await selectedReceiptDocument();
+      if (!receipt) return;
+      await printingService.savePdf(receipt);
+    } catch (pdfError) {
+      const message = pdfError instanceof Error ? pdfError.message : "Unable to save receipt PDF.";
+      Alert.alert("PDF failed", message);
+    }
+  };
+
+  const shareReceiptWhatsApp = async () => {
+    try {
+      const receipt = await selectedReceiptDocument();
+      if (!receipt) return;
+      await printingService.sharePdfToWhatsApp(receipt);
+    } catch (shareError) {
+      const message = shareError instanceof Error ? shareError.message : "Unable to share receipt PDF.";
+      Alert.alert("Share failed", message);
     }
   };
 
@@ -492,7 +527,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       </ScrollView>
 
       {selectedSale ? (
-        <AppBottomSheet ref={saleSheetRef} snapPoints={["82%"]} onClose={() => setSelectedSale(null)}>
+        <AppBottomSheet ref={saleSheetRef} snapPoints={["82%"]} initialIndex={0} onClose={() => setSelectedSale(null)}>
           <BottomSheetScrollView
             contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
             showsVerticalScrollIndicator
@@ -505,7 +540,11 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                 <Text style={styles.sectionTitle}>{selectedSale.saleNumber}</Text>
                 <Text style={styles.sectionMeta}>{new Date(selectedSale.saleDate).toLocaleString()}</Text>
               </View>
-              {selectedSale.receipt?.id ? <Button label="Receipt" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printReceipt()} style={styles.smallButton} /> : null}
+              <View style={styles.receiptActions}>
+                <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void saveReceiptPdf()} style={styles.smallButton} />
+                <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void shareReceiptWhatsApp()} style={styles.smallButton} />
+                <Button label="Receipt" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printReceipt()} style={styles.smallButton} />
+              </View>
             </View>
             <Card style={styles.infoCard}>
               <InfoLine label="Employee" value={name} />
@@ -685,6 +724,7 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   sectionTitle: { color: colors.foreground, fontSize: 15, fontWeight: "800" },
   sectionMeta: { color: colors.textPlaceholder, fontSize: 11, marginTop: 3 },
+  receiptActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, flexShrink: 1 },
   smallButton: { minHeight: 44, paddingHorizontal: 12 },
   salesStats: { flexDirection: "row", gap: 10 },
   salesStat: { flex: 1, borderWidth: 1, borderColor: colors.borderLight, borderRadius: 8, padding: 12 },
