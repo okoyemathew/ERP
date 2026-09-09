@@ -27,7 +27,6 @@ export const SALESPERSON_RESTRICTED_PERMISSIONS = new Set<string>([
   'products.manage',
   'inventory.manage',
   'suppliers.manage',
-  'expenses.manage',
   'goods-supplied.manage',
   'goods-disbursement.manage',
   'roles.change',

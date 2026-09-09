@@ -64,7 +64,9 @@ function createPrismaMock() {
   const prisma: any = {};
 
   Object.assign(prisma, {
-    $transaction: jest.fn(async (callback: (tx: unknown) => unknown) => callback(prisma)),
+    $transaction: jest.fn(async (callback: (tx: unknown) => unknown) =>
+      callback(prisma),
+    ),
     expenseCategory: {
       findFirst: jest.fn(),
       findMany: jest.fn(),
@@ -82,6 +84,9 @@ function createPrismaMock() {
     },
     user: {
       findMany: jest.fn(),
+    },
+    employee: {
+      findFirst: jest.fn(),
     },
     auditLog: {
       create: jest.fn(),
@@ -200,6 +205,81 @@ describe('ExpensesService employee ownership', () => {
     expect(Number(summary.expensesByEmployee[0].totalAmount)).toBe(1000);
   });
 
+  it('allows a roleless active employee to load their own expense screen data', async () => {
+    prisma.employee.findFirst.mockResolvedValue({ id: 'emp-a' });
+    prisma.expense.aggregate.mockResolvedValue({
+      _count: 1,
+      _sum: { amount: new Prisma.Decimal(1000) },
+    });
+    prisma.expense.groupBy
+      .mockResolvedValueOnce([
+        {
+          categoryId,
+          _count: { _all: 1 },
+          _sum: { amount: new Prisma.Decimal(1000) },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          paymentMethod: PaymentMethod.CARD,
+          _count: { _all: 1 },
+          _sum: { amount: new Prisma.Decimal(1000) },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          userId: employeeUserId,
+          _count: { _all: 1 },
+          _sum: { amount: new Prisma.Decimal(1000) },
+        },
+      ]);
+    prisma.expenseCategory.findMany.mockResolvedValue([
+      { id: categoryId, name: 'Travel' },
+    ]);
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: employeeUserId,
+        firstName: 'Employee',
+        lastName: 'A',
+        username: 'employee.a',
+        employee: { id: 'emp-a', employeeCode: 'EMP-A' },
+      },
+    ]);
+    prisma.expense.count.mockResolvedValue(1);
+    prisma.expense.findMany.mockResolvedValue([expense()]);
+
+    const result = await service.findAll(
+      businessId,
+      { limit: 50 },
+      {
+        ...employeeA,
+        roleId: null,
+        roleName: null,
+        employeeId: 'emp-a',
+      },
+    );
+
+    expect(prisma.employee.findFirst).toHaveBeenCalledWith({
+      where: {
+        businessId,
+        userId: employeeUserId,
+        status: 'ACTIVE',
+        canLogin: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    expect(prisma.expense.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessId,
+          userId: employeeUserId,
+        }),
+      }),
+    );
+    expect(result.data).toHaveLength(1);
+  });
+
   it('allows the creator to update their own expense', async () => {
     const record = expense();
     prisma.expense.findFirst
@@ -243,7 +323,11 @@ describe('ExpensesService employee ownership', () => {
     prisma.expense.findFirst.mockResolvedValue(expense());
     prisma.expense.update.mockResolvedValue(expense({ deletedAt: new Date() }));
 
-    const result = await service.removeExpense(businessId, expenseId, employeeA);
+    const result = await service.removeExpense(
+      businessId,
+      expenseId,
+      employeeA,
+    );
 
     expect(result).toEqual({ id: expenseId, deleted: true });
     expect(prisma.expense.update).toHaveBeenCalledWith(

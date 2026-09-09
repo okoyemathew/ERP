@@ -8,6 +8,7 @@ import {
   AuditAction,
   CashRegisterStatus,
   CashTransactionType,
+  EmployeeStatus,
   PaymentMethod,
   Prisma,
 } from '@prisma/client';
@@ -72,7 +73,7 @@ export class ExpensesService {
     dto: CreateExpenseCategoryDto,
     user: AuthenticatedUser,
   ) {
-    this.assertCanModifyExpenses(user);
+    await this.assertCanModifyExpenses(user);
     const name = dto.name.trim();
     const description = dto.description?.trim() || null;
 
@@ -136,7 +137,7 @@ export class ExpensesService {
     dto: UpdateExpenseCategoryDto,
     user: AuthenticatedUser,
   ) {
-    this.assertCanModifyExpenses(user);
+    await this.assertCanModifyExpenses(user);
 
     return this.prisma.$transaction(async (tx) => {
       const current = await this.getCategoryOrThrow(businessId, id, tx);
@@ -191,7 +192,7 @@ export class ExpensesService {
     dto: CreateExpenseDto,
     user: AuthenticatedUser,
   ) {
-    this.assertCanManageExpenses(user);
+    await this.assertCanManageExpenses(user);
     this.assertExpensePaymentMethod(dto.paymentMethod);
 
     return this.prisma.$transaction(async (tx) => {
@@ -243,7 +244,7 @@ export class ExpensesService {
     query: ExpenseQueryDto = {},
     user: AuthenticatedUser,
   ) {
-    this.assertCanAccessExpenses(user);
+    await this.assertCanAccessExpenses(user);
     const scopedQuery = this.scopeQueryToUser(query, user);
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
@@ -284,7 +285,7 @@ export class ExpensesService {
   }
 
   async findOne(businessId: string, id: string, user: AuthenticatedUser) {
-    this.assertCanAccessExpenses(user);
+    await this.assertCanAccessExpenses(user);
     const expense = await this.getExpenseOrThrow(businessId, id, this.prisma);
     this.assertCanViewExpense(user, expense);
     return this.formatExpense(expense);
@@ -295,8 +296,11 @@ export class ExpensesService {
     query: ExpenseQueryDto = {},
     user: AuthenticatedUser,
   ) {
-    this.assertCanAccessExpenses(user);
-    const where = this.buildWhere(businessId, this.scopeQueryToUser(query, user));
+    await this.assertCanAccessExpenses(user);
+    const where = this.buildWhere(
+      businessId,
+      this.scopeQueryToUser(query, user),
+    );
     return this.expenseReportSummary(where);
   }
 
@@ -411,12 +415,8 @@ export class ExpensesService {
     });
   }
 
-  async removeExpense(
-    businessId: string,
-    id: string,
-    user: AuthenticatedUser,
-  ) {
-    this.assertCanAccessExpenses(user);
+  async removeExpense(businessId: string, id: string, user: AuthenticatedUser) {
+    await this.assertCanAccessExpenses(user);
 
     return this.prisma.$transaction(async (tx) => {
       const current = await this.getExpenseOrThrow(businessId, id, tx);
@@ -516,7 +516,7 @@ export class ExpensesService {
     isActive: boolean,
     user: AuthenticatedUser,
   ) {
-    this.assertCanModifyExpenses(user);
+    await this.assertCanModifyExpenses(user);
 
     return this.prisma.$transaction(async (tx) => {
       const current = await this.getCategoryOrThrow(businessId, id, tx);
@@ -563,7 +563,8 @@ export class ExpensesService {
       create: {
         businessId,
         name: DEFAULT_EXPENSE_CATEGORY_NAME,
-        description: 'Default category for expenses without a selected category',
+        description:
+          'Default category for expenses without a selected category',
         isActive: true,
       },
     });
@@ -753,33 +754,33 @@ export class ExpensesService {
   private async expenseReportSummary(where: Prisma.ExpenseWhereInput) {
     const [totals, categoryGroups, paymentGroups, employeeGroups] =
       await Promise.all([
-      this.prisma.expense.aggregate({
-        where,
-        _count: true,
-        _sum: { amount: true },
-      }),
-      this.prisma.expense.groupBy({
-        by: ['categoryId'],
-        where,
-        _count: { _all: true },
-        _sum: { amount: true },
-        orderBy: { _sum: { amount: 'desc' } },
-      }),
-      this.prisma.expense.groupBy({
-        by: ['paymentMethod'],
-        where,
-        _count: { _all: true },
-        _sum: { amount: true },
-        orderBy: { _sum: { amount: 'desc' } },
-      }),
-      this.prisma.expense.groupBy({
-        by: ['userId'],
-        where,
-        _count: { _all: true },
-        _sum: { amount: true },
-        orderBy: { _sum: { amount: 'desc' } },
-      }),
-    ]);
+        this.prisma.expense.aggregate({
+          where,
+          _count: true,
+          _sum: { amount: true },
+        }),
+        this.prisma.expense.groupBy({
+          by: ['categoryId'],
+          where,
+          _count: { _all: true },
+          _sum: { amount: true },
+          orderBy: { _sum: { amount: 'desc' } },
+        }),
+        this.prisma.expense.groupBy({
+          by: ['paymentMethod'],
+          where,
+          _count: { _all: true },
+          _sum: { amount: true },
+          orderBy: { _sum: { amount: 'desc' } },
+        }),
+        this.prisma.expense.groupBy({
+          by: ['userId'],
+          where,
+          _count: { _all: true },
+          _sum: { amount: true },
+          orderBy: { _sum: { amount: 'desc' } },
+        }),
+      ]);
 
     const categories = categoryGroups.length
       ? await this.prisma.expenseCategory.findMany({
@@ -854,7 +855,7 @@ export class ExpensesService {
     period: ExpensePeriod,
     user: AuthenticatedUser,
   ) {
-    this.assertCanAccessExpenses(user);
+    await this.assertCanAccessExpenses(user);
     const scopedQuery = this.scopeQueryToUser(query, user);
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
@@ -1160,27 +1161,73 @@ export class ExpensesService {
     return `${prefix}-${String(count + offset + 1).padStart(6, '0')}`;
   }
 
-  private assertCanManageExpenses(user: AuthenticatedUser) {
+  private async assertCanManageExpenses(user: AuthenticatedUser) {
     const roleName = normalizeSystemRoleName(user.roleName);
-    if (!roleName || !EXPENSE_ROLES.includes(roleName)) {
+
+    if (roleName && EXPENSE_ROLES.includes(roleName)) {
+      return;
+    }
+
+    if (!(await this.activeEmployeeCanAccessExpenses(user))) {
       throw new ForbiddenException('User is not allowed to manage expenses');
     }
   }
 
-  private assertCanAccessExpenses(user: AuthenticatedUser) {
+  private async assertCanAccessExpenses(user: AuthenticatedUser) {
     const roleName = normalizeSystemRoleName(user.roleName);
-    if (!roleName || !EXPENSE_ROLES.includes(roleName)) {
+
+    if (roleName && EXPENSE_ROLES.includes(roleName)) {
+      return;
+    }
+
+    if (!(await this.activeEmployeeCanAccessExpenses(user))) {
       throw new ForbiddenException('User is not allowed to access expenses');
     }
   }
 
-  private assertCanModifyExpenses(user: AuthenticatedUser) {
+  private async assertCanModifyExpenses(user: AuthenticatedUser) {
     const roleName = normalizeSystemRoleName(user.roleName);
-    if (!roleName || !EXPENSE_MODIFY_ROLES.includes(roleName)) {
+
+    if (roleName && EXPENSE_MODIFY_ROLES.includes(roleName)) {
+      return;
+    }
+
+    if (!(await this.activeEmployeeCanModifyExpenses(user))) {
       throw new ForbiddenException(
         'User is not allowed to modify completed expenses',
       );
     }
+  }
+
+  private async activeEmployeeCanAccessExpenses(user: AuthenticatedUser) {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        businessId: user.businessId,
+        userId: user.id,
+        status: EmployeeStatus.ACTIVE,
+        canLogin: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    return Boolean(employee);
+  }
+
+  private async activeEmployeeCanModifyExpenses(user: AuthenticatedUser) {
+    const employee = await this.prisma.employee.findFirst({
+      where: {
+        businessId: user.businessId,
+        userId: user.id,
+        status: EmployeeStatus.ACTIVE,
+        canLogin: true,
+        canManageExpenses: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    return Boolean(employee);
   }
 
   private canViewAllExpenses(user: AuthenticatedUser) {
