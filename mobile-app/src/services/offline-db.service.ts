@@ -79,14 +79,16 @@ async function getDb() {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_sync_queue_scope_status_created ON sync_queue (businessId, userId, status, createdAt);
-    CREATE INDEX IF NOT EXISTS idx_customer_cache_scope_updated ON customer_cache (businessId, userId, updatedAt);
-    CREATE INDEX IF NOT EXISTS idx_goods_disbursement_cache_scope_updated ON goods_disbursement_cache (businessId, userId, updatedAt);
   `);
   await ensureColumn(db, "customer_cache", "userId", "TEXT");
   await ensureColumn(db, "goods_disbursement_cache", "userId", "TEXT");
   await ensureColumn(db, "sync_queue", "businessId", "TEXT");
   await ensureColumn(db, "sync_queue", "userId", "TEXT");
+  await db.execAsync(`
+    CREATE INDEX IF NOT EXISTS idx_sync_queue_scope_status_created ON sync_queue (businessId, userId, status, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_customer_cache_scope_updated ON customer_cache (businessId, userId, updatedAt);
+    CREATE INDEX IF NOT EXISTS idx_goods_disbursement_cache_scope_updated ON goods_disbursement_cache (businessId, userId, updatedAt);
+  `);
   return db;
 }
 
