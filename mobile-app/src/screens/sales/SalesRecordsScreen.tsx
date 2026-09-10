@@ -16,7 +16,7 @@ import { mapReceiptToDocument, toApiPaymentMethod } from "@/types/sales";
 import { dashboardEvents } from "@/utils/dashboardEvents";
 import { formatCurrency } from "@/utils/format";
 
-const filters = ["All", "Completed", "Pending", "Refunded"] as const;
+const filters = ["All", "Today", "Completed", "Pending", "Refunded"] as const;
 const paymentMethods: Array<{ label: string; value: PosPaymentMethod }> = [
   { label: "Cash", value: "cash" },
   { label: "Card", value: "card" },
@@ -58,6 +58,18 @@ function saleMatchesSearch(sale: ApiSale, search: string) {
     .some((value) => String(value).toLowerCase().includes(normalized));
 }
 
+function todaySaleRange() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  end.setMilliseconds(end.getMilliseconds() - 1);
+  return {
+    startDate: start.toISOString(),
+    endDate: end.toISOString()
+  };
+}
+
 export function SalesRecordsScreen() {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
@@ -85,6 +97,9 @@ export function SalesRecordsScreen() {
       const params: Record<string, string | number> = { limit: 50 };
       const search = query.trim();
       if (search) params.search = search;
+      if (filter === "Today") {
+        Object.assign(params, todaySaleRange());
+      }
       if (filter === "Refunded") {
         const [salesResponse, returnsResponse] = await Promise.all([
           salesService.list({ ...params, status: "REFUNDED" }),
@@ -115,7 +130,7 @@ export function SalesRecordsScreen() {
         return;
       }
 
-      if (filter !== "All") params.status = filter.toUpperCase();
+      if (filter !== "All" && filter !== "Today") params.status = filter.toUpperCase();
       const response = await salesService.list(params);
       setSales(response.data);
     } catch {

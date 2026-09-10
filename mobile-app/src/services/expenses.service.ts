@@ -23,7 +23,12 @@ function isOfflineError(error: unknown) {
 
 function filterCachedExpenses(expenses: ApiExpense[], params?: Record<string, string | number | boolean | undefined>) {
   const search = String(params?.search ?? "").trim().toLowerCase();
-  const userId = params?.userId ? String(params.userId) : "";
+  const currentUser = useAuthStore.getState().user;
+  const roleName = currentUser?.roleName?.trim().toLowerCase();
+  const canViewAllExpenses = roleName === "owner" || roleName === "admin" || currentUser?.role === "owner";
+  const userId = canViewAllExpenses
+    ? params?.userId ? String(params.userId) : ""
+    : currentUser?.id ?? "";
   return expenses.filter((expense) => {
     if (userId && expense.recordedBy.id !== userId) return false;
     if (!search) return true;

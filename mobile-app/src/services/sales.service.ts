@@ -1,7 +1,7 @@
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
 import { AppApiError } from "@/api/errors";
-import { getRequiredBusinessId } from "@/api/session";
+import { getRequiredAuthContext } from "@/api/session";
 import { offlineDbService } from "@/services/offline-db.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import type { ApiSale, CreatePaymentPayload, CreateSalePayload, PrintReadyReceipt } from "@/types/sales";
@@ -83,9 +83,9 @@ function saleMatchesParams(sale: ApiSale, params: Record<string, string | number
 }
 
 async function queuedSalesForParams(params: Record<string, string | number> = {}) {
-  const businessId = await getRequiredBusinessId();
+  const { businessId, userId } = await getRequiredAuthContext();
   const limit = Number(params.limit ?? 50);
-  return (await offlineDbService.getQueuedOfflineSales(businessId))
+  return (await offlineDbService.getQueuedOfflineSales(businessId, userId))
     .filter((sale) => saleMatchesParams(sale, params))
     .slice(0, Number.isFinite(limit) && limit > 0 ? limit : 50);
 }

@@ -1,7 +1,7 @@
 import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { apiConfig, assertApiConfigured } from "./config";
 import { endpoints } from "./endpoints";
-import { clearAuthStorage, getAccessToken, getRefreshToken, saveAccessToken, saveRefreshToken } from "./tokenStorage";
+import { clearAuthStorage, getAccessToken, getAuthSession, getRefreshToken, saveAccessToken, saveRefreshToken } from "./tokenStorage";
 import { normalizeApiError } from "./errors";
 import { apiCacheKey, offlineApiCacheService } from "@/services/offline-api-cache.service";
 import type { RefreshTokenResponse } from "@/types/auth";
@@ -42,6 +42,17 @@ function isPublicAuthEndpoint(url?: string) {
   }
 }
 
+async function scopedApiCacheKey(method?: string, url?: string, params?: unknown) {
+  const session = await getAuthSession();
+  return apiCacheKey(method, url, {
+    scope: {
+      businessId: session?.user.businessId ?? null,
+      userId: session?.user.id ?? null
+    },
+    params: params ?? null
+  });
+}
+
 async function refreshAccessToken() {
   if (refreshPromise) return refreshPromise;
 
@@ -77,9 +88,9 @@ api.interceptors.request.use(async (config) => {
 });
 
 api.interceptors.response.use(
-  (response) => {
+  async (response) => {
     if (response.config.method?.toUpperCase() === "GET") {
-      const cacheKey = apiCacheKey(response.config.method, response.config.url, response.config.params);
+      const cacheKey = await scopedApiCacheKey(response.config.method, response.config.url, response.config.params);
       void offlineApiCacheService.set(cacheKey, response.data).catch(() => undefined);
     }
     return response;
@@ -104,7 +115,7 @@ api.interceptors.response.use(
 
     const apiError = normalizeApiError(error);
     if (original?.method?.toUpperCase() === "GET" && (apiError.code === "NETWORK" || apiError.code === "TIMEOUT")) {
-      const cacheKey = apiCacheKey(original.method, original.url, original.params);
+      const cacheKey = await scopedApiCacheKey(original.method, original.url, original.params);
       const cached = await offlineApiCacheService.get(cacheKey);
       if (cached !== null) {
         return {

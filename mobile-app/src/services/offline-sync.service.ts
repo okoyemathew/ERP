@@ -2,7 +2,7 @@ import NetInfo from "@react-native-community/netinfo";
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
 import { AppApiError } from "@/api/errors";
-import { getRequiredBusinessId } from "@/api/session";
+import { getRequiredAuthContext } from "@/api/session";
 import { deviceService } from "@/services/device.service";
 import { dashboardEvents } from "@/utils/dashboardEvents";
 import type { CreateExpensePayload } from "@/types/expense";
@@ -21,16 +21,17 @@ export const offlineSyncService = {
   },
 
   async enqueueSale(payload: CreateSalePayload) {
-    const businessId = await getRequiredBusinessId();
+    const { businessId, userId } = await getRequiredAuthContext();
     const { deviceId } = await deviceService.getDeviceInfo();
     const operationId = payload.idempotencyKey ?? createOperationId(deviceId);
     const queuedPayload = { ...payload, deviceId, idempotencyKey: operationId };
-    const queued = await offlineDbService.enqueueSale(operationId, queuedPayload);
+    const queued = await offlineDbService.enqueueSale(operationId, businessId, userId, queuedPayload);
     await offlineDbService.applySaleToCachedProducts(businessId, payload.items);
     return queued;
   },
 
   async enqueueExpense(payload: CreateExpensePayload) {
+    const { businessId, userId } = await getRequiredAuthContext();
     const { deviceId } = await deviceService.getDeviceInfo();
     const operationId = `expense-${createOperationId(deviceId)}`;
     const queuedPayload = {
@@ -38,13 +39,14 @@ export const offlineSyncService = {
       deviceId,
       receiptNumber: payload.receiptNumber ?? operationId
     };
-    return offlineDbService.enqueueExpense(operationId, queuedPayload);
+    return offlineDbService.enqueueExpense(operationId, businessId, userId, queuedPayload);
   },
 
   async enqueueMutation(payload: Omit<ApiMutationPayload, "deviceId">) {
+    const { businessId, userId } = await getRequiredAuthContext();
     const { deviceId } = await deviceService.getDeviceInfo();
     const operationId = `api-${createOperationId(deviceId)}`;
-    return offlineDbService.enqueueApiMutation(operationId, { ...payload, deviceId });
+    return offlineDbService.enqueueApiMutation(operationId, businessId, userId, { ...payload, deviceId });
   },
 
   async syncApiMutations(operations: SyncQueueItem[]) {
@@ -70,9 +72,10 @@ export const offlineSyncService = {
           typeof response.data === "object" &&
           "id" in response.data
         ) {
-          const businessId = await getRequiredBusinessId();
+          const { businessId, userId } = await getRequiredAuthContext();
           await offlineDbService.replaceQueuedSaleCustomerByPhone(
             businessId,
+            userId,
             String((payload.data as { phone?: unknown }).phone ?? ""),
             response.data as import("@/types/customer").ApiCustomer
           );
@@ -94,7 +97,8 @@ export const offlineSyncService = {
 
   async syncPending() {
     if (!(await this.isOnline())) return { synced: 0, failed: 0 };
-    const operations = await offlineDbService.pendingOperations();
+    const { businessId, userId } = await getRequiredAuthContext();
+    const operations = await offlineDbService.pendingOperations(businessId, userId);
     if (operations.length === 0) return { synced: 0, failed: 0 };
 
     const operationIds = operations.map((operation) => operation.id);

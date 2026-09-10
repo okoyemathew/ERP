@@ -152,6 +152,49 @@ describe('ExpensesService employee ownership', () => {
     expect(result.recordedBy.id).toBe(employeeUserId);
   });
 
+  it('debits cash expenses from the authenticated employee cash register', async () => {
+    const createdExpense = expense({ paymentMethod: PaymentMethod.CASH });
+    prisma.expenseCategory.findFirst.mockResolvedValue({
+      id: categoryId,
+      businessId,
+      isActive: true,
+    });
+    prisma.expense.count.mockResolvedValue(0);
+    prisma.expense.create.mockResolvedValue(createdExpense);
+    prisma.expense.findFirst.mockResolvedValue(createdExpense);
+    prisma.cashRegister.findFirst.mockResolvedValue({
+      id: 'register-a',
+      openingBalance: new Prisma.Decimal(5000),
+      expectedBalance: new Prisma.Decimal(5000),
+    });
+
+    await service.createExpense(
+      businessId,
+      {
+        title: 'Fuel',
+        description: 'Delivery fuel',
+        amount: 1000,
+        categoryId,
+        paymentMethod: PaymentMethod.CASH,
+      },
+      employeeA,
+    );
+
+    expect(prisma.cashRegister.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessId,
+          userId: employeeUserId,
+          status: 'OPEN',
+        }),
+      }),
+    );
+    expect(prisma.cashRegister.update).toHaveBeenCalledWith({
+      where: { id: 'register-a' },
+      data: { expectedBalance: new Prisma.Decimal(4000) },
+    });
+  });
+
   it('calculates employee totals from database aggregate groups', async () => {
     prisma.expense.aggregate.mockResolvedValue({
       _count: 1,

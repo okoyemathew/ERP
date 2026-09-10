@@ -625,8 +625,10 @@ describe('SalesService sale item price and quantity validation', () => {
         useEmployeeStock: true,
         employeeId: ownerUser.employeeId,
         userId: ownerUser.id,
+        stockMatch: [{ employeeId: ownerUser.employeeId }],
       }),
     );
+    expect(JSON.stringify(seller)).not.toContain('contains');
   });
 
   it('creates a low-stock notification for the seller after stock drops below threshold', async () => {

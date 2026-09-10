@@ -389,7 +389,7 @@ export class ExpensesService {
       if (!cashDelta.eq(0)) {
         await this.recordCashRegisterTransaction(tx, {
           businessId,
-          userId: user.id,
+          userId: current.userId,
           transactionType: cashDelta.gt(0)
             ? CashTransactionType.CASH_OUT
             : CashTransactionType.CASH_IN,
@@ -425,7 +425,7 @@ export class ExpensesService {
       if (current.paymentMethod === PaymentMethod.CASH) {
         await this.recordCashRegisterTransaction(tx, {
           businessId,
-          userId: user.id,
+          userId: current.userId,
           transactionType: CashTransactionType.CASH_IN,
           amount: new Prisma.Decimal(current.amount),
           reference: current.expenseNumber,

@@ -5,12 +5,11 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Plus, RotateCcw, Truck, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
-import { goodsDisbursementService } from "@/services/goods-disbursement.service";
+import { employeesService } from "@/services/employees.service";
 import { productsService } from "@/services/products.service";
 import { suppliersService } from "@/services/suppliers.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
-import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
 import type { ApiSupplier } from "@/types/supplier";
 import { canAccess } from "@/utils/permissions";
 import { formatCurrency } from "@/utils/format";
@@ -30,34 +29,6 @@ type EmployeeSuppliedProduct = {
   lastActivityAt: string;
 };
 type SuppliedListItem = EmployeeSuppliedProduct | ApiSupplier;
-
-function aggregateEmployeeProducts(disbursements: ApiGoodsDisbursement[]) {
-  const byProduct = new Map<string, EmployeeSuppliedProduct>();
-
-  for (const run of disbursements) {
-    for (const item of run.items) {
-      if (!item.product) continue;
-      if (item.product.isActive === false) continue;
-
-      const current = byProduct.get(item.productId);
-      const nextQuantity = (current?.suppliedQuantity ?? 0) + item.quantity;
-      byProduct.set(item.productId, {
-        productId: item.productId,
-        productName: item.product.name,
-        sku: item.product.sku,
-        barcode: item.product.barcode,
-        quantityInHand: nextQuantity,
-        suppliedQuantity: nextQuantity,
-        unitValue: item.product.sellingPrice ?? current?.unitValue ?? 0,
-        lastActivityAt: run.disbursementDate ?? run.createdAt,
-      });
-    }
-  }
-
-  return Array.from(byProduct.values()).sort(
-    (left, right) => new Date(right.lastActivityAt).getTime() - new Date(left.lastActivityAt).getTime()
-  );
-}
 
 export function SuppliedScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
@@ -90,8 +61,17 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
     setError(null);
     try {
       if (isEmployeeView) {
-        const response = await goodsDisbursementService.mine({ limit: 100 });
-        const products = aggregateEmployeeProducts(response.data);
+        const response = await employeesService.myProfile();
+        const products = response.profileActivity?.stock.map((product) => ({
+          productId: product.productId,
+          productName: product.productName,
+          sku: product.sku,
+          barcode: product.barcode,
+          quantityInHand: product.quantityInHand,
+          suppliedQuantity: product.suppliedQuantity,
+          unitValue: product.unitValue,
+          lastActivityAt: product.lastActivityAt,
+        })) ?? [];
         const normalizedSearch = search.trim().toLowerCase();
         setEmployeeProducts(
           normalizedSearch

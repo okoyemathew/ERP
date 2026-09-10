@@ -902,39 +902,17 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const employeeName = employee
-      ? [employee.firstName, employee.lastName].filter(Boolean).join(' ') ||
-        employee.user?.username ||
-        employee.employeeCode
-      : undefined;
-    const matchTokens = employee
-      ? [employee.employeeCode, employeeName, employee.user?.username].filter(
-          Boolean,
-        )
-      : [];
+    const employeeName =
+      [employee.firstName, employee.lastName].filter(Boolean).join(' ') ||
+      employee.user?.username ||
+      employee.employeeCode;
 
     return {
       useEmployeeStock: true,
-      employeeId: employee?.id,
+      employeeId: employee.id,
       userId: user.id,
       displayName: employeeName,
-      stockMatch: [
-        ...(employee ? [{ employeeId: employee.id }] : []),
-        ...matchTokens.flatMap((token) => [
-          {
-            destination: {
-              contains: token,
-              mode: Prisma.QueryMode.insensitive,
-            },
-          },
-          {
-            remarks: {
-              contains: token,
-              mode: Prisma.QueryMode.insensitive,
-            },
-          },
-        ]),
-      ],
+      stockMatch: [{ employeeId: employee.id }],
     };
   }
 

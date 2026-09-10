@@ -4,11 +4,23 @@ import type { ApiExpense, CreateExpensePayload, ExpenseCategory } from "@/types/
 import type { ApiProduct, ProductReturnRequest } from "@/types/product";
 import type { ApiMutationPayload, SyncPayload, SyncQueueItem, SyncOperationType, SyncQueueStatus } from "@/types/sync";
 import type { ApiSale, CreateSalePayload } from "@/types/sales";
+import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 function normalizePhone(phone?: string | null) {
   return (phone ?? "").replace(/\D/g, "") || (phone ?? "").trim().toLowerCase();
+}
+
+async function columnExists(db: SQLite.SQLiteDatabase, table: string, column: string) {
+  const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  return columns.some((item) => item.name === column);
+}
+
+async function ensureColumn(db: SQLite.SQLiteDatabase, table: string, column: string, definition: string) {
+  if (!(await columnExists(db, table, column))) {
+    await db.runAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
 async function getDb() {
@@ -26,6 +38,7 @@ async function getDb() {
     CREATE TABLE IF NOT EXISTS customer_cache (
       id TEXT PRIMARY KEY NOT NULL,
       businessId TEXT NOT NULL,
+      userId TEXT,
       payload TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
@@ -47,8 +60,17 @@ async function getDb() {
       payload TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS goods_disbursement_cache (
+      id TEXT PRIMARY KEY NOT NULL,
+      businessId TEXT NOT NULL,
+      userId TEXT,
+      payload TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS sync_queue (
       id TEXT PRIMARY KEY NOT NULL,
+      businessId TEXT,
+      userId TEXT,
       type TEXT NOT NULL,
       payload TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -57,7 +79,14 @@ async function getDb() {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_sync_queue_scope_status_created ON sync_queue (businessId, userId, status, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_customer_cache_scope_updated ON customer_cache (businessId, userId, updatedAt);
+    CREATE INDEX IF NOT EXISTS idx_goods_disbursement_cache_scope_updated ON goods_disbursement_cache (businessId, userId, updatedAt);
   `);
+  await ensureColumn(db, "customer_cache", "userId", "TEXT");
+  await ensureColumn(db, "goods_disbursement_cache", "userId", "TEXT");
+  await ensureColumn(db, "sync_queue", "businessId", "TEXT");
+  await ensureColumn(db, "sync_queue", "userId", "TEXT");
   return db;
 }
 
@@ -104,50 +133,64 @@ export const offlineDbService = {
     await db.runAsync("DELETE FROM product_cache WHERE businessId = ? AND id = ?", businessId, productId);
   },
 
-  async cacheCustomers(businessId: string, customers: ApiCustomer[]) {
+  async cacheCustomers(businessId: string, userId: string, customers: ApiCustomer[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
     for (const customer of customers) {
       await db.runAsync(
-        "INSERT OR REPLACE INTO customer_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO customer_cache (id, businessId, userId, payload, updatedAt) VALUES (?, ?, ?, ?, ?)",
         customer.id,
         businessId,
+        userId,
         JSON.stringify(customer),
         updatedAt
       );
     }
   },
 
-  async getCachedCustomers(businessId: string): Promise<ApiCustomer[]> {
+  async getCachedCustomers(businessId: string, userId?: string): Promise<ApiCustomer[]> {
     const db = await getDb();
-    const rows = await db.getAllAsync<{ payload: string }>(
-      "SELECT payload FROM customer_cache WHERE businessId = ? ORDER BY updatedAt DESC",
-      businessId
-    );
+    const rows = userId
+      ? await db.getAllAsync<{ payload: string }>(
+          "SELECT payload FROM customer_cache WHERE businessId = ? AND (userId = ? OR userId IS NULL) ORDER BY updatedAt DESC",
+          businessId,
+          userId
+        )
+      : await db.getAllAsync<{ payload: string }>(
+          "SELECT payload FROM customer_cache WHERE businessId = ? ORDER BY updatedAt DESC",
+          businessId
+        );
     return rows.map((row) => JSON.parse(row.payload) as ApiCustomer);
   },
 
-  async cacheCustomer(businessId: string, customer: ApiCustomer) {
-    await this.cacheCustomers(businessId, [customer]);
+  async cacheCustomer(businessId: string, userId: string, customer: ApiCustomer) {
+    await this.cacheCustomers(businessId, userId, [customer]);
   },
 
-  async removeCachedCustomer(businessId: string, customerId: string) {
+  async removeCachedCustomer(businessId: string, userId: string, customerId: string) {
     const db = await getDb();
-    await db.runAsync("DELETE FROM customer_cache WHERE businessId = ? AND id = ?", businessId, customerId);
+    await db.runAsync(
+      "DELETE FROM customer_cache WHERE businessId = ? AND (userId = ? OR userId IS NULL) AND id = ?",
+      businessId,
+      userId,
+      customerId
+    );
   },
 
-  async replaceQueuedSaleCustomerByPhone(businessId: string, phone: string, serverCustomer: ApiCustomer) {
+  async replaceQueuedSaleCustomerByPhone(businessId: string, userId: string, phone: string, serverCustomer: ApiCustomer) {
     const db = await getDb();
     const targetPhone = normalizePhone(phone);
-    const localCustomers = (await this.getCachedCustomers(businessId)).filter((customer) => normalizePhone(customer.phone) === targetPhone);
+    const localCustomers = (await this.getCachedCustomers(businessId, userId)).filter((customer) => normalizePhone(customer.phone) === targetPhone);
     if (localCustomers.length === 0) {
-      await this.cacheCustomer(businessId, serverCustomer);
+      await this.cacheCustomer(businessId, userId, serverCustomer);
       return;
     }
 
     const localCustomerIds = new Set(localCustomers.map((customer) => customer.id));
     const rows = await db.getAllAsync<{ id: string; payload: string }>(
-      "SELECT id, payload FROM sync_queue WHERE type = 'SALE_CREATE' AND status IN ('PENDING', 'FAILED', 'SYNCING')"
+      "SELECT id, payload FROM sync_queue WHERE businessId = ? AND userId = ? AND type = 'SALE_CREATE' AND status IN ('PENDING', 'FAILED', 'SYNCING')",
+      businessId,
+      userId
     );
     const updatedAt = new Date().toISOString();
 
@@ -163,10 +206,10 @@ export const offlineDbService = {
       );
     }
 
-    await this.cacheCustomer(businessId, serverCustomer);
+    await this.cacheCustomer(businessId, userId, serverCustomer);
     for (const localCustomer of localCustomers) {
       if (localCustomer.id !== serverCustomer.id) {
-        await this.removeCachedCustomer(businessId, localCustomer.id);
+        await this.removeCachedCustomer(businessId, userId, localCustomer.id);
       }
     }
   },
@@ -253,19 +296,56 @@ export const offlineDbService = {
     return rows.map((row) => JSON.parse(row.payload) as ProductReturnRequest);
   },
 
-  async getQueuedOfflineSales(businessId: string): Promise<ApiSale[]> {
+  async cacheGoodsDisbursements(businessId: string, userId: string, disbursements: ApiGoodsDisbursement[]) {
+    const db = await getDb();
+    const updatedAt = new Date().toISOString();
+    for (const disbursement of disbursements) {
+      await db.runAsync(
+        "INSERT OR REPLACE INTO goods_disbursement_cache (id, businessId, userId, payload, updatedAt) VALUES (?, ?, ?, ?, ?)",
+        disbursement.id,
+        businessId,
+        userId,
+        JSON.stringify(disbursement),
+        updatedAt
+      );
+    }
+  },
+
+  async cacheGoodsDisbursement(businessId: string, userId: string, disbursement: ApiGoodsDisbursement) {
+    await this.cacheGoodsDisbursements(businessId, userId, [disbursement]);
+  },
+
+  async getCachedGoodsDisbursements(businessId: string, userId?: string): Promise<ApiGoodsDisbursement[]> {
+    const db = await getDb();
+    const rows = userId
+      ? await db.getAllAsync<{ payload: string }>(
+          "SELECT payload FROM goods_disbursement_cache WHERE businessId = ? AND (userId = ? OR userId IS NULL) ORDER BY updatedAt DESC",
+          businessId,
+          userId
+        )
+      : await db.getAllAsync<{ payload: string }>(
+          "SELECT payload FROM goods_disbursement_cache WHERE businessId = ? ORDER BY updatedAt DESC",
+          businessId
+        );
+    return rows.map((row) => JSON.parse(row.payload) as ApiGoodsDisbursement);
+  },
+
+  async getQueuedOfflineSales(businessId: string, userId: string): Promise<ApiSale[]> {
     const db = await getDb();
     const rows = await db.getAllAsync<{
       id: string;
+      userId: string | null;
       payload: string;
       status: SyncQueueStatus;
       createdAt: string;
       updatedAt: string;
     }>(
-      "SELECT id, payload, status, createdAt, updatedAt FROM sync_queue WHERE type = 'SALE_CREATE' AND status IN ('PENDING', 'FAILED', 'SYNCING') ORDER BY createdAt DESC"
+      "SELECT id, userId, payload, status, createdAt, updatedAt FROM sync_queue WHERE type = 'SALE_CREATE' AND status IN ('PENDING', 'FAILED', 'SYNCING') AND (businessId = ? OR businessId IS NULL) AND (userId = ? OR userId IS NULL) ORDER BY createdAt DESC",
+      businessId,
+      userId
     );
     const [customers, products] = await Promise.all([
-      this.getCachedCustomers(businessId),
+      this.getCachedCustomers(businessId, userId),
       this.getCachedProducts(businessId)
     ]);
     const customersById = new Map(customers.map((customer) => [customer.id, customer]));
@@ -292,7 +372,7 @@ export const offlineDbService = {
         localSyncStatus: row.status,
         saleNumber,
         customerId: payload.customerId ?? null,
-        userId: "offline-user",
+        userId: row.userId ?? userId,
         subtotal,
         discountAmount,
         taxAmount,
@@ -304,7 +384,7 @@ export const offlineDbService = {
         saleDate: row.createdAt,
         customer: customer ?? null,
         user: {
-          id: "offline-user",
+          id: row.userId ?? userId,
           firstName: "Offline",
           lastName: "Sale",
           username: "offline"
@@ -376,12 +456,14 @@ export const offlineDbService = {
     }
   },
 
-  async enqueueSale(id: string, payload: CreateSalePayload): Promise<SyncQueueItem> {
+  async enqueueSale(id: string, businessId: string, userId: string, payload: CreateSalePayload): Promise<SyncQueueItem> {
     const db = await getDb();
     const now = new Date().toISOString();
     await db.runAsync(
-      "INSERT OR REPLACE INTO sync_queue (id, type, payload, status, attempts, lastError, createdAt, updatedAt) VALUES (?, ?, ?, ?, COALESCE((SELECT attempts FROM sync_queue WHERE id = ?), 0), NULL, COALESCE((SELECT createdAt FROM sync_queue WHERE id = ?), ?), ?)",
+      "INSERT OR REPLACE INTO sync_queue (id, businessId, userId, type, payload, status, attempts, lastError, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT attempts FROM sync_queue WHERE id = ?), 0), NULL, COALESCE((SELECT createdAt FROM sync_queue WHERE id = ?), ?), ?)",
       id,
+      businessId,
+      userId,
       "SALE_CREATE",
       JSON.stringify(payload),
       "PENDING",
@@ -390,15 +472,17 @@ export const offlineDbService = {
       now,
       now
     );
-    return { id, type: "SALE_CREATE", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
+    return { id, businessId, userId, type: "SALE_CREATE", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
   },
 
-  async enqueueExpense(id: string, payload: CreateExpensePayload): Promise<SyncQueueItem> {
+  async enqueueExpense(id: string, businessId: string, userId: string, payload: CreateExpensePayload): Promise<SyncQueueItem> {
     const db = await getDb();
     const now = new Date().toISOString();
     await db.runAsync(
-      "INSERT OR REPLACE INTO sync_queue (id, type, payload, status, attempts, lastError, createdAt, updatedAt) VALUES (?, ?, ?, ?, COALESCE((SELECT attempts FROM sync_queue WHERE id = ?), 0), NULL, COALESCE((SELECT createdAt FROM sync_queue WHERE id = ?), ?), ?)",
+      "INSERT OR REPLACE INTO sync_queue (id, businessId, userId, type, payload, status, attempts, lastError, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT attempts FROM sync_queue WHERE id = ?), 0), NULL, COALESCE((SELECT createdAt FROM sync_queue WHERE id = ?), ?), ?)",
       id,
+      businessId,
+      userId,
       "EXPENSE_CREATE",
       JSON.stringify(payload),
       "PENDING",
@@ -407,15 +491,17 @@ export const offlineDbService = {
       now,
       now
     );
-    return { id, type: "EXPENSE_CREATE", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
+    return { id, businessId, userId, type: "EXPENSE_CREATE", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
   },
 
-  async enqueueApiMutation(id: string, payload: ApiMutationPayload): Promise<SyncQueueItem> {
+  async enqueueApiMutation(id: string, businessId: string, userId: string, payload: ApiMutationPayload): Promise<SyncQueueItem> {
     const db = await getDb();
     const now = new Date().toISOString();
     await db.runAsync(
-      "INSERT OR REPLACE INTO sync_queue (id, type, payload, status, attempts, lastError, createdAt, updatedAt) VALUES (?, ?, ?, ?, COALESCE((SELECT attempts FROM sync_queue WHERE id = ?), 0), NULL, COALESCE((SELECT createdAt FROM sync_queue WHERE id = ?), ?), ?)",
+      "INSERT OR REPLACE INTO sync_queue (id, businessId, userId, type, payload, status, attempts, lastError, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, COALESCE((SELECT attempts FROM sync_queue WHERE id = ?), 0), NULL, COALESCE((SELECT createdAt FROM sync_queue WHERE id = ?), ?), ?)",
       id,
+      businessId,
+      userId,
       "API_MUTATION",
       JSON.stringify(payload),
       "PENDING",
@@ -424,13 +510,22 @@ export const offlineDbService = {
       now,
       now
     );
-    return { id, type: "API_MUTATION", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
+    return { id, businessId, userId, type: "API_MUTATION", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
   },
 
-  async pendingOperations(): Promise<SyncQueueItem[]> {
+  async pendingOperations(businessId: string, userId: string): Promise<SyncQueueItem[]> {
     const db = await getDb();
+    const now = new Date().toISOString();
+    await db.runAsync(
+      "UPDATE sync_queue SET businessId = COALESCE(businessId, ?), userId = COALESCE(userId, ?), updatedAt = ? WHERE status IN ('PENDING', 'FAILED', 'SYNCING') AND (businessId IS NULL OR userId IS NULL)",
+      businessId,
+      userId,
+      now
+    );
     const rows = await db.getAllAsync<{
       id: string;
+      businessId: string | null;
+      userId: string | null;
       type: SyncOperationType;
       payload: string;
       status: SyncQueueStatus;
@@ -438,7 +533,11 @@ export const offlineDbService = {
       lastError: string | null;
       createdAt: string;
       updatedAt: string;
-    }>("SELECT * FROM sync_queue WHERE status IN ('PENDING', 'FAILED', 'SYNCING') ORDER BY createdAt ASC LIMIT 25");
+    }>(
+      "SELECT * FROM sync_queue WHERE businessId = ? AND userId = ? AND status IN ('PENDING', 'FAILED', 'SYNCING') ORDER BY createdAt ASC LIMIT 25",
+      businessId,
+      userId
+    );
     return rows.map((row) => ({ ...row, payload: JSON.parse(row.payload) as SyncPayload }));
   },
 
@@ -468,9 +567,15 @@ export const offlineDbService = {
     }
   },
 
-  async queueCount() {
+  async queueCount(businessId?: string, userId?: string) {
     const db = await getDb();
-    const row = await db.getFirstAsync<{ count: number }>("SELECT COUNT(*) AS count FROM sync_queue WHERE status IN ('PENDING', 'FAILED', 'SYNCING')");
+    const row = businessId && userId
+      ? await db.getFirstAsync<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM sync_queue WHERE businessId = ? AND userId = ? AND status IN ('PENDING', 'FAILED', 'SYNCING')",
+          businessId,
+          userId
+        )
+      : await db.getFirstAsync<{ count: number }>("SELECT COUNT(*) AS count FROM sync_queue WHERE status IN ('PENDING', 'FAILED', 'SYNCING')");
     return row?.count ?? 0;
   }
 };

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type GorhomBottomSheet from "@gorhom/bottom-sheet";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
@@ -22,6 +22,7 @@ import { formatCurrency } from "@/utils/format";
 
 type ProfileTab = "stock" | "supplies" | "sales";
 type EmployeeStockProduct = NonNullable<EmployeeProfileResponse["profileActivity"]>["stock"][number];
+type EmployeeSupplyRun = NonNullable<EmployeeProfileResponse["profileActivity"]>["supplies"]["data"][number];
 
 function customerName(sale: ApiSale) {
   return sale.customer
@@ -55,6 +56,17 @@ function employeeName(employee: ApiEmployee) {
   return `${employee.firstName} ${employee.lastName}`.trim() || employee.user.username;
 }
 
+function supplyRunProductTitle(run: EmployeeSupplyRun) {
+  const productNames = run.items
+    .map((item) => item.productName?.trim())
+    .filter((name): name is string => Boolean(name));
+
+  if (!productNames.length) return "Supplied products";
+  if (productNames.length === 1) return productNames[0];
+  if (productNames.length === 2) return productNames.join(", ");
+  return `${productNames.slice(0, 2).join(", ")} +${productNames.length - 2} more`;
+}
+
 export function EmployeeDetailScreen({ route, navigation }: { route: any; navigation: any }) {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
@@ -65,6 +77,8 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const supplySheetRef = useRef<GorhomBottomSheet>(null);
   const [profile, setProfile] = useState<EmployeeProfileResponse | null>(null);
   const [sales, setSales] = useState<EmployeeSalesResponse | null>(null);
+  const [stockQuery, setStockQuery] = useState("");
+  const [suppliesQuery, setSuppliesQuery] = useState("");
   const [salesQuery, setSalesQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ProfileTab>("stock");
   const [supplySheetVisible, setSupplySheetVisible] = useState(false);
@@ -330,6 +344,43 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     }
   };
 
+  const activity = profile?.profileActivity;
+  const stockItems = activity?.stock ?? [];
+  const supplyRuns = activity?.supplies.data ?? [];
+  const textMatches = useCallback((needle: string, values: Array<string | number | null | undefined>) => {
+    const normalized = needle.trim().toLowerCase();
+    if (!normalized) return true;
+    return values.some((value) => String(value ?? "").toLowerCase().includes(normalized));
+  }, []);
+  const filteredStockItems = useMemo(() => (
+    stockItems.filter((item) => textMatches(stockQuery, [
+      item.productName,
+      item.sku,
+      item.barcode,
+      item.productId,
+      item.quantityInHand,
+      item.suppliedQuantity,
+      item.quantitySold
+    ]))
+  ), [stockItems, stockQuery, textMatches]);
+  const filteredSupplyRuns = useMemo(() => (
+    supplyRuns.filter((run) => textMatches(suppliesQuery, [
+      run.disbursementNumber,
+      run.destination,
+      run.remarks,
+      run.totalQuantity,
+      run.totalValue,
+      ...run.items.flatMap((item) => [
+        item.productName,
+        item.sku,
+        item.barcode,
+        item.productId,
+        item.quantity,
+        item.value
+      ])
+    ]))
+  ), [suppliesQuery, supplyRuns, textMatches]);
+
   if (loading) return <LoadingState label="Loading employee" />;
   if (error || !profile) return <ErrorState onRetry={load} />;
 
@@ -337,20 +388,18 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const name = employeeName(employee);
   const role = employee.user.role?.name ?? employee.designation ?? "Employee";
   const latestSession = profile.recentSessions[0];
-  const activity = profile.profileActivity;
   const displayStatus = employee.canLogin ? employee.status : "DISABLED";
   const normalizedUserRole = user?.roleName?.trim().toLowerCase();
   const isOwner = normalizedUserRole ? normalizedUserRole === "owner" : user?.role === "owner";
   const canManageStockProducts = !isSelfProfile && (isOwner || canManageProducts);
   const salesToday = activity?.stats.salesToday ?? 0;
   const totalSupplied = activity?.stats.totalSupplied ?? 0;
-  const stockItems = activity?.stock ?? [];
-  const supplyRuns = activity?.supplies.data ?? [];
 
   const renderTabContent = () => {
     if (activeTab === "stock") {
       return (
         <View style={styles.tabContent}>
+          <SearchBar value={stockQuery} onChangeText={setStockQuery} placeholder="Search employee stock" />
           <View style={styles.stockSummary}>
             <View>
               <Text style={styles.summaryLabel}>Total Stock Value</Text>
@@ -361,7 +410,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               <Text style={styles.summaryValue}>{activity?.stats.stockItems ?? 0}</Text>
             </View>
           </View>
-          {stockItems.length ? stockItems.map((item) => (
+          {filteredStockItems.length ? filteredStockItems.map((item) => (
             <Pressable
               key={item.productId}
               disabled={!canManageStockProducts}
@@ -391,7 +440,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               </Card>
             </Pressable>
           )) : (
-            <EmptyState icon={<Package size={28} color={colors.textPlaceholder} />} title="No stock activity yet" />
+            <EmptyState icon={<Package size={28} color={colors.textPlaceholder} />} title={stockQuery.trim() ? "No stock products found" : "No stock activity yet"} />
           )}
         </View>
       );
@@ -400,24 +449,26 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     if (activeTab === "supplies") {
       return (
         <View style={styles.tabContent}>
+          <SearchBar value={suppliesQuery} onChangeText={setSuppliesQuery} placeholder="Search employee supplies" />
           <Card style={styles.supplySummary}>
             <InfoLine label="Total Supply Run" value={String(activity?.supplies.summary.totalSupplyRuns ?? 0)} />
             <InfoLine label="Total Value Supplied" value={formatCurrency(Number(activity?.supplies.summary.totalSuppliedValue ?? 0))} valueColor={colors.primary} />
           </Card>
-          {supplyRuns.length ? supplyRuns.map((run) => {
+          {filteredSupplyRuns.length ? filteredSupplyRuns.map((run) => {
             const expanded = expandedSupplyRunId === run.id;
+            const productTitle = supplyRunProductTitle(run);
             return (
               <Pressable
                 key={run.id}
                 onPress={() => setExpandedSupplyRunId((current) => current === run.id ? null : run.id)}
                 accessibilityRole="button"
-                accessibilityLabel={`View products supplied in ${run.disbursementNumber}`}
+                accessibilityLabel={`View supplied products in ${productTitle}`}
               >
                 <Card style={styles.supplyCard}>
                   <View style={styles.productHead}>
                     <View style={styles.supplyIcon}><Archive size={16} color={colors.primary} /></View>
                     <View style={styles.productBody}>
-                      <Text style={styles.productTitle}>{run.disbursementNumber}</Text>
+                      <Text style={styles.productTitle}>{productTitle}</Text>
                       <Text style={styles.productMeta}>{run.destination ?? "No destination"} | {compactDate(run.disbursementDate)}</Text>
                     </View>
                     <Text style={styles.quantity}>{run.totalQuantity}</Text>
@@ -443,7 +494,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               </Pressable>
             );
           }) : (
-            <EmptyState icon={<Archive size={28} color={colors.textPlaceholder} />} title="No supply records yet" />
+            <EmptyState icon={<Archive size={28} color={colors.textPlaceholder} />} title={suppliesQuery.trim() ? "No supply records found" : "No supply records yet"} />
           )}
         </View>
       );

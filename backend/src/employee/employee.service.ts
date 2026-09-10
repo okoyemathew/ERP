@@ -813,35 +813,10 @@ export class EmployeeService {
     employee: Awaited<ReturnType<EmployeeService['findOne']>>,
   ) {
     const userId = employee.userId;
-    const employeeName =
-      `${employee.firstName} ${employee.lastName}`.trim() ||
-      employee.user.username;
-    const matchTokens = [
-      employee.employeeCode,
-      employeeName,
-      employee.user.username,
-    ].filter(Boolean);
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const endOfToday = new Date(startOfToday);
     endOfToday.setDate(endOfToday.getDate() + 1);
-    const disbursementEmployeeMatches: Prisma.GoodsDisbursementWhereInput[] = [
-      { employeeId: employee.id },
-      ...matchTokens.flatMap((token) => [
-        {
-          destination: {
-            contains: token,
-            mode: Prisma.QueryMode.insensitive,
-          },
-        },
-        {
-          remarks: {
-            contains: token,
-            mode: Prisma.QueryMode.insensitive,
-          },
-        },
-      ]),
-    ];
 
     const [soldItems, disbursements, returnedItems, salesTodayCount, salesTodayValue] =
       await Promise.all([
@@ -881,7 +856,7 @@ export class EmployeeService {
         this.prisma.goodsDisbursement.findMany({
           where: {
             businessId,
-            OR: disbursementEmployeeMatches,
+            employeeId: employee.id,
           },
           include: {
             items: {
@@ -1139,7 +1114,7 @@ export class EmployeeService {
         salesTodayValue:
           salesTodayValue._sum.totalAmount ?? new Prisma.Decimal(0),
       },
-      stock: stockItems.slice(0, 50),
+      stock: stockItems,
       supplies: {
         summary: {
           totalSupplyRuns: supplyRecords.length,

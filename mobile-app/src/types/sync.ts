@@ -18,6 +18,8 @@ export type SyncPayload = (CreateSalePayload | CreateExpensePayload) & {
 
 export interface SyncQueueItem {
   id: string;
+  businessId?: string | null;
+  userId?: string | null;
   type: SyncOperationType;
   payload: SyncPayload;
   status: SyncQueueStatus;

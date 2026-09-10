@@ -359,6 +359,74 @@ export class GoodsDisbursementService {
                   },
                 },
               },
+              {
+                items: {
+                  some: {
+                    product: {
+                      sku: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                  },
+                },
+              },
+              {
+                items: {
+                  some: {
+                    product: {
+                      barcode: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                  },
+                },
+              },
+              {
+                employee: {
+                  is: {
+                    employeeCode: {
+                      contains: search,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                },
+              },
+              {
+                employee: {
+                  is: {
+                    firstName: {
+                      contains: search,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                },
+              },
+              {
+                employee: {
+                  is: {
+                    lastName: {
+                      contains: search,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                },
+              },
+              {
+                employee: {
+                  is: {
+                    user: {
+                      is: {
+                        username: {
+                          contains: search,
+                          mode: Prisma.QueryMode.insensitive,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
             ],
           }
         : {}),

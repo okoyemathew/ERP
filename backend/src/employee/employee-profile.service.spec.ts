@@ -131,6 +131,21 @@ describe('EmployeeService profile stock', () => {
 
     const response = await service.getProfile(businessId, employeeId);
 
+    expect(prisma.goodsDisbursement.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          businessId,
+          employeeId,
+        }),
+      }),
+    );
+    expect(prisma.goodsDisbursement.findMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.any(Array),
+        }),
+      }),
+    );
     expect(response.profileActivity?.stock[0]).toEqual(
       expect.objectContaining({
         productId,
@@ -198,5 +213,59 @@ describe('EmployeeService profile stock', () => {
         quantityInHand: 101,
       }),
     );
+  });
+
+  it('returns every distinct supplied stock item for add sales product selection', async () => {
+    const prisma = createPrismaMock();
+    const service = new EmployeeService(prisma as never, {} as never);
+    const productCount = 75;
+    const items = Array.from({ length: productCount }, (_, index) => {
+      const id = `product-${String(index).padStart(3, '0')}`;
+
+      return {
+        id: `item-${String(index).padStart(3, '0')}`,
+        productId: id,
+        quantity: index + 1,
+        product: {
+          id,
+          name: `Product ${index + 1}`,
+          sku: `SKU-${index + 1}`,
+          barcode: null,
+          sellingPrice: new Prisma.Decimal(100 + index),
+          isActive: true,
+        },
+        createdAt: new Date(2026, 8, 9, 10, index),
+      };
+    });
+
+    prisma.employee.findFirst.mockResolvedValue(employee);
+    prisma.sale.count.mockResolvedValue(0);
+    prisma.payment.count.mockResolvedValue(0);
+    prisma.expense.count.mockResolvedValue(0);
+    prisma.userSession.findMany.mockResolvedValue([]);
+    prisma.sale.aggregate.mockResolvedValue({
+      _sum: { totalAmount: new Prisma.Decimal(0) },
+    });
+    prisma.productReturnRequest.findMany.mockResolvedValue([]);
+    prisma.goodsDisbursement.findMany.mockResolvedValue([
+      {
+        id: '55555555-5555-5555-5555-555555555555',
+        employeeId,
+        disbursementNumber: 'GD-MANY',
+        disbursementDate: new Date('2026-09-09T10:00:00.000Z'),
+        destination: 'Okoye Matthew Ikechukwu',
+        remarks: null,
+        items,
+      },
+    ]);
+    prisma.saleItem.findMany.mockResolvedValue([]);
+
+    const response = await service.getProfile(businessId, employeeId);
+
+    expect(response.profileActivity?.stats.stockItems).toBe(productCount);
+    expect(response.profileActivity?.stock).toHaveLength(productCount);
+    expect(
+      response.profileActivity?.stock.map((item) => item.productId),
+    ).toEqual(expect.arrayContaining(['product-000', 'product-050', 'product-074']));
   });
 });

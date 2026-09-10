@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Archive, FileDown, Printer, Search, Send } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AppBottomSheet, Button, Card, EmptyState, ErrorState, LoadingState } from "@/components/common";
+import { AppBottomSheet, Button, Card, EmptyState, ErrorState, LoadingState, SearchBar } from "@/components/common";
 import { SimpleRow, ListScreen } from "@/screens/shared/ScreenKit";
 import { goodsDisbursementService } from "@/services/goods-disbursement.service";
 import { printingService } from "@/services/printing.service";
@@ -81,10 +81,35 @@ function buildDisbursementInvoiceText(disbursement: ApiGoodsDisbursement, quanti
   ].join("\n");
 }
 
+function matchesSearch(disbursement: ApiGoodsDisbursement, query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+
+  const employeeName = disbursementEmployeeName(disbursement);
+  const values: Array<string | number | null | undefined> = [
+    disbursement.disbursementNumber,
+    disbursement.destination,
+    disbursement.remarks,
+    employeeName,
+    disbursement.employee?.employeeCode,
+    disbursement.employee?.user?.username,
+    ...disbursement.items.flatMap((item) => [
+      item.product?.name,
+      item.product?.sku,
+      item.product?.barcode,
+      item.productId,
+      item.quantity
+    ])
+  ];
+
+  return values.some((value) => String(value ?? "").toLowerCase().includes(normalized));
+}
+
 export function DisbursedScreen() {
   const insets = useSafeAreaInsets();
   const business = useAuthStore((state) => state.business);
   const [items, setItems] = useState<ApiGoodsDisbursement[]>([]);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState<ApiGoodsDisbursement | null>(null);
@@ -95,17 +120,23 @@ export function DisbursedScreen() {
     setLoading(true);
     setError(false);
     try {
-      const response = await goodsDisbursementService.list({ limit: 50 });
+      const response = await goodsDisbursementService.list({
+        limit: 50,
+        search: query.trim() || undefined
+      });
       setItems(response.data);
     } catch {
       setError(true);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [query]);
 
   useEffect(() => {
-    void load();
+    const timer = setTimeout(() => {
+      void load();
+    }, 300);
+    return () => clearTimeout(timer);
   }, [load]);
 
   const openEdit = (item: ApiGoodsDisbursement) => {
@@ -200,12 +231,17 @@ export function DisbursedScreen() {
   };
 
   const sheetBottomPadding = Math.max(insets.bottom, 24) + 48;
+  const visibleItems = useMemo(
+    () => items.filter((item) => matchesSearch(item, query)),
+    [items, query]
+  );
 
   return (
     <>
       <ListScreen
         title="Disbursed"
-        data={loading || error ? [] : items}
+        ListHeaderComponent={<SearchBar value={query} onChangeText={setQuery} placeholder="Search disbursements" />}
+        data={loading || error ? [] : visibleItems}
         keyExtractor={(item) => item.id}
         empty={
           loading ? (

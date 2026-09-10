@@ -71,6 +71,7 @@ export function SimpleRow({
 export function ListScreen<T>({
   title,
   right,
+  ListHeaderComponent,
   data,
   renderItem,
   keyExtractor,
@@ -78,6 +79,7 @@ export function ListScreen<T>({
 }: {
   title: string;
   right?: React.ReactNode;
+  ListHeaderComponent?: React.ReactElement;
   data: T[];
   renderItem: ({ item }: { item: T }) => React.ReactElement;
   keyExtractor: (item: T) => string;
@@ -93,6 +95,7 @@ export function ListScreen<T>({
         data={data}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
+        ListHeaderComponent={ListHeaderComponent}
         ListEmptyComponent={empty}
         contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
         showsVerticalScrollIndicator
