@@ -20,6 +20,7 @@ export class CollectCreditPaymentDto {
   creditSaleId?: string;
 
   @ApiProperty({ description: 'Payment amount', minimum: 0.01 })
+  @Type(() => Number)
   @Min(0.01)
   amount!: number;
 

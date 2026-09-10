@@ -1,4 +1,5 @@
 import { CustomerService } from './customer.service';
+import { CreditSaleStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 
 const businessId = '11111111-1111-1111-1111-111111111111';
@@ -184,6 +185,109 @@ describe('CustomerService activity scoping', () => {
               ]),
             }),
           ]),
+        }),
+      }),
+    );
+  });
+
+  it('keeps credit sale and linked sale balances partial after a partial credit payment', async () => {
+    const saleId = '66666666-6666-6666-6666-666666666666';
+    const creditSaleId = '77777777-7777-7777-7777-777777777777';
+    const paymentDate = new Date('2026-09-10T12:00:00.000Z');
+    const tx = {
+      creditSale: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: creditSaleId,
+            saleId,
+            customerId,
+            amountPaid: new Prisma.Decimal(0),
+            balance: new Prisma.Decimal(5000),
+            createdAt: new Date('2026-09-09T12:00:00.000Z'),
+            sale: {
+              id: saleId,
+              businessId,
+              totalAmount: new Prisma.Decimal(5000),
+              payments: [
+                {
+                  paymentMethod: PaymentMethod.CREDIT,
+                  amount: new Prisma.Decimal(5000),
+                },
+              ],
+            },
+          },
+        ]),
+        update: jest.fn(),
+        aggregate: jest.fn().mockResolvedValue({
+          _sum: { balance: new Prisma.Decimal(3000) },
+        }),
+      },
+      creditPayment: {
+        create: jest.fn().mockResolvedValue({
+          id: '88888888-8888-8888-8888-888888888888',
+          amount: new Prisma.Decimal(2000),
+        }),
+      },
+      sale: {
+        update: jest.fn(),
+        aggregate: jest.fn().mockResolvedValue({
+          _sum: { balanceDue: new Prisma.Decimal(3000) },
+        }),
+      },
+      customer: {
+        update: jest.fn().mockResolvedValue({
+          id: customerId,
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          companyName: null,
+          outstandingBalance: new Prisma.Decimal(3000),
+        }),
+      },
+      auditLog: {
+        create: jest.fn(),
+      },
+    };
+    const prisma = {
+      customer: {
+        findFirst: jest.fn().mockResolvedValue({ id: customerId }),
+      },
+      $transaction: jest.fn((callback) => callback(tx)),
+    };
+    const service = new CustomerService(prisma as never, {} as never);
+
+    await service.collectCreditPayment(
+      businessId,
+      customerId,
+      {
+        creditSaleId,
+        amount: 2000,
+        paymentMethod: PaymentMethod.CARD,
+        paymentDate,
+      },
+      employee,
+    );
+
+    expect(tx.creditSale.update).toHaveBeenCalledWith({
+      where: { id: creditSaleId },
+      data: {
+        amountPaid: new Prisma.Decimal(2000),
+        balance: new Prisma.Decimal(3000),
+        status: CreditSaleStatus.PARTIALLY_PAID,
+      },
+    });
+    expect(tx.sale.update).toHaveBeenCalledWith({
+      where: { id: saleId },
+      data: {
+        amountPaid: new Prisma.Decimal(2000),
+        balanceDue: new Prisma.Decimal(3000),
+        paymentStatus: PaymentStatus.PARTIAL,
+      },
+    });
+    expect(tx.creditPayment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          amount: new Prisma.Decimal(2000),
+          paymentDate,
         }),
       }),
     );

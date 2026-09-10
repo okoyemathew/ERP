@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React from "react";
 import { View } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { BottomTabParamList } from "@/types/navigation.types";
-import { BottomNav, DrawerMenu } from "@/components/common";
+import { BottomNav } from "@/components/common";
 import { OwnerDashboard } from "@/screens/dashboard/OwnerDashboard";
 import { EmployeeDashboard } from "@/screens/dashboard/EmployeeDashboard";
 import { SalesRecordsScreen } from "@/screens/sales/SalesRecordsScreen";
@@ -10,6 +10,7 @@ import { AddNewSalesScreen } from "@/screens/sales/AddNewSalesScreen";
 import { CustomersScreen } from "@/screens/customers/CustomersScreen";
 import { useAuthStore } from "@/store/authStore";
 import { appRoleForUser } from "@/utils/permissions";
+import { useAppNavigationMenu } from "./AppNavigationMenu";
 
 const Tabs = createBottomTabNavigator<BottomTabParamList>();
 
@@ -18,10 +19,9 @@ function EmptyMore() {
 }
 
 export function BottomTabNavigator() {
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const user = useAuthStore((state) => state.user);
+  const navigationMenu = useAppNavigationMenu();
   const role = appRoleForUser(user);
-  const logout = useAuthStore((state) => state.logout);
   const Dashboard = role === "owner" ? OwnerDashboard : EmployeeDashboard;
 
   return (
@@ -34,23 +34,10 @@ export function BottomTabNavigator() {
             active={state.routeNames[state.index] as keyof BottomTabParamList}
             onTabPress={(tab) => {
               if (tab === "More") {
-                setDrawerOpen(true);
+                navigationMenu?.openMenu();
                 return;
               }
               navigation.navigate(tab);
-            }}
-          />
-          <DrawerMenu
-            open={drawerOpen}
-            role={role}
-            onClose={() => setDrawerOpen(false)}
-            onLogout={() => {
-              setDrawerOpen(false);
-              void logout();
-            }}
-            onNavigate={(route) => {
-              setDrawerOpen(false);
-              navigation.getParent()?.navigate(route as never);
             }}
           />
         </>

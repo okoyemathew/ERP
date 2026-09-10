@@ -2,16 +2,88 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Alert, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { Archive, Search } from "lucide-react-native";
+import { Archive, FileDown, Printer, Search, Send } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Button, Card, EmptyState, ErrorState, LoadingState } from "@/components/common";
 import { SimpleRow, ListScreen } from "@/screens/shared/ScreenKit";
 import { goodsDisbursementService } from "@/services/goods-disbursement.service";
+import { printingService } from "@/services/printing.service";
+import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
-import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
+import type { ApiGoodsDisbursement, ApiGoodsDisbursementItem } from "@/types/goodsDisbursement";
+import { formatCurrency } from "@/utils/format";
+
+const invoiceLineWidth = 36;
+const invoiceDivider = "-".repeat(invoiceLineWidth);
+
+const invoiceCenter = (text: string) => {
+  const trimmed = text.slice(0, invoiceLineWidth);
+  const pad = Math.max(0, Math.floor((invoiceLineWidth - trimmed.length) / 2));
+  return `${" ".repeat(pad)}${trimmed}`;
+};
+
+const invoiceRow = (left: string, right: string) => {
+  const cleanLeft = left.slice(0, invoiceLineWidth - 1);
+  const cleanRight = right.slice(0, invoiceLineWidth - 1);
+  const spaces = Math.max(1, invoiceLineWidth - cleanLeft.length - cleanRight.length);
+  return `${cleanLeft}${" ".repeat(spaces)}${cleanRight}`;
+};
+
+function disbursementEmployeeName(disbursement: ApiGoodsDisbursement) {
+  const employee = disbursement.employee;
+  if (!employee) return undefined;
+  return `${employee.firstName} ${employee.lastName}`.trim() || employee.user?.username || employee.employeeCode;
+}
+
+function itemUnitPrice(item: ApiGoodsDisbursementItem) {
+  return Number(item.product?.sellingPrice ?? 0);
+}
+
+function visibleQuantity(item: ApiGoodsDisbursementItem, quantities: Record<string, string>) {
+  const quantity = Number.parseInt(quantities[item.id] ?? String(item.quantity), 10);
+  return Number.isFinite(quantity) ? quantity : 0;
+}
+
+function buildDisbursementInvoiceText(disbursement: ApiGoodsDisbursement, quantities: Record<string, string>, businessName?: string | null) {
+  const employeeName = disbursementEmployeeName(disbursement);
+  const rows = disbursement.items.map((item) => {
+    const quantity = visibleQuantity(item, quantities);
+    const unitPrice = itemUnitPrice(item);
+    return {
+      name: item.product?.name ?? "Product",
+      code: item.product?.sku ?? item.product?.barcode ?? item.productId.slice(0, 8),
+      quantity,
+      unitPrice,
+      total: quantity * unitPrice
+    };
+  });
+  const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0);
+  const totalValue = rows.reduce((sum, item) => sum + item.total, 0);
+
+  return [
+    invoiceCenter(businessName ?? "Business"),
+    invoiceCenter("Disbursement Invoice"),
+    invoiceDivider,
+    invoiceRow("Invoice", disbursement.disbursementNumber),
+    invoiceRow("Date", new Date(disbursement.disbursementDate).toLocaleDateString()),
+    invoiceRow("Destination", disbursement.destination ?? employeeName ?? "No destination"),
+    ...(employeeName ? [invoiceRow("Employee", employeeName)] : []),
+    invoiceDivider,
+    ...rows.flatMap((item) => [
+      item.name,
+      item.code,
+      invoiceRow(`${item.quantity} x ${formatCurrency(item.unitPrice)}`, formatCurrency(item.total))
+    ]),
+    invoiceDivider,
+    invoiceRow("Total Qty", String(totalQuantity)),
+    invoiceRow("Total Value", formatCurrency(totalValue)),
+    ...(disbursement.remarks ? [invoiceDivider, disbursement.remarks] : [])
+  ].join("\n");
+}
 
 export function DisbursedScreen() {
   const insets = useSafeAreaInsets();
+  const business = useAuthStore((state) => state.business);
   const [items, setItems] = useState<ApiGoodsDisbursement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -84,6 +156,49 @@ export function DisbursedScreen() {
       setSaving(false);
     }
   };
+
+  const selectedInvoice = () => {
+    if (!selected) return null;
+    const title = `Disbursement ${selected.disbursementNumber}`;
+    return {
+      title,
+      text: buildDisbursementInvoiceText(selected, quantities, business?.name)
+    };
+  };
+
+  const printInvoice = async () => {
+    const invoice = selectedInvoice();
+    if (!invoice) return;
+    try {
+      await printingService.printText(invoice.text, invoice.title);
+    } catch (printError) {
+      const message = printError instanceof Error ? printError.message : "Unable to print disbursement invoice.";
+      Alert.alert("Print failed", message);
+    }
+  };
+
+  const saveInvoicePdf = async () => {
+    const invoice = selectedInvoice();
+    if (!invoice) return;
+    try {
+      await printingService.saveTextPdf(invoice.text, invoice.title);
+    } catch (pdfError) {
+      const message = pdfError instanceof Error ? pdfError.message : "Unable to save disbursement invoice PDF.";
+      Alert.alert("PDF failed", message);
+    }
+  };
+
+  const shareInvoiceWhatsApp = async () => {
+    const invoice = selectedInvoice();
+    if (!invoice) return;
+    try {
+      await printingService.shareTextPdfToWhatsApp(invoice.text, invoice.title);
+    } catch (shareError) {
+      const message = shareError instanceof Error ? shareError.message : "Unable to share disbursement invoice.";
+      Alert.alert("Share failed", message);
+    }
+  };
+
   const sheetBottomPadding = Math.max(insets.bottom, 24) + 48;
 
   return (
@@ -124,34 +239,45 @@ export function DisbursedScreen() {
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
             >
-              {selected.items.map((item) => (
-                <Card key={item.id} style={styles.itemCard}>
-                  <View style={styles.itemHead}>
-                    <View style={styles.icon}>
-                      <Archive size={16} color={colors.primary} />
+              {selected.items.map((item) => {
+                const quantity = visibleQuantity(item, quantities);
+                const unitPrice = itemUnitPrice(item);
+                const totalValue = quantity * unitPrice;
+                return (
+                  <Card key={item.id} style={styles.itemCard}>
+                    <View style={styles.itemHead}>
+                      <View style={styles.icon}>
+                        <Archive size={16} color={colors.primary} />
+                      </View>
+                      <View style={styles.itemBody}>
+                        <Text style={styles.itemTitle}>{item.product?.name ?? "Product"}</Text>
+                        <Text style={styles.itemMeta}>{item.product?.sku ?? item.product?.barcode ?? item.productId.slice(0, 8)}</Text>
+                        <Text style={styles.itemMeta}>Qty {quantity} x {formatCurrency(unitPrice)} = {formatCurrency(totalValue)}</Text>
+                      </View>
                     </View>
-                    <View style={styles.itemBody}>
-                      <Text style={styles.itemTitle}>{item.product?.name ?? "Product"}</Text>
-                      <Text style={styles.itemMeta}>{item.product?.sku ?? item.product?.barcode ?? item.productId.slice(0, 8)}</Text>
-                    </View>
-                  </View>
-                  <TextInput
-                    value={quantities[item.id] ?? String(item.quantity)}
-                    onChangeText={(value) => {
-                      if (value && !/^\d+$/.test(value)) {
-                        Alert.alert("Quantity", "Enter a valid quantity.");
-                        return;
-                      }
-                      setQuantities((current) => ({ ...current, [item.id]: value }));
-                    }}
-                    keyboardType="number-pad"
-                    style={styles.quantityInput}
-                    accessibilityLabel={`Quantity for ${item.product?.name ?? "product"}`}
-                  />
-                </Card>
-              ))}
+                    <TextInput
+                      value={quantities[item.id] ?? String(item.quantity)}
+                      onChangeText={(value) => {
+                        if (value && !/^\d+$/.test(value)) {
+                          Alert.alert("Quantity", "Enter a valid quantity.");
+                          return;
+                        }
+                        setQuantities((current) => ({ ...current, [item.id]: value }));
+                      }}
+                      keyboardType="number-pad"
+                      style={styles.quantityInput}
+                      accessibilityLabel={`Quantity for ${item.product?.name ?? "product"}`}
+                    />
+                  </Card>
+                );
+              })}
             </BottomSheetScrollView>
             <View style={[styles.sheetFooter, { paddingBottom: sheetBottomPadding }]}>
+              <View style={styles.invoiceActions}>
+                <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printInvoice()} style={styles.invoiceButton} />
+                <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void saveInvoicePdf()} style={styles.invoiceButton} />
+                <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void shareInvoiceWhatsApp()} style={styles.invoiceButton} />
+              </View>
               <Button label="Save Changes" loading={saving} onPress={() => void saveEdit()} />
             </View>
           </View>
@@ -164,9 +290,11 @@ export function DisbursedScreen() {
 const styles = StyleSheet.create({
   sheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
   sheetScroller: { flex: 1 },
-  sheetFooter: { paddingTop: 2 },
+  sheetFooter: { paddingTop: 2, gap: 10 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "800" },
   sheetScroll: { gap: 12, paddingBottom: spacing.sectionGap },
+  invoiceActions: { flexDirection: "row", gap: 8 },
+  invoiceButton: { flex: 1, minHeight: 44 },
   itemCard: { gap: 10 },
   itemHead: { flexDirection: "row", alignItems: "center", gap: 10 },
   icon: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.secondaryBg, alignItems: "center", justifyContent: "center" },

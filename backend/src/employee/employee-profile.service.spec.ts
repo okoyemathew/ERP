@@ -140,4 +140,63 @@ describe('EmployeeService profile stock', () => {
       }),
     );
   });
+
+  it('calculates employee stock and supplied value from all supply runs', async () => {
+    const prisma = createPrismaMock();
+    const service = new EmployeeService(prisma as never, {} as never);
+    const supplyRuns = Array.from({ length: 101 }, (_, index) => ({
+      id: `55555555-5555-5555-5555-${String(index).padStart(12, '0')}`,
+      employeeId,
+      disbursementNumber: `GD-${String(index + 1).padStart(3, '0')}`,
+      disbursementDate: new Date(2026, 8, 9, 10, index),
+      destination: 'Okoye Matthew Ikechukwu',
+      remarks: null,
+      items: [
+        {
+          id: `66666666-6666-6666-6666-${String(index).padStart(12, '0')}`,
+          productId,
+          quantity: 1,
+          product: {
+            id: productId,
+            name: 'Salt',
+            sku: 'SALT-6',
+            barcode: null,
+            sellingPrice: new Prisma.Decimal(80),
+            isActive: true,
+          },
+          createdAt: new Date(2026, 8, 9, 10, index),
+        },
+      ],
+    }));
+
+    prisma.employee.findFirst.mockResolvedValue(employee);
+    prisma.sale.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+    prisma.payment.count.mockResolvedValue(0);
+    prisma.expense.count.mockResolvedValue(0);
+    prisma.userSession.findMany.mockResolvedValue([]);
+    prisma.sale.aggregate.mockResolvedValue({
+      _sum: { totalAmount: new Prisma.Decimal(0) },
+    });
+    prisma.productReturnRequest.findMany.mockResolvedValue([]);
+    prisma.goodsDisbursement.findMany.mockResolvedValue(supplyRuns);
+    prisma.saleItem.findMany.mockResolvedValue([]);
+
+    const response = await service.getProfile(businessId, employeeId);
+
+    expect(response.profileActivity?.stats.totalSupplied).toBe(101);
+    expect(String(response.profileActivity?.stats.stockValue)).toBe('8080');
+    expect(String(response.profileActivity?.supplies.summary.totalSuppliedValue)).toBe('8080');
+    expect(response.profileActivity?.supplies.summary.totalSupplyRuns).toBe(101);
+    expect(response.profileActivity?.supplies.data).toHaveLength(100);
+    expect(response.profileActivity?.stock[0]).toEqual(
+      expect.objectContaining({
+        productId,
+        suppliedQuantity: 101,
+        quantitySold: 0,
+        quantityInHand: 101,
+      }),
+    );
+  });
 });

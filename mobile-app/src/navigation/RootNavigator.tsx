@@ -4,6 +4,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
 import { AppNavigator } from "./AppNavigator";
 import { AuthStack } from "./AuthStack";
+import { navigationRef } from "./navigationRef";
 import { deviceNotificationsService } from "@/services/device-notifications.service";
 import { offlineSyncService } from "@/services/offline-sync.service";
 import { useAuthStore } from "@/store/authStore";
@@ -32,7 +33,14 @@ export function RootNavigator() {
 
   if (!hasRestored && isLoading) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface }}>
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: colors.surface,
+        }}
+      >
         <StatusBar style="dark" />
         <ActivityIndicator color={colors.primary} />
       </View>
@@ -40,9 +48,13 @@ export function RootNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <StatusBar style={user ? "dark" : "light"} />
-      {user ? <AppNavigator /> : <AuthStack key={authEntryRoute} initialRouteName={authEntryRoute} />}
+      {user ? (
+        <AppNavigator />
+      ) : (
+        <AuthStack key={authEntryRoute} initialRouteName={authEntryRoute} />
+      )}
     </NavigationContainer>
   );
 }

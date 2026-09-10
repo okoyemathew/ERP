@@ -8,6 +8,7 @@ import {
   CashTransactionType,
   CreditSaleStatus,
   CustomerStatus,
+  PaymentStatus,
   PaymentMethod,
   Prisma,
 } from '@prisma/client';
@@ -728,6 +729,13 @@ export class CustomerService {
           balance: { gt: 0 },
           status: { not: CreditSaleStatus.PAID },
         },
+        include: {
+          sale: {
+            include: {
+              payments: true,
+            },
+          },
+        },
         orderBy: { createdAt: 'asc' },
       });
 
@@ -743,6 +751,7 @@ export class CustomerService {
 
       let remaining = paymentAmount;
       const payments: unknown[] = [];
+      const paymentDate = dto.paymentDate ?? new Date();
 
       for (const credit of openCredits) {
         if (remaining.lte(0)) {
@@ -764,7 +773,7 @@ export class CustomerService {
             paymentMethod: dto.paymentMethod,
             amount: amountForCredit,
             referenceNumber: dto.referenceNumber?.trim() || null,
-            paymentDate: dto.paymentDate ?? new Date(),
+            paymentDate,
             notes: dto.notes?.trim() || null,
           },
         });
@@ -777,13 +786,41 @@ export class CustomerService {
             amount: amountForCredit,
             reference: credit.id,
             description: 'Cash customer credit payment',
-            transactionDate: dto.paymentDate ?? new Date(),
+            transactionDate: paymentDate,
           });
         }
 
         await tx.creditSale.update({
           where: { id: credit.id },
           data: { amountPaid: newPaid, balance: newBalance, status },
+        });
+
+        const initialPaid = credit.sale.payments.reduce(
+          (sum, salePayment) =>
+            salePayment.paymentMethod === PaymentMethod.CREDIT
+              ? sum
+              : sum.add(salePayment.amount),
+          new Decimal(0),
+        );
+        const saleAmountPaid = Prisma.Decimal.min(
+          credit.sale.totalAmount,
+          initialPaid.add(newPaid),
+        );
+        const saleBalanceDue = Prisma.Decimal.max(
+          new Decimal(0),
+          credit.sale.totalAmount.sub(saleAmountPaid),
+        );
+
+        await tx.sale.update({
+          where: { id: credit.saleId },
+          data: {
+            amountPaid: saleAmountPaid,
+            balanceDue: saleBalanceDue,
+            paymentStatus: this.paymentStatus(
+              saleAmountPaid,
+              credit.sale.totalAmount,
+            ),
+          },
         });
 
         payments.push(payment);
@@ -894,6 +931,16 @@ export class CustomerService {
       where: { id: register.id },
       data: { expectedBalance: nextBalance },
     });
+  }
+
+  private paymentStatus(amountPaid: Decimal, totalAmount: Decimal) {
+    if (amountPaid.lte(0)) {
+      return PaymentStatus.UNPAID;
+    }
+    if (amountPaid.gte(totalAmount)) {
+      return PaymentStatus.PAID;
+    }
+    return PaymentStatus.PARTIAL;
   }
 
   private async calculateRegisterCashBalance(tx: Tx, cashRegisterId: string) {

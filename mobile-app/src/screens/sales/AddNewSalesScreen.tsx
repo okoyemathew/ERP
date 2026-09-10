@@ -1,9 +1,40 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  Alert,
+  FlatList,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from "react-native";
 import { Text } from "@/i18n";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { useFocusEffect } from "@react-navigation/native";
-import { CreditCard, FileDown, Grid2X2, HandCoins, List, Minus, Package, Plus, Printer, Search, Send, Trash2, Wallet } from "lucide-react-native";
+import {
+  CreditCard,
+  ChevronRight,
+  FileDown,
+  Grid2X2,
+  HandCoins,
+  List,
+  Minus,
+  Package,
+  Plus,
+  Printer,
+  Search,
+  Send,
+  Trash2,
+  Wallet,
+} from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppBottomSheet, Button, Card } from "@/components/common";
@@ -18,28 +49,41 @@ import { salesService } from "@/services/sales.service";
 import { useAuthStore } from "@/store/authStore";
 import { useEmployeeCartStore } from "@/store/employeeCartStore";
 import { colors, shadows, spacing } from "@/theme";
-import type { EmployeeStockItem, Product, ReceiptDocument, SaleItem } from "@/types/domain.types";
+import type {
+  EmployeeStockItem,
+  Product,
+  ReceiptDocument,
+  SaleItem,
+} from "@/types/domain.types";
 import type { ApiCustomer } from "@/types/customer";
 import type { ApiCreditSale } from "@/types/creditSale";
 import { customerDisplayName } from "@/types/customer";
-import type { CreatePaymentPayload, CreateSalePayload, PosPaymentMethod } from "@/types/sales";
+import type {
+  CreatePaymentPayload,
+  CreateSalePayload,
+  PosPaymentMethod,
+} from "@/types/sales";
 import { mapReceiptToDocument, toApiPaymentMethod } from "@/types/sales";
 import { dashboardEvents } from "@/utils/dashboardEvents";
 import { formatCurrency } from "@/utils/format";
+import { useAppNavigationMenu } from "@/navigation/AppNavigationMenu";
 
 const paymentMethods: Array<{ label: string; value: PosPaymentMethod }> = [
   { label: "Cash", value: "cash" },
   { label: "Card", value: "card" },
   { label: "Bank", value: "bank" },
   { label: "Mobile", value: "mobile" },
-  { label: "Credit", value: "credit" }
+  { label: "Credit", value: "credit" },
 ];
 
-const collectMethods: Array<{ label: string; value: Exclude<PosPaymentMethod, "credit"> }> = [
+const collectMethods: Array<{
+  label: string;
+  value: Exclude<PosPaymentMethod, "credit">;
+}> = [
   { label: "Cash", value: "cash" },
   { label: "Card", value: "card" },
   { label: "Bank", value: "bank" },
-  { label: "Mobile", value: "mobile" }
+  { label: "Mobile", value: "mobile" },
 ];
 
 type ProductTile = {
@@ -81,22 +125,36 @@ const alphaColor = (hex: string, opacity: number) => {
 };
 
 const stockStatus = (stock: number) => {
-  if (stock <= 3) return { label: "Critical", color: colors.error, bg: colors.errorBg };
-  if (stock <= 10) return { label: "Low", color: colors.warning, bg: colors.warningBg };
+  if (stock <= 3)
+    return { label: "Critical", color: colors.error, bg: colors.errorBg };
+  if (stock <= 10)
+    return { label: "Low", color: colors.warning, bg: colors.warningBg };
   return { label: "In Stock", color: colors.successDark, bg: colors.successBg };
 };
 
-const normalizeCustomerPhone = (phone?: string | null) => (phone ?? "").replace(/\D/g, "") || (phone ?? "").trim().toLowerCase();
+const normalizeCustomerPhone = (phone?: string | null) =>
+  (phone ?? "").replace(/\D/g, "") || (phone ?? "").trim().toLowerCase();
 
 const moneyValue = (value: string | number | null | undefined) => {
   const amount = Number(value ?? 0);
   return Number.isFinite(amount) ? amount : 0;
 };
 
-const productColors = ["#1565C0", "#2E7D32", "#FB8C00", "#6A1B9A", "#E65100", "#00838F", "#C62828", "#00695C"];
+const productColors = [
+  "#1565C0",
+  "#2E7D32",
+  "#FB8C00",
+  "#6A1B9A",
+  "#E65100",
+  "#00838F",
+  "#C62828",
+  "#00695C",
+];
 
 const productIconColor = (name: string) => {
-  const index = name.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) % productColors.length;
+  const index =
+    name.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0) %
+    productColors.length;
   return productColors[index];
 };
 
@@ -118,7 +176,7 @@ const mapCreditSaleToInvoiceView = (item: ApiCreditSale): CreditInvoiceView => {
       productId: saleItem.productId,
       name: saleItem.productName ?? "Product",
       qty: saleItem.quantity,
-      price: moneyValue(saleItem.unitPrice)
+      price: moneyValue(saleItem.unitPrice),
     })),
     createdAt: item.sale.saleDate ?? item.createdAt,
     employeeName: item.sale.salesperson.name || item.sale.salesperson.username,
@@ -129,39 +187,57 @@ const mapCreditSaleToInvoiceView = (item: ApiCreditSale): CreditInvoiceView => {
           date: payment.paymentDate,
           amount: moneyValue(payment.amount),
           method: payment.paymentMethod,
-          referenceNumber: payment.referenceNumber
+          referenceNumber: payment.referenceNumber,
         })),
       ...item.payments.map((payment) => ({
         date: payment.paymentDate,
         amount: moneyValue(payment.amount),
         method: payment.paymentMethod,
-        referenceNumber: payment.referenceNumber
-      }))
-    ]
+        referenceNumber: payment.referenceNumber,
+      })),
+    ],
   };
 };
 
 export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
-  const bottomInset = Math.max(insets.bottom, Platform.OS === "android" ? 24 : 0);
-  const sheetBottomPadding = spacing.bottomNavHeight + bottomInset + (Platform.OS === "android" ? 180 : 96);
-  const checkoutScrollBottomPadding = spacing.bottomNavHeight + bottomInset + (Platform.OS === "android" ? 420 : 280);
+  const navigationMenu = useAppNavigationMenu();
+  const bottomInset = Math.max(
+    insets.bottom,
+    Platform.OS === "android" ? 24 : 0,
+  );
+  const sheetBottomPadding =
+    spacing.bottomNavHeight +
+    bottomInset +
+    (Platform.OS === "android" ? 180 : 96);
+  const checkoutScrollBottomPadding =
+    spacing.bottomNavHeight +
+    bottomInset +
+    (Platform.OS === "android" ? 420 : 280);
   const user = useAuthStore((state) => state.user);
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const [prices, setPrices] = useState<Record<string, string>>({});
-  const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
+  const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>(
+    {},
+  );
   const [paymentMethod, setPaymentMethod] = useState<PosPaymentMethod>("cash");
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string | undefined>();
+  const [selectedCustomerId, setSelectedCustomerId] = useState<
+    string | undefined
+  >();
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [receiptCustomerName, setReceiptCustomerName] = useState("");
   const [receiptCustomerPhone, setReceiptCustomerPhone] = useState("");
-  const [selectedCollectInvoice, setSelectedCollectInvoice] = useState<CreditInvoiceView | null>(null);
+  const [selectedCollectInvoice, setSelectedCollectInvoice] =
+    useState<CreditInvoiceView | null>(null);
   const [collectAmount, setCollectAmount] = useState("");
-  const [collectMethod, setCollectMethod] = useState<Exclude<PosPaymentMethod, "credit">>("cash");
-  const [activeReceipt, setActiveReceipt] = useState<ReceiptDocument | null>(null);
+  const [collectMethod, setCollectMethod] =
+    useState<Exclude<PosPaymentMethod, "credit">>("cash");
+  const [activeReceipt, setActiveReceipt] = useState<ReceiptDocument | null>(
+    null,
+  );
   const [printText, setPrintText] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<ApiCustomer[]>([]);
@@ -201,12 +277,15 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               cost: unitValue,
               stock: item.quantityInHand,
               floorPrice: unitValue,
-              iconColor: productIconColor(name)
+              iconColor: productIconColor(name),
             };
-          })
+          }),
       );
     } catch (loadError) {
-      const message = loadError instanceof Error ? loadError.message : "Unable to load products.";
+      const message =
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load products.";
       Alert.alert("Products", message);
     } finally {
       setLoadingProducts(false);
@@ -215,10 +294,16 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const loadCustomers = useCallback(async () => {
     try {
-      const response = await customersService.list({ limit: 100, isActive: true });
+      const response = await customersService.list({
+        limit: 100,
+        isActive: true,
+      });
       setCustomers(response.data);
     } catch (loadError) {
-      const message = loadError instanceof Error ? loadError.message : "Unable to load customers.";
+      const message =
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load customers.";
       Alert.alert("Customers", message);
     }
   }, []);
@@ -247,7 +332,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   useFocusEffect(
     useCallback(() => {
       void loadProducts();
-    }, [loadProducts])
+    }, [loadProducts]),
   );
 
   useEffect(() => {
@@ -271,7 +356,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         barcode: product.barcode,
         qtyInHand: product.stock,
         floorPrice: product.floorPrice ?? product.cost,
-        iconColor: product.iconColor
+        iconColor: product.iconColor,
       };
       return {
         id: product.id,
@@ -283,17 +368,28 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         stock: product.stock,
         iconColor: product.iconColor,
         floorPrice: product.floorPrice,
-        source: stockItem
+        source: stockItem,
       };
     });
   }, [products]);
 
-  const categories = useMemo(() => ["All", ...Array.from(new Set(productTiles.map((product) => product.category)))], [productTiles]);
+  const categories = useMemo(
+    () => [
+      "All",
+      ...Array.from(new Set(productTiles.map((product) => product.category))),
+    ],
+    [productTiles],
+  );
   const filteredProducts = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return productTiles.filter((product) => {
-      const inCategory = activeCategory === "All" || product.category === activeCategory;
-      const matchesQuery = !normalized || [product.name, product.sku, product.barcode, product.category].filter(Boolean).some((value) => String(value).toLowerCase().includes(normalized));
+      const inCategory =
+        activeCategory === "All" || product.category === activeCategory;
+      const matchesQuery =
+        !normalized ||
+        [product.name, product.sku, product.barcode, product.category]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalized));
       return inCategory && matchesQuery;
     });
   }, [activeCategory, productTiles, query]);
@@ -303,23 +399,46 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const discountAmount = Math.max(0, Number(discountInput || 0));
   const taxAmount = Math.max(0, Number(taxInput || 0));
   const grandTotal = Math.max(0, cartSubtotal - discountAmount + taxAmount);
-  const paidAmount = paidInput.trim() === "" ? (paymentMethod === "credit" ? 0 : grandTotal) : Math.max(0, Number(paidInput || 0));
+  const paidAmount =
+    paidInput.trim() === ""
+      ? paymentMethod === "credit"
+        ? 0
+        : grandTotal
+      : Math.max(0, Number(paidInput || 0));
   const total = grandTotal;
-  const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId);
+  const selectedCustomer = customers.find(
+    (customer) => customer.id === selectedCustomerId,
+  );
   const trimmedNewCustomerName = newCustomerName.trim();
   const trimmedNewCustomerPhone = newCustomerPhone.trim();
   const trimmedReceiptCustomerName = receiptCustomerName.trim();
   const trimmedReceiptCustomerPhone = receiptCustomerPhone.trim();
-  const hasNewCreditCustomer = Boolean(trimmedNewCustomerName || trimmedNewCustomerPhone);
-  const hasReceiptCustomerDetails = Boolean(trimmedReceiptCustomerName || trimmedReceiptCustomerPhone);
-  const needsCreditCustomer = paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0;
-  const openCreditInvoices = useMemo(() => creditInvoices.filter((invoice) => invoice.remaining > 0), [creditInvoices]);
-  const cartItems: SaleItem[] = employeeCart.items.map((item) => ({ productId: item.stockItem.productId, name: item.stockItem.name, qty: item.qty, price: item.sellingPrice }));
+  const hasNewCreditCustomer = Boolean(
+    trimmedNewCustomerName || trimmedNewCustomerPhone,
+  );
+  const hasReceiptCustomerDetails = Boolean(
+    trimmedReceiptCustomerName || trimmedReceiptCustomerPhone,
+  );
+  const needsCreditCustomer =
+    paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0;
+  const openCreditInvoices = useMemo(
+    () => creditInvoices.filter((invoice) => invoice.remaining > 0),
+    [creditInvoices],
+  );
+  const cartItems: SaleItem[] = employeeCart.items.map((item) => ({
+    productId: item.stockItem.productId,
+    name: item.stockItem.name,
+    qty: item.qty,
+    price: item.sellingPrice,
+  }));
 
-  const cartQty = (productId: string) => employeeCart.items.find((item) => item.stockItem.productId === productId)?.qty ?? 0;
+  const cartQty = (productId: string) =>
+    employeeCart.items.find((item) => item.stockItem.productId === productId)
+      ?.qty ?? 0;
 
   const productPriceInput = (product: ProductTile) => prices[product.id] ?? "";
-  const minimumSellingPrice = (product: ProductTile) => Math.max(0, Number(product.price || 0));
+  const minimumSellingPrice = (product: ProductTile) =>
+    Math.max(0, Number(product.price || 0));
 
   const parsePositiveMoney = (value: string) => {
     const trimmed = value.trim();
@@ -331,7 +450,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const parseSalePrice = (product: ProductTile): SalePriceResult => {
     const sellingPrice = parsePositiveMoney(productPriceInput(product));
     if (!sellingPrice) return { price: null, reason: "missing" as const };
-    if (sellingPrice < minimumSellingPrice(product)) return { price: null, reason: "belowMinimum" as const };
+    if (sellingPrice < minimumSellingPrice(product))
+      return { price: null, reason: "belowMinimum" as const };
     return { price: sellingPrice, reason: null };
   };
 
@@ -340,7 +460,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       "Selling price",
       reason === "missing"
         ? "Enter the selling price before adding this product."
-        : "Selling price cannot be below the owner-set selling price."
+        : "Selling price cannot be below the owner-set selling price.",
     );
   };
 
@@ -352,7 +472,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       phone: trimmedNewCustomerPhone,
       creditLimit: 0,
       outstandingBalance: 0,
-      notes: "Created from POS credit sale"
+      notes: "Created from POS credit sale",
     });
     setCustomers((current) => {
       if (current.some((item) => item.id === customer.id)) return current;
@@ -373,14 +493,25 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     };
     const findExistingReceiptCustomer = async () => {
       const targetPhone = normalizeCustomerPhone(trimmedReceiptCustomerPhone);
-      const cachedMatch = customers.find((customer) => normalizeCustomerPhone(customer.phone) === targetPhone);
+      const cachedMatch = customers.find(
+        (customer) => normalizeCustomerPhone(customer.phone) === targetPhone,
+      );
       if (cachedMatch) return cachedMatch;
 
       try {
-        const response = await customersService.search(trimmedReceiptCustomerPhone, { limit: 10, isActive: true });
-        return response.data.find((customer) => normalizeCustomerPhone(customer.phone) === targetPhone);
+        const response = await customersService.search(
+          trimmedReceiptCustomerPhone,
+          { limit: 10, isActive: true },
+        );
+        return response.data.find(
+          (customer) => normalizeCustomerPhone(customer.phone) === targetPhone,
+        );
       } catch (error) {
-        if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) return undefined;
+        if (
+          error instanceof AppApiError &&
+          (error.code === "NETWORK" || error.code === "TIMEOUT")
+        )
+          return undefined;
         throw error;
       }
     };
@@ -388,7 +519,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     const existingCustomer = await findExistingReceiptCustomer();
     if (existingCustomer) return rememberCustomer(existingCustomer);
 
-    const [firstName, ...lastNameParts] = trimmedReceiptCustomerName.split(/\s+/);
+    const [firstName, ...lastNameParts] =
+      trimmedReceiptCustomerName.split(/\s+/);
     try {
       const customer = await customersService.create({
         firstName,
@@ -396,13 +528,18 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         phone: trimmedReceiptCustomerPhone,
         creditLimit: 0,
         outstandingBalance: 0,
-        notes: "Created from POS receipt"
+        notes: "Created from POS receipt",
       });
       return rememberCustomer(customer);
     } catch (error) {
-      if (error instanceof AppApiError && (error.code === "BAD_REQUEST" || error.code === "CONFLICT") && error.message.toLowerCase().includes("same phone")) {
+      if (
+        error instanceof AppApiError &&
+        (error.code === "BAD_REQUEST" || error.code === "CONFLICT") &&
+        error.message.toLowerCase().includes("same phone")
+      ) {
         const retryExistingCustomer = await findExistingReceiptCustomer();
-        if (retryExistingCustomer) return rememberCustomer(retryExistingCustomer);
+        if (retryExistingCustomer)
+          return rememberCustomer(retryExistingCustomer);
       }
       throw error;
     }
@@ -410,7 +547,8 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const createPendingCustomer = async () => {
     const customerName = trimmedReceiptCustomerName || trimmedNewCustomerName;
-    const customerPhone = trimmedReceiptCustomerPhone || trimmedNewCustomerPhone;
+    const customerPhone =
+      trimmedReceiptCustomerPhone || trimmedNewCustomerPhone;
     const rememberCustomer = (customer: ApiCustomer) => {
       setCustomers((current) => {
         if (current.some((item) => item.id === customer.id)) return current;
@@ -421,14 +559,25 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     };
     const findExistingPendingCustomer = async () => {
       const targetPhone = normalizeCustomerPhone(customerPhone);
-      const cachedMatch = customers.find((customer) => normalizeCustomerPhone(customer.phone) === targetPhone);
+      const cachedMatch = customers.find(
+        (customer) => normalizeCustomerPhone(customer.phone) === targetPhone,
+      );
       if (cachedMatch) return cachedMatch;
 
       try {
-        const response = await customersService.search(customerPhone, { limit: 10, isActive: true });
-        return response.data.find((customer) => normalizeCustomerPhone(customer.phone) === targetPhone);
+        const response = await customersService.search(customerPhone, {
+          limit: 10,
+          isActive: true,
+        });
+        return response.data.find(
+          (customer) => normalizeCustomerPhone(customer.phone) === targetPhone,
+        );
       } catch (error) {
-        if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) return undefined;
+        if (
+          error instanceof AppApiError &&
+          (error.code === "NETWORK" || error.code === "TIMEOUT")
+        )
+          return undefined;
         throw error;
       }
     };
@@ -443,7 +592,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       phone: customerPhone,
       creditLimit: 0,
       outstandingBalance: 0,
-      notes: "Created from POS pending sale"
+      notes: "Created from POS pending sale",
     });
     return rememberCustomer(customer);
   };
@@ -453,7 +602,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     setReceiptVisible(true);
   };
 
-  const buildCreditInvoiceReceipt = (invoice: CreditInvoiceView, method: Exclude<PosPaymentMethod, "credit">): ReceiptDocument => ({
+  const buildCreditInvoiceReceipt = (
+    invoice: CreditInvoiceView,
+    method: Exclude<PosPaymentMethod, "credit">,
+  ): ReceiptDocument => ({
     id: invoice.orderNumber,
     kind: invoice.remaining > 0 ? "credit" : "sale",
     businessName: "EST JP MOTORS",
@@ -470,7 +622,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     method,
     createdAt: invoice.createdAt,
     printed: false,
-    paymentLines: invoice.paymentLines
+    paymentLines: invoice.paymentLines,
   });
 
   const openCheckout = () => {
@@ -532,7 +684,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const addProduct = (product: ProductTile) => {
     const currentQty = cartQty(product.id);
     if (currentQty >= product.stock) {
-      Alert.alert("Stock limit", "You cannot add more than the available stock.");
+      Alert.alert(
+        "Stock limit",
+        "You cannot add more than the available stock.",
+      );
       return false;
     }
 
@@ -543,7 +698,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     }
 
     employeeCart.addItem(product.source, salePrice.price);
-    setQuantityInputs((current) => ({ ...current, [product.id]: String(currentQty + 1) }));
+    setQuantityInputs((current) => ({
+      ...current,
+      [product.id]: String(currentQty + 1),
+    }));
     return true;
   };
 
@@ -555,7 +713,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       const matchedProduct = products.find((product) =>
         [product.barcode, product.sku]
           .filter(Boolean)
-          .some((value) => String(value).toLowerCase() === normalizedBarcode)
+          .some((value) => String(value).toLowerCase() === normalizedBarcode),
       );
 
       if (!matchedProduct) {
@@ -580,14 +738,17 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           barcode: matchedProduct.barcode,
           qtyInHand: matchedProduct.stock,
           floorPrice: matchedProduct.floorPrice ?? matchedProduct.cost,
-          iconColor: matchedProduct.iconColor
-        }
+          iconColor: matchedProduct.iconColor,
+        },
       };
       if (addProduct(tile)) {
         openCheckout();
       }
     } catch (barcodeError) {
-      const message = barcodeError instanceof Error ? barcodeError.message : "Unable to look up barcode.";
+      const message =
+        barcodeError instanceof Error
+          ? barcodeError.message
+          : "Unable to look up barcode.";
       Alert.alert("Barcode", message);
     }
   };
@@ -599,7 +760,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return;
     }
     if (nextQty > product.stock) {
-      Alert.alert("Stock limit", "You cannot add more than the available stock.");
+      Alert.alert(
+        "Stock limit",
+        "You cannot add more than the available stock.",
+      );
       return;
     }
     if (cartQty(product.id) === 0) {
@@ -614,7 +778,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     }
 
     employeeCart.updateQty(product.id, nextQty);
-    setQuantityInputs((current) => ({ ...current, [product.id]: String(nextQty) }));
+    setQuantityInputs((current) => ({
+      ...current,
+      [product.id]: String(nextQty),
+    }));
   };
 
   const updateProductPrice = (product: ProductTile, value: string) => {
@@ -628,18 +795,27 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const submitQuantityInput = (product: ProductTile, value: string) => {
     const trimmed = value.trim();
     if (!trimmed) {
-      setQuantityInputs((current) => ({ ...current, [product.id]: String(cartQty(product.id)) }));
+      setQuantityInputs((current) => ({
+        ...current,
+        [product.id]: String(cartQty(product.id)),
+      }));
       return;
     }
     if (!/^\d+$/.test(trimmed)) {
       Alert.alert("Quantity", "Enter a valid quantity.");
-      setQuantityInputs((current) => ({ ...current, [product.id]: String(cartQty(product.id)) }));
+      setQuantityInputs((current) => ({
+        ...current,
+        [product.id]: String(cartQty(product.id)),
+      }));
       return;
     }
     const nextQty = Number(trimmed);
     if (!Number.isSafeInteger(nextQty)) {
       Alert.alert("Quantity", "Enter a valid quantity.");
-      setQuantityInputs((current) => ({ ...current, [product.id]: String(cartQty(product.id)) }));
+      setQuantityInputs((current) => ({
+        ...current,
+        [product.id]: String(cartQty(product.id)),
+      }));
       return;
     }
     updateProductQty(product, nextQty);
@@ -655,19 +831,30 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       Alert.alert("Check discount", "Discount cannot exceed the subtotal.");
       return;
     }
-    if (!selectedCustomer && (!(trimmedReceiptCustomerName || trimmedNewCustomerName) || !(trimmedReceiptCustomerPhone || trimmedNewCustomerPhone))) {
-      Alert.alert("Pending sale", "Enter the customer's name and phone number before saving the cart as pending.");
+    if (
+      !selectedCustomer &&
+      (!(trimmedReceiptCustomerName || trimmedNewCustomerName) ||
+        !(trimmedReceiptCustomerPhone || trimmedNewCustomerPhone))
+    ) {
+      Alert.alert(
+        "Pending sale",
+        "Enter the customer's name and phone number before saving the cart as pending.",
+      );
       return;
     }
 
     setProcessingSale(true);
     try {
       if (!(await offlineSyncService.isOnline())) {
-        Alert.alert("Pending sale", "Connect to the internet before saving a pending sale.");
+        Alert.alert(
+          "Pending sale",
+          "Connect to the internet before saving a pending sale.",
+        );
         return;
       }
 
-      const checkoutCustomer = selectedCustomer ?? await createPendingCustomer();
+      const checkoutCustomer =
+        selectedCustomer ?? (await createPendingCustomer());
       const saleItems = cartItems.map((item) => {
         const lineSubtotal = item.qty * item.price;
         return {
@@ -675,7 +862,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           quantity: item.qty,
           unitPrice: item.price,
           discountAmount: distributeAmount(discountAmount, lineSubtotal),
-          taxAmount: distributeAmount(taxAmount, lineSubtotal)
+          taxAmount: distributeAmount(taxAmount, lineSubtotal),
         };
       });
 
@@ -683,16 +870,22 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         customerId: checkoutCustomer.id,
         items: saleItems,
         payments: [],
-        remarks: "Pending sale - auto-clears after 48 hours"
+        remarks: "Pending sale - auto-clears after 48 hours",
       });
 
       dashboardEvents.notifySaleChanged();
       clearCart();
       await loadProducts();
       await loadCreditInvoices();
-      Alert.alert("Pending sale saved", "The selected products were saved under Sales Records > Pending.");
+      Alert.alert(
+        "Pending sale saved",
+        "The selected products were saved under Sales Records > Pending.",
+      );
     } catch (pendingError) {
-      const message = pendingError instanceof Error ? pendingError.message : "Unable to save pending sale.";
+      const message =
+        pendingError instanceof Error
+          ? pendingError.message
+          : "Unable to save pending sale.";
       Alert.alert("Pending sale failed", message);
     } finally {
       setProcessingSale(false);
@@ -701,42 +894,78 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const handleCheckout = async () => {
     if (cartItems.length === 0) return;
-    if (Number.isNaN(discountAmount) || Number.isNaN(taxAmount) || Number.isNaN(paidAmount)) {
-      Alert.alert("Check amounts", "Discount, tax and paid amount must be valid numbers.");
+    if (
+      Number.isNaN(discountAmount) ||
+      Number.isNaN(taxAmount) ||
+      Number.isNaN(paidAmount)
+    ) {
+      Alert.alert(
+        "Check amounts",
+        "Discount, tax and paid amount must be valid numbers.",
+      );
       return;
     }
     if (discountAmount > cartSubtotal) {
       Alert.alert("Check discount", "Discount cannot exceed the subtotal.");
       return;
     }
-    const creditBalance = paymentMethod === "credit" ? grandTotal : Math.max(0, grandTotal - paidAmount);
+    const creditBalance =
+      paymentMethod === "credit"
+        ? grandTotal
+        : Math.max(0, grandTotal - paidAmount);
     if (creditBalance > 0 && !selectedCustomer && !hasNewCreditCustomer) {
-      Alert.alert("Credit customer", "Select an existing customer or enter the new customer's name and phone number.");
+      Alert.alert(
+        "Credit customer",
+        "Select an existing customer or enter the new customer's name and phone number.",
+      );
       return;
     }
-    if (creditBalance > 0 && !selectedCustomer && (!trimmedNewCustomerName || !trimmedNewCustomerPhone)) {
-      Alert.alert("Credit customer", "Enter both the customer's name and phone number before confirming the credit sale.");
+    if (
+      creditBalance > 0 &&
+      !selectedCustomer &&
+      (!trimmedNewCustomerName || !trimmedNewCustomerPhone)
+    ) {
+      Alert.alert(
+        "Credit customer",
+        "Enter both the customer's name and phone number before confirming the credit sale.",
+      );
       return;
     }
     if (paymentMethod !== "credit" && paidAmount <= 0) {
       Alert.alert("Payment amount", "Paid amount must be greater than zero.");
       return;
     }
-    if (paymentMethod !== "credit" && creditBalance <= 0 && hasReceiptCustomerDetails && (!trimmedReceiptCustomerName || !trimmedReceiptCustomerPhone)) {
-      Alert.alert("Customer", "Enter both the customer's name and phone number before confirming payment.");
+    if (
+      paymentMethod !== "credit" &&
+      creditBalance <= 0 &&
+      hasReceiptCustomerDetails &&
+      (!trimmedReceiptCustomerName || !trimmedReceiptCustomerPhone)
+    ) {
+      Alert.alert(
+        "Customer",
+        "Enter both the customer's name and phone number before confirming payment.",
+      );
       return;
     }
 
     let checkoutCustomer = selectedCustomer;
 
-    const buildOfflineReceipt = (operationId: string, receiptCustomer = checkoutCustomer): ReceiptDocument => ({
+    const buildOfflineReceipt = (
+      operationId: string,
+      receiptCustomer = checkoutCustomer,
+    ): ReceiptDocument => ({
       id: `OFF-${operationId.slice(-8).toUpperCase()}`,
       kind: creditBalance > 0 ? "credit" : "sale",
       businessName: "EST JP MOTORS",
       title: "Sales Receipt",
       orderNumber: `OFF-${operationId.slice(-8).toUpperCase()}`,
-      customerName: receiptCustomer ? customerDisplayName(receiptCustomer) : "Walk-in Customer",
-      employeeName: user?.name ?? ([user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.username),
+      customerName: receiptCustomer
+        ? customerDisplayName(receiptCustomer)
+        : "Walk-in Customer",
+      employeeName:
+        user?.name ??
+        ([user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+          user?.username),
       items: cartItems,
       subtotal: cartSubtotal,
       tax: taxAmount,
@@ -745,7 +974,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       balance: creditBalance,
       method: paymentMethod,
       createdAt: new Date().toISOString(),
-      printed: false
+      printed: false,
     });
 
     setProcessingSale(true);
@@ -753,7 +982,12 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       if (creditBalance > 0 && !checkoutCustomer) {
         checkoutCustomer = await createInlineCreditCustomer();
       }
-      if (paymentMethod !== "credit" && creditBalance <= 0 && hasReceiptCustomerDetails && !checkoutCustomer) {
+      if (
+        paymentMethod !== "credit" &&
+        creditBalance <= 0 &&
+        hasReceiptCustomerDetails &&
+        !checkoutCustomer
+      ) {
         checkoutCustomer = await createReceiptCustomer();
       }
 
@@ -764,7 +998,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           quantity: item.qty,
           unitPrice: item.price,
           discountAmount: distributeAmount(discountAmount, lineSubtotal),
-          taxAmount: distributeAmount(taxAmount, lineSubtotal)
+          taxAmount: distributeAmount(taxAmount, lineSubtotal),
         };
       });
 
@@ -774,13 +1008,13 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           paymentMethod: toApiPaymentMethod(paymentMethod),
           amount: paidAmount,
           referenceNumber: referenceInput.trim() || undefined,
-          allowChange: paidAmount > grandTotal
+          allowChange: paidAmount > grandTotal,
         });
       }
       if (creditBalance > 0) {
         payments.push({
           paymentMethod: toApiPaymentMethod("credit"),
-          amount: Number(creditBalance.toFixed(2))
+          amount: Number(creditBalance.toFixed(2)),
         });
       }
 
@@ -788,7 +1022,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         customerId: checkoutCustomer?.id,
         items: saleItems,
         payments,
-        remarks: paymentMethod === "credit" ? "Credit sale" : undefined
+        remarks: paymentMethod === "credit" ? "Credit sale" : undefined,
       };
 
       const clearCheckout = async (refreshCreditInvoices = true) => {
@@ -817,7 +1051,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         await loadProducts();
         setPrintText(null);
         openReceipt(offlineReceipt);
-        Alert.alert("Sale queued", "The sale was saved offline and will sync when the network is available.");
+        Alert.alert(
+          "Sale queued",
+          "The sale was saved offline and will sync when the network is available.",
+        );
       };
 
       if (!(await offlineSyncService.isOnline())) {
@@ -828,14 +1065,19 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       const sale = await salesService.create(salePayload);
       dashboardEvents.notifySaleChanged();
       const receipt = await salesService.receipt(sale.id);
-      const printReady = sale.receipt?.id ? await salesService.printReceipt(sale.receipt.id) : null;
+      const printReady = sale.receipt?.id
+        ? await salesService.printReceipt(sale.receipt.id)
+        : null;
       setPrintText(printReady?.text ?? null);
 
       await clearCheckout();
       await loadProducts();
       openReceipt(mapReceiptToDocument(receipt));
     } catch (checkoutError) {
-      if (checkoutError instanceof AppApiError && (checkoutError.code === "NETWORK" || checkoutError.code === "TIMEOUT")) {
+      if (
+        checkoutError instanceof AppApiError &&
+        (checkoutError.code === "NETWORK" || checkoutError.code === "TIMEOUT")
+      ) {
         try {
           const saleItems = cartItems.map((item) => {
             const lineSubtotal = item.qty * item.price;
@@ -844,7 +1086,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               quantity: item.qty,
               unitPrice: item.price,
               discountAmount: distributeAmount(discountAmount, lineSubtotal),
-              taxAmount: distributeAmount(taxAmount, lineSubtotal)
+              taxAmount: distributeAmount(taxAmount, lineSubtotal),
             };
           });
           const payments: CreatePaymentPayload[] = [];
@@ -853,20 +1095,20 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               paymentMethod: toApiPaymentMethod(paymentMethod),
               amount: paidAmount,
               referenceNumber: referenceInput.trim() || undefined,
-              allowChange: paidAmount > grandTotal
+              allowChange: paidAmount > grandTotal,
             });
           }
           if (creditBalance > 0) {
             payments.push({
               paymentMethod: toApiPaymentMethod("credit"),
-              amount: Number(creditBalance.toFixed(2))
+              amount: Number(creditBalance.toFixed(2)),
             });
           }
           const queued = await offlineSyncService.enqueueSale({
             customerId: checkoutCustomer?.id,
             items: saleItems,
             payments,
-            remarks: paymentMethod === "credit" ? "Credit sale" : undefined
+            remarks: paymentMethod === "credit" ? "Credit sale" : undefined,
           });
           const offlineReceipt = buildOfflineReceipt(queued.id);
           dashboardEvents.notifySaleChanged();
@@ -885,14 +1127,20 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           await loadProducts();
           setPrintText(null);
           openReceipt(offlineReceipt);
-          Alert.alert("Sale queued", "The sale was saved offline and will sync when the network is available.");
+          Alert.alert(
+            "Sale queued",
+            "The sale was saved offline and will sync when the network is available.",
+          );
           return;
         } catch {
           Alert.alert("Sale failed", "Unable to save the sale offline.");
           return;
         }
       }
-      const message = checkoutError instanceof Error ? checkoutError.message : "Unable to complete sale.";
+      const message =
+        checkoutError instanceof Error
+          ? checkoutError.message
+          : "Unable to complete sale.";
       Alert.alert("Sale failed", message);
     } finally {
       setProcessingSale(false);
@@ -902,10 +1150,15 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const openCollect = async () => {
     try {
       const invoices = await loadCreditInvoices();
-      const payableInvoices = invoices.filter((invoice) => invoice.remaining > 0);
+      const payableInvoices = invoices.filter(
+        (invoice) => invoice.remaining > 0,
+      );
 
       if (payableInvoices.length === 0) {
-        Alert.alert("No balances", "There are no outstanding credit invoices to collect.");
+        Alert.alert(
+          "No balances",
+          "There are no outstanding credit invoices to collect.",
+        );
         return;
       }
 
@@ -913,7 +1166,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       setCollectAmount(String(payableInvoices[0].remaining));
       openCollectSheet();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to load outstanding credit invoices.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to load outstanding credit invoices.";
       Alert.alert("Credit payments", message);
     }
   };
@@ -922,34 +1178,47 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     if (!selectedCollectInvoice || collectingPayment) return;
     const amount = Number(collectAmount);
     if (!amount || amount <= 0 || amount > selectedCollectInvoice.remaining) {
-      Alert.alert("Check amount", "Payment must be greater than zero and cannot exceed the invoice balance.");
+      Alert.alert(
+        "Check amount",
+        "Payment must be greater than zero and cannot exceed the invoice balance.",
+      );
       return;
     }
 
     setCollectingPayment(true);
     try {
-      const updatedCreditSale = await creditSalesService.collectPosPayment(selectedCollectInvoice.id, {
-        amount,
-        paymentMethod: toApiPaymentMethod(collectMethod),
-        referenceNumber: `CR-${Date.now()}`
-      });
+      const paymentDate = new Date().toISOString();
+      const updatedCreditSale = await creditSalesService.collectPosPayment(
+        selectedCollectInvoice.id,
+        {
+          amount,
+          paymentMethod: toApiPaymentMethod(collectMethod),
+          paymentDate,
+          referenceNumber: `CR-${Date.now()}`,
+        },
+      );
       const updatedInvoice = mapCreditSaleToInvoiceView(updatedCreditSale);
-      const receiptInvoice = updatedInvoice.total > 0
-        ? updatedInvoice
-        : {
-            ...selectedCollectInvoice,
-            paid: Math.min(selectedCollectInvoice.total, selectedCollectInvoice.paid + amount),
-            remaining: Math.max(0, selectedCollectInvoice.remaining - amount),
-            paymentLines: [
-              ...(selectedCollectInvoice.paymentLines ?? []),
-              {
-                date: new Date().toISOString(),
-                amount,
-                method: toApiPaymentMethod(collectMethod),
-                referenceNumber: null
-              }
-            ]
-          };
+      const receiptInvoice =
+        updatedInvoice.total > 0
+          ? { ...updatedInvoice, createdAt: paymentDate }
+          : {
+              ...selectedCollectInvoice,
+              paid: Math.min(
+                selectedCollectInvoice.total,
+                selectedCollectInvoice.paid + amount,
+              ),
+              remaining: Math.max(0, selectedCollectInvoice.remaining - amount),
+              createdAt: paymentDate,
+              paymentLines: [
+                ...(selectedCollectInvoice.paymentLines ?? []),
+                {
+                  date: paymentDate,
+                  amount,
+                  method: toApiPaymentMethod(collectMethod),
+                  referenceNumber: null,
+                },
+              ],
+            };
       collectRef.current?.close();
       setCollectVisible(false);
       setSelectedCollectInvoice(null);
@@ -959,7 +1228,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       openReceipt(buildCreditInvoiceReceipt(receiptInvoice, collectMethod));
       Alert.alert("Payment received", "Credit payment has been recorded.");
     } catch (collectError) {
-      const message = collectError instanceof Error ? collectError.message : "Unable to collect credit payment.";
+      const message =
+        collectError instanceof Error
+          ? collectError.message
+          : "Unable to collect credit payment.";
       Alert.alert("Payment failed", message);
     } finally {
       setCollectingPayment(false);
@@ -983,7 +1255,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     try {
       await printingService.savePdf(activeReceipt);
     } catch (pdfError) {
-      const message = pdfError instanceof Error ? pdfError.message : "Unable to save receipt PDF.";
+      const message =
+        pdfError instanceof Error
+          ? pdfError.message
+          : "Unable to save receipt PDF.";
       Alert.alert("PDF failed", message);
     }
   };
@@ -993,7 +1268,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     try {
       await printingService.sharePdfToWhatsApp(activeReceipt);
     } catch (shareError) {
-      const message = shareError instanceof Error ? shareError.message : "Unable to share receipt PDF.";
+      const message =
+        shareError instanceof Error
+          ? shareError.message
+          : "Unable to share receipt PDF.";
       Alert.alert("Share failed", message);
     }
   };
@@ -1021,22 +1299,56 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return;
     }
 
-    Alert.alert("Add item", "Tap a product card or search a barcode to add it to the sale.");
+    Alert.alert(
+      "Add item",
+      "Tap a product card or search a barcode to add it to the sale.",
+    );
   };
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.header, { paddingTop: Math.max(insets.top, 10) + 8 }]}>
+      <View
+        style={[styles.header, { paddingTop: Math.max(insets.top, 10) + 8 }]}
+      >
         <View style={styles.headerRow}>
+          <Pressable
+            onPress={navigationMenu?.openMenu}
+            accessibilityRole="button"
+            accessibilityLabel="Open menu"
+            style={styles.smallIconButton}
+          >
+            <ChevronRight size={16} color={colors.textMuted} />
+          </Pressable>
           <Text style={styles.title}>Add New Sales</Text>
-          <Pressable style={styles.collectButton} onPress={() => void openCollect()} accessibilityRole="button" accessibilityLabel="Collect credit payment">
+          <Pressable
+            style={styles.collectButton}
+            onPress={() => void openCollect()}
+            accessibilityRole="button"
+            accessibilityLabel="Collect credit payment"
+          >
             <HandCoins size={12} color={colors.orange} />
-            <Text style={styles.collectText}>{loadingCreditInvoices ? "Loading" : "Collect"}</Text>
+            <Text style={styles.collectText}>
+              {loadingCreditInvoices ? "Loading" : "Collect"}
+            </Text>
           </Pressable>
-          <Pressable onPress={() => setGrid((value) => !value)} accessibilityRole="button" accessibilityLabel="Toggle product layout" style={styles.smallIconButton}>
-            {grid ? <List size={16} color={colors.textMuted} /> : <Grid2X2 size={16} color={colors.textMuted} />}
+          <Pressable
+            onPress={() => setGrid((value) => !value)}
+            accessibilityRole="button"
+            accessibilityLabel="Toggle product layout"
+            style={styles.smallIconButton}
+          >
+            {grid ? (
+              <List size={16} color={colors.textMuted} />
+            ) : (
+              <Grid2X2 size={16} color={colors.textMuted} />
+            )}
           </Pressable>
-          <Pressable onPress={handleAddSalePress} accessibilityRole="button" accessibilityLabel="Add sale item or complete sale" style={styles.addCircle}>
+          <Pressable
+            onPress={handleAddSalePress}
+            accessibilityRole="button"
+            accessibilityLabel="Add sale item or complete sale"
+            style={styles.addCircle}
+          >
             <Plus size={19} color={colors.surface} strokeWidth={2.8} />
           </Pressable>
         </View>
@@ -1052,12 +1364,23 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
             accessibilityLabel="Search products"
           />
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.filters}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator
+          contentContainerStyle={styles.filters}
+        >
           {categories.map((category) => {
             const selected = activeCategory === category;
             return (
-              <Pressable key={category} onPress={() => setActiveCategory(category)} accessibilityRole="button" accessibilityLabel={`Filter ${category}`}>
-                <Text style={[styles.chip, selected && styles.chipActive]}>{category}</Text>
+              <Pressable
+                key={category}
+                onPress={() => setActiveCategory(category)}
+                accessibilityRole="button"
+                accessibilityLabel={`Filter ${category}`}
+              >
+                <Text style={[styles.chip, selected && styles.chipActive]}>
+                  {category}
+                </Text>
               </Pressable>
             );
           })}
@@ -1066,30 +1389,55 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
       <FlatList
         data={filteredProducts}
-        ListEmptyComponent={loadingProducts ? <Text style={styles.emptyText}>Loading products...</Text> : <Text style={styles.emptyText}>No products found</Text>}
+        ListEmptyComponent={
+          loadingProducts ? (
+            <Text style={styles.emptyText}>Loading products...</Text>
+          ) : (
+            <Text style={styles.emptyText}>No products found</Text>
+          )
+        }
         keyExtractor={(item) => item.id}
         numColumns={grid ? 2 : 1}
         key={grid ? "grid" : "list"}
         showsVerticalScrollIndicator
         persistentScrollbar
         indicatorStyle="black"
-        contentContainerStyle={[styles.list, { paddingBottom: 150 + bottomInset }]}
+        contentContainerStyle={[
+          styles.list,
+          { paddingBottom: 150 + bottomInset },
+        ]}
         columnWrapperStyle={grid ? styles.columns : undefined}
         renderItem={({ item }) => {
           const qty = cartQty(item.id);
           const status = stockStatus(item.stock);
           const priceInput = productPriceInput(item);
           const enteredPrice = parsePositiveMoney(priceInput);
-          const invalidPrice = Boolean(priceInput) && (!enteredPrice || enteredPrice < minimumSellingPrice(item));
+          const invalidPrice =
+            Boolean(priceInput) &&
+            (!enteredPrice || enteredPrice < minimumSellingPrice(item));
           const quantityValue = quantityInputs[item.id] ?? String(qty);
 
           return (
             <View style={[styles.productCard, !grid && styles.productListCard]}>
-              <Pressable onPress={() => addProduct(item)} accessibilityRole="button" accessibilityLabel={`Add ${item.name}`} style={[styles.productArt, { backgroundColor: alphaColor(item.iconColor, 0.1) }]}>
+              <Pressable
+                onPress={() => addProduct(item)}
+                accessibilityRole="button"
+                accessibilityLabel={`Add ${item.name}`}
+                style={[
+                  styles.productArt,
+                  { backgroundColor: alphaColor(item.iconColor, 0.1) },
+                ]}
+              >
                 <Package size={30} color={item.iconColor} strokeWidth={1.9} />
-                {qty > 0 ? <View style={styles.qtyBadge}><Text style={styles.qtyBadgeText}>{qty}</Text></View> : null}
+                {qty > 0 ? (
+                  <View style={styles.qtyBadge}>
+                    <Text style={styles.qtyBadgeText}>{qty}</Text>
+                  </View>
+                ) : null}
               </Pressable>
-              <Text style={styles.productName} numberOfLines={2}>{item.name}</Text>
+              <Text style={styles.productName} numberOfLines={2}>
+                {item.name}
+              </Text>
               <Text style={styles.sku}>{item.sku}</Text>
               <View style={styles.priceRow}>
                 <TextInput
@@ -1098,14 +1446,31 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
                   keyboardType="decimal-pad"
                   placeholder="Add Selling Price"
                   placeholderTextColor={colors.textPlaceholder}
-                  style={[styles.employeePrice, invalidPrice && styles.invalidPrice]}
+                  style={[
+                    styles.employeePrice,
+                    invalidPrice && styles.invalidPrice,
+                  ]}
                   accessibilityLabel={`Selling price for ${item.name}`}
                 />
-                <Text style={[styles.statusText, { color: status.color, backgroundColor: status.bg }]}>{status.label}</Text>
+                <Text
+                  style={[
+                    styles.statusText,
+                    { color: status.color, backgroundColor: status.bg },
+                  ]}
+                >
+                  {status.label}
+                </Text>
               </View>
-              {invalidPrice ? <Text style={styles.error}>Enter a valid price</Text> : null}
+              {invalidPrice ? (
+                <Text style={styles.error}>Enter a valid price</Text>
+              ) : null}
               <View style={styles.stepper}>
-                <Pressable onPress={() => updateProductQty(item, qty - 1)} accessibilityRole="button" accessibilityLabel={`Decrease ${item.name}`} style={styles.stepperButton}>
+                <Pressable
+                  onPress={() => updateProductQty(item, qty - 1)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Decrease ${item.name}`}
+                  style={styles.stepperButton}
+                >
                   <Minus size={13} color={colors.textMuted} />
                 </Pressable>
                 <TextInput
@@ -1115,15 +1480,28 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
                       Alert.alert("Quantity", "Enter a valid quantity.");
                       return;
                     }
-                    setQuantityInputs((current) => ({ ...current, [item.id]: value }));
+                    setQuantityInputs((current) => ({
+                      ...current,
+                      [item.id]: value,
+                    }));
                   }}
                   onFocus={() => {
-                    if (cartQty(item.id) === 0 && quantityInputs[item.id] == null) {
-                      setQuantityInputs((current) => ({ ...current, [item.id]: "" }));
+                    if (
+                      cartQty(item.id) === 0 &&
+                      quantityInputs[item.id] == null
+                    ) {
+                      setQuantityInputs((current) => ({
+                        ...current,
+                        [item.id]: "",
+                      }));
                     }
                   }}
-                  onEndEditing={(event) => submitQuantityInput(item, event.nativeEvent.text)}
-                  onSubmitEditing={(event) => submitQuantityInput(item, event.nativeEvent.text)}
+                  onEndEditing={(event) =>
+                    submitQuantityInput(item, event.nativeEvent.text)
+                  }
+                  onSubmitEditing={(event) =>
+                    submitQuantityInput(item, event.nativeEvent.text)
+                  }
                   keyboardType="number-pad"
                   returnKeyType="done"
                   placeholder="0"
@@ -1132,7 +1510,12 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
                   style={styles.stepperQtyInput}
                   accessibilityLabel={`Quantity for ${item.name}`}
                 />
-                <Pressable onPress={() => addProduct(item)} accessibilityRole="button" accessibilityLabel={`Increase ${item.name}`} style={styles.stepperButton}>
+                <Pressable
+                  onPress={() => addProduct(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Increase ${item.name}`}
+                  style={styles.stepperButton}
+                >
                   <Plus size={13} color={colors.primary} />
                 </Pressable>
               </View>
@@ -1141,9 +1524,22 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         }}
       />
 
-      {cartCount > 0 && !checkoutVisible && !collectVisible && !receiptVisible ? (
-        <Pressable style={[styles.cartFab, { bottom: spacing.cartFABBottom + bottomInset }]} accessibilityLabel="Open cart" onPress={openCheckout}>
-          <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.cartFabGradient}>
+      {cartCount > 0 &&
+      !checkoutVisible &&
+      !collectVisible &&
+      !receiptVisible ? (
+        <Pressable
+          style={[
+            styles.cartFab,
+            { bottom: spacing.cartFABBottom + bottomInset },
+          ]}
+          accessibilityLabel="Open cart"
+          onPress={openCheckout}
+        >
+          <LinearGradient
+            colors={[colors.primary, colors.primaryDark]}
+            style={styles.cartFabGradient}
+          >
             <Wallet size={18} color={colors.surface} />
             <Text style={styles.cartText}>{cartCount} items</Text>
             <Text style={styles.cartTotal}>{formatCurrency(total)}</Text>
@@ -1159,228 +1555,456 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         onRequestClose={() => setCheckoutVisible(false)}
       >
         <View style={styles.checkoutModal}>
-          <Pressable style={styles.checkoutBackdrop} onPress={() => setCheckoutVisible(false)} accessibilityRole="button" accessibilityLabel="Close checkout" />
-          <View style={[styles.checkoutSheet, { paddingTop: Math.max(insets.top, 10) + 8, paddingBottom: bottomInset }]}>
-            <View style={styles.modalHandle} />
-          <Text style={styles.sheetTitle}>Complete sale</Text>
-          <ScrollView
-            style={styles.sheetScroller}
-            contentContainerStyle={[styles.sheetScroll, { paddingBottom: checkoutScrollBottomPadding }]}
-            showsVerticalScrollIndicator
-            persistentScrollbar
-            overScrollMode="always"
-            scrollEnabled
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            nestedScrollEnabled
+          <Pressable
+            style={styles.checkoutBackdrop}
+            onPress={() => setCheckoutVisible(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close checkout"
+          />
+          <View
+            style={[
+              styles.checkoutSheet,
+              {
+                paddingTop: Math.max(insets.top, 10) + 8,
+                paddingBottom: bottomInset,
+              },
+            ]}
           >
-            {cartItems.map((item) => (
-              <Card key={item.productId} style={styles.cartRow}>
-                <View style={styles.cartBody}>
-                  <Text style={styles.sheetItemName}>{item.name}</Text>
-                  <Text style={styles.meta}>{item.qty} x {formatCurrency(item.price)}</Text>
-                </View>
-                <Text style={styles.lineTotal}>{formatCurrency(item.qty * item.price)}</Text>
-              </Card>
-            ))}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Payment method</Text>
-              <View style={styles.methodGrid}>
-                {paymentMethods.map((method) => (
-                  <Pressable
-                    key={method.value}
-                    onPress={() => setPaymentMethod(method.value)}
-                    style={[styles.methodChip, paymentMethod === method.value && styles.methodChipActive]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Pay by ${method.label}`}
-                  >
-                    {method.value === "credit" ? <Wallet size={15} color={paymentMethod === method.value ? colors.surface : colors.primary} /> : <CreditCard size={15} color={paymentMethod === method.value ? colors.surface : colors.primary} />}
-                    <Text style={[styles.methodChipText, paymentMethod === method.value && styles.methodChipTextActive]}>{method.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{paymentMethod === "credit" ? "Credit customer" : "Customer"}</Text>
-              {needsCreditCustomer ? (
-                <Card style={styles.newCustomerCard}>
-                  <Text style={styles.customerName}>New credit customer</Text>
-                  <TextInput
-                    value={newCustomerName}
-                    onChangeText={updateNewCreditCustomerName}
-                    placeholder="Customer name"
-                    placeholderTextColor={colors.textPlaceholder}
-                    style={styles.customerInput}
-                    accessibilityLabel="New customer name"
-                  />
-                  <TextInput
-                    value={newCustomerPhone}
-                    onChangeText={updateNewCreditCustomerPhone}
-                    placeholder="Phone number"
-                    placeholderTextColor={colors.textPlaceholder}
-                    keyboardType="phone-pad"
-                    style={styles.customerInput}
-                    accessibilityLabel="New customer phone number"
-                  />
+            <View style={styles.modalHandle} />
+            <Text style={styles.sheetTitle}>Complete sale</Text>
+            <ScrollView
+              style={styles.sheetScroller}
+              contentContainerStyle={[
+                styles.sheetScroll,
+                { paddingBottom: checkoutScrollBottomPadding },
+              ]}
+              showsVerticalScrollIndicator
+              persistentScrollbar
+              overScrollMode="always"
+              scrollEnabled
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              nestedScrollEnabled
+            >
+              {cartItems.map((item) => (
+                <Card key={item.productId} style={styles.cartRow}>
+                  <View style={styles.cartBody}>
+                    <Text style={styles.sheetItemName}>{item.name}</Text>
+                    <Text style={styles.meta}>
+                      {item.qty} x {formatCurrency(item.price)}
+                    </Text>
+                  </View>
+                  <Text style={styles.lineTotal}>
+                    {formatCurrency(item.qty * item.price)}
+                  </Text>
                 </Card>
-              ) : null}
-              {!needsCreditCustomer ? (
-                <View style={styles.customerList}>
+              ))}
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Payment method</Text>
+                <View style={styles.methodGrid}>
+                  {paymentMethods.map((method) => (
+                    <Pressable
+                      key={method.value}
+                      onPress={() => setPaymentMethod(method.value)}
+                      style={[
+                        styles.methodChip,
+                        paymentMethod === method.value &&
+                          styles.methodChipActive,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Pay by ${method.label}`}
+                    >
+                      {method.value === "credit" ? (
+                        <Wallet
+                          size={15}
+                          color={
+                            paymentMethod === method.value
+                              ? colors.surface
+                              : colors.primary
+                          }
+                        />
+                      ) : (
+                        <CreditCard
+                          size={15}
+                          color={
+                            paymentMethod === method.value
+                              ? colors.surface
+                              : colors.primary
+                          }
+                        />
+                      )}
+                      <Text
+                        style={[
+                          styles.methodChipText,
+                          paymentMethod === method.value &&
+                            styles.methodChipTextActive,
+                        ]}
+                      >
+                        {method.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>
+                  {paymentMethod === "credit" ? "Credit customer" : "Customer"}
+                </Text>
+                {needsCreditCustomer ? (
                   <Card style={styles.newCustomerCard}>
+                    <Text style={styles.customerName}>New credit customer</Text>
                     <TextInput
-                      value={receiptCustomerName}
-                      onChangeText={updateReceiptCustomerName}
-                      placeholder="Name"
+                      value={newCustomerName}
+                      onChangeText={updateNewCreditCustomerName}
+                      placeholder="Customer name"
                       placeholderTextColor={colors.textPlaceholder}
                       style={styles.customerInput}
-                      accessibilityLabel="Receipt customer name"
+                      accessibilityLabel="New customer name"
                     />
                     <TextInput
-                      value={receiptCustomerPhone}
-                      onChangeText={updateReceiptCustomerPhone}
+                      value={newCustomerPhone}
+                      onChangeText={updateNewCreditCustomerPhone}
                       placeholder="Phone number"
                       placeholderTextColor={colors.textPlaceholder}
                       keyboardType="phone-pad"
                       style={styles.customerInput}
-                      accessibilityLabel="Receipt customer phone number"
+                      accessibilityLabel="New customer phone number"
                     />
                   </Card>
+                ) : null}
+                {!needsCreditCustomer ? (
+                  <View style={styles.customerList}>
+                    <Card style={styles.newCustomerCard}>
+                      <TextInput
+                        value={receiptCustomerName}
+                        onChangeText={updateReceiptCustomerName}
+                        placeholder="Name"
+                        placeholderTextColor={colors.textPlaceholder}
+                        style={styles.customerInput}
+                        accessibilityLabel="Receipt customer name"
+                      />
+                      <TextInput
+                        value={receiptCustomerPhone}
+                        onChangeText={updateReceiptCustomerPhone}
+                        placeholder="Phone number"
+                        placeholderTextColor={colors.textPlaceholder}
+                        keyboardType="phone-pad"
+                        style={styles.customerInput}
+                        accessibilityLabel="Receipt customer phone number"
+                      />
+                    </Card>
+                  </View>
+                ) : null}
+              </View>
+              <Card style={styles.totalCard}>
+                <View style={styles.totalRow}>
+                  <Text style={styles.meta}>Subtotal</Text>
+                  <Text style={styles.totalValue}>
+                    {formatCurrency(cartSubtotal)}
+                  </Text>
+                </View>
+                <View style={styles.amountRow}>
+                  <Text style={styles.meta}>Discount</Text>
+                  <TextInput
+                    value={discountInput}
+                    onChangeText={setDiscountInput}
+                    keyboardType="decimal-pad"
+                    style={styles.inlineAmountInput}
+                    accessibilityLabel="Sale discount"
+                  />
+                </View>
+                <View style={styles.amountRow}>
+                  <Text style={styles.meta}>Tax</Text>
+                  <TextInput
+                    value={taxInput}
+                    onChangeText={setTaxInput}
+                    keyboardType="decimal-pad"
+                    style={styles.inlineAmountInput}
+                    accessibilityLabel="Sale tax"
+                  />
+                </View>
+                <View style={styles.amountRow}>
+                  <Text style={styles.meta}>Paid</Text>
+                  <TextInput
+                    value={paidInput}
+                    onChangeText={setPaidInput}
+                    keyboardType="decimal-pad"
+                    placeholder={formatCurrency(grandTotal)}
+                    placeholderTextColor={colors.textPlaceholder}
+                    style={styles.inlineAmountInput}
+                    accessibilityLabel="Amount paid"
+                  />
+                </View>
+                <TextInput
+                  value={referenceInput}
+                  onChangeText={setReferenceInput}
+                  placeholder="Payment reference"
+                  placeholderTextColor={colors.textPlaceholder}
+                  style={styles.referenceInput}
+                  accessibilityLabel="Payment reference"
+                />
+                <View style={styles.totalRow}>
+                  <Text style={styles.grandLabel}>Total</Text>
+                  <Text style={styles.grandValue}>
+                    {formatCurrency(grandTotal)}
+                  </Text>
+                </View>
+                {paymentMethod === "credit" ||
+                Math.max(0, grandTotal - paidAmount) > 0 ? (
+                  <View style={styles.totalRow}>
+                    <Text style={styles.meta}>Credit Balance</Text>
+                    <Text style={styles.totalValue}>
+                      {formatCurrency(
+                        paymentMethod === "credit"
+                          ? grandTotal
+                          : Math.max(0, grandTotal - paidAmount),
+                      )}
+                    </Text>
+                  </View>
+                ) : null}
+              </Card>
+              <View style={styles.checkoutActions}>
+                <Button
+                  label={
+                    paymentMethod === "credit"
+                      ? "Confirm Credit Sale"
+                      : "Confirm Payment"
+                  }
+                  loading={processingSale}
+                  onPress={() => void handleCheckout()}
+                />
+                <Button
+                  label="Save Pending"
+                  variant="ghost"
+                  loading={processingSale}
+                  onPress={() => void handleSavePendingSale()}
+                />
+                <Button
+                  label="Clear Cart"
+                  variant="danger"
+                  icon={<Trash2 size={16} color={colors.error} />}
+                  disabled={processingSale}
+                  onPress={clearCart}
+                />
+              </View>
+              {needsCreditCustomer ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Existing customers</Text>
+                  <View style={styles.customerList}>
+                    {customers.map((customer) => (
+                      <Pressable
+                        key={customer.id}
+                        onPress={() => chooseCustomer(customer.id)}
+                        style={[
+                          styles.customerChip,
+                          selectedCustomerId === customer.id &&
+                            styles.customerChipActive,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Select ${customerDisplayName(customer)}`}
+                      >
+                        <Text
+                          style={[
+                            styles.customerName,
+                            selectedCustomerId === customer.id &&
+                              styles.customerNameActive,
+                          ]}
+                        >
+                          {customerDisplayName(customer)}
+                        </Text>
+                        {Number(customer.outstandingBalance) > 0 ? (
+                          <Text style={styles.customerOwes}>
+                            {formatCurrency(
+                              Number(customer.outstandingBalance),
+                            )}{" "}
+                            owed
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    ))}
+                  </View>
                 </View>
               ) : null}
-            </View>
-            <Card style={styles.totalCard}>
-              <View style={styles.totalRow}><Text style={styles.meta}>Subtotal</Text><Text style={styles.totalValue}>{formatCurrency(cartSubtotal)}</Text></View>
-              <View style={styles.amountRow}>
-                <Text style={styles.meta}>Discount</Text>
-                <TextInput value={discountInput} onChangeText={setDiscountInput} keyboardType="decimal-pad" style={styles.inlineAmountInput} accessibilityLabel="Sale discount" />
-              </View>
-              <View style={styles.amountRow}>
-                <Text style={styles.meta}>Tax</Text>
-                <TextInput value={taxInput} onChangeText={setTaxInput} keyboardType="decimal-pad" style={styles.inlineAmountInput} accessibilityLabel="Sale tax" />
-              </View>
-              <View style={styles.amountRow}>
-                <Text style={styles.meta}>Paid</Text>
-                <TextInput value={paidInput} onChangeText={setPaidInput} keyboardType="decimal-pad" placeholder={formatCurrency(grandTotal)} placeholderTextColor={colors.textPlaceholder} style={styles.inlineAmountInput} accessibilityLabel="Amount paid" />
-              </View>
-              <TextInput value={referenceInput} onChangeText={setReferenceInput} placeholder="Payment reference" placeholderTextColor={colors.textPlaceholder} style={styles.referenceInput} accessibilityLabel="Payment reference" />
-              <View style={styles.totalRow}><Text style={styles.grandLabel}>Total</Text><Text style={styles.grandValue}>{formatCurrency(grandTotal)}</Text></View>
-              {(paymentMethod === "credit" || Math.max(0, grandTotal - paidAmount) > 0) ? <View style={styles.totalRow}><Text style={styles.meta}>Credit Balance</Text><Text style={styles.totalValue}>{formatCurrency(paymentMethod === "credit" ? grandTotal : Math.max(0, grandTotal - paidAmount))}</Text></View> : null}
-            </Card>
-            <View style={styles.checkoutActions}>
-              <Button label={paymentMethod === "credit" ? "Confirm Credit Sale" : "Confirm Payment"} loading={processingSale} onPress={() => void handleCheckout()} />
-              <Button label="Save Pending" variant="ghost" loading={processingSale} onPress={() => void handleSavePendingSale()} />
-              <Button label="Clear Cart" variant="danger" icon={<Trash2 size={16} color={colors.error} />} disabled={processingSale} onPress={clearCart} />
-            </View>
-            {needsCreditCustomer ? (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Existing customers</Text>
-                <View style={styles.customerList}>
-                  {customers.map((customer) => (
-                    <Pressable
-                      key={customer.id}
-                      onPress={() => chooseCustomer(customer.id)}
-                      style={[styles.customerChip, selectedCustomerId === customer.id && styles.customerChipActive]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Select ${customerDisplayName(customer)}`}
-                    >
-                      <Text style={[styles.customerName, selectedCustomerId === customer.id && styles.customerNameActive]}>{customerDisplayName(customer)}</Text>
-                      {Number(customer.outstandingBalance) > 0 ? <Text style={styles.customerOwes}>{formatCurrency(Number(customer.outstandingBalance))} owed</Text> : null}
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-            <View style={styles.checkoutEndSpacer} />
-          </ScrollView>
+              <View style={styles.checkoutEndSpacer} />
+            </ScrollView>
           </View>
         </View>
       </Modal>
 
-      {collectVisible ? <AppBottomSheet ref={collectRef} snapPoints={["96%"]} initialIndex={0} onClose={() => setCollectVisible(false)}>
-        <View style={styles.sheet}>
-          <Text style={styles.sheetTitle}>Collect Credit</Text>
-          <BottomSheetScrollView
-            style={styles.sheetScroller}
-            contentContainerStyle={[styles.sheetScroll, { paddingBottom: sheetBottomPadding }]}
-            showsVerticalScrollIndicator
-            persistentScrollbar
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-          >
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Open invoices</Text>
-              {openCreditInvoices.map((invoice) => (
-                <Pressable
-                  key={invoice.id}
-                  onPress={() => {
-                    setSelectedCollectInvoice(invoice);
-                    setCollectAmount(String(invoice.remaining));
-                  }}
-                  style={[styles.invoiceChip, selectedCollectInvoice?.id === invoice.id && styles.invoiceChipActive]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Select ${invoice.orderNumber}`}
-                >
-                  <View style={styles.cartBody}>
-                    <Text style={styles.customerName}>{invoice.customerName}</Text>
-                    <Text style={styles.meta}>{invoice.orderNumber} | {invoice.items.length} products</Text>
-                  </View>
-                  <Text style={styles.lineTotal}>{formatCurrency(invoice.remaining)}</Text>
-                </Pressable>
-              ))}
-            </View>
-            {selectedCollectInvoice ? (
-              <>
-                <View style={styles.quickRow}>
-                  <Pressable style={styles.quickChip} onPress={() => setCollectAmount(String(selectedCollectInvoice.remaining / 2))}>
-                    <Text style={styles.quickText}>Half</Text>
+      {collectVisible ? (
+        <AppBottomSheet
+          ref={collectRef}
+          snapPoints={["96%"]}
+          initialIndex={0}
+          onClose={() => setCollectVisible(false)}
+        >
+          <View style={styles.sheet}>
+            <Text style={styles.sheetTitle}>Collect Credit</Text>
+            <BottomSheetScrollView
+              style={styles.sheetScroller}
+              contentContainerStyle={[
+                styles.sheetScroll,
+                { paddingBottom: sheetBottomPadding },
+              ]}
+              showsVerticalScrollIndicator
+              persistentScrollbar
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Open invoices</Text>
+                {openCreditInvoices.map((invoice) => (
+                  <Pressable
+                    key={invoice.id}
+                    onPress={() => {
+                      setSelectedCollectInvoice(invoice);
+                      setCollectAmount(String(invoice.remaining));
+                    }}
+                    style={[
+                      styles.invoiceChip,
+                      selectedCollectInvoice?.id === invoice.id &&
+                        styles.invoiceChipActive,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Select ${invoice.orderNumber}`}
+                  >
+                    <View style={styles.cartBody}>
+                      <Text style={styles.customerName}>
+                        {invoice.customerName}
+                      </Text>
+                      <Text style={styles.meta}>
+                        {invoice.orderNumber} | {invoice.items.length} products
+                      </Text>
+                    </View>
+                    <Text style={styles.lineTotal}>
+                      {formatCurrency(invoice.remaining)}
+                    </Text>
                   </Pressable>
-                  <Pressable style={styles.quickChip} onPress={() => setCollectAmount(String(selectedCollectInvoice.remaining))}>
-                    <Text style={styles.quickText}>Full</Text>
-                  </Pressable>
-                </View>
-                <TextInput value={collectAmount} onChangeText={setCollectAmount} keyboardType="numeric" style={styles.amountInput} accessibilityLabel="Credit payment amount" />
-                <View style={styles.methodGrid}>
-                  {collectMethods.map((method) => (
+                ))}
+              </View>
+              {selectedCollectInvoice ? (
+                <>
+                  <View style={styles.quickRow}>
                     <Pressable
-                      key={method.value}
-                      onPress={() => setCollectMethod(method.value)}
-                      style={[styles.methodChip, collectMethod === method.value && styles.methodChipActive]}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Collect by ${method.label}`}
+                      style={styles.quickChip}
+                      onPress={() =>
+                        setCollectAmount(
+                          String(selectedCollectInvoice.remaining / 2),
+                        )
+                      }
                     >
-                      <CreditCard size={15} color={collectMethod === method.value ? colors.surface : colors.primary} />
-                      <Text style={[styles.methodChipText, collectMethod === method.value && styles.methodChipTextActive]}>{method.label}</Text>
+                      <Text style={styles.quickText}>Half</Text>
                     </Pressable>
-                  ))}
-                </View>
-              </>
-            ) : null}
-            <Button label="Confirm Payment" variant="success" loading={collectingPayment} onPress={() => void handleCollectPayment()} />
-          </BottomSheetScrollView>
-        </View>
-      </AppBottomSheet> : null}
-
-      {receiptVisible ? <AppBottomSheet ref={receiptRef} snapPoints={["90%"]} initialIndex={0} onClose={() => setReceiptVisible(false)}>
-        <View style={styles.sheet}>
-          <View style={styles.receiptHeader}>
-            <Text style={styles.sheetTitle}>Receipt Preview</Text>
-            <View style={styles.receiptActions}>
-              <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void handleSavePdf()} style={styles.printButton} />
-              <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void handleShareWhatsApp()} style={styles.printButton} />
-              <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={handlePrint} style={styles.printButton} />
-            </View>
+                    <Pressable
+                      style={styles.quickChip}
+                      onPress={() =>
+                        setCollectAmount(
+                          String(selectedCollectInvoice.remaining),
+                        )
+                      }
+                    >
+                      <Text style={styles.quickText}>Full</Text>
+                    </Pressable>
+                  </View>
+                  <TextInput
+                    value={collectAmount}
+                    onChangeText={setCollectAmount}
+                    keyboardType="numeric"
+                    style={styles.amountInput}
+                    accessibilityLabel="Credit payment amount"
+                  />
+                  <View style={styles.methodGrid}>
+                    {collectMethods.map((method) => (
+                      <Pressable
+                        key={method.value}
+                        onPress={() => setCollectMethod(method.value)}
+                        style={[
+                          styles.methodChip,
+                          collectMethod === method.value &&
+                            styles.methodChipActive,
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Collect by ${method.label}`}
+                      >
+                        <CreditCard
+                          size={15}
+                          color={
+                            collectMethod === method.value
+                              ? colors.surface
+                              : colors.primary
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.methodChipText,
+                            collectMethod === method.value &&
+                              styles.methodChipTextActive,
+                          ]}
+                        >
+                          {method.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+              <Button
+                label="Confirm Payment"
+                variant="success"
+                loading={collectingPayment}
+                onPress={() => void handleCollectPayment()}
+              />
+            </BottomSheetScrollView>
           </View>
-          <BottomSheetScrollView
-            style={styles.sheetScroller}
-            contentContainerStyle={{ paddingBottom: sheetBottomPadding }}
-            showsVerticalScrollIndicator
-            persistentScrollbar
-            nestedScrollEnabled
-          >
-            {activeReceipt ? <ReceiptTicket receipt={activeReceipt} /> : null}
-          </BottomSheetScrollView>
-        </View>
-      </AppBottomSheet> : null}
+        </AppBottomSheet>
+      ) : null}
+
+      {receiptVisible ? (
+        <AppBottomSheet
+          ref={receiptRef}
+          snapPoints={["90%"]}
+          initialIndex={0}
+          onClose={() => setReceiptVisible(false)}
+        >
+          <View style={styles.sheet}>
+            <View style={styles.receiptHeader}>
+              <Text style={styles.sheetTitle}>Receipt Preview</Text>
+              <View style={styles.receiptActions}>
+                <Button
+                  label="PDF"
+                  variant="ghost"
+                  icon={<FileDown size={16} color={colors.primary} />}
+                  onPress={() => void handleSavePdf()}
+                  style={styles.printButton}
+                />
+                <Button
+                  label="WhatsApp"
+                  variant="ghost"
+                  icon={<Send size={16} color={colors.primary} />}
+                  onPress={() => void handleShareWhatsApp()}
+                  style={styles.printButton}
+                />
+                <Button
+                  label="Print"
+                  variant="ghost"
+                  icon={<Printer size={16} color={colors.primary} />}
+                  onPress={handlePrint}
+                  style={styles.printButton}
+                />
+              </View>
+            </View>
+            <BottomSheetScrollView
+              style={styles.sheetScroller}
+              contentContainerStyle={{ paddingBottom: sheetBottomPadding }}
+              showsVerticalScrollIndicator
+              persistentScrollbar
+              nestedScrollEnabled
+            >
+              {activeReceipt ? <ReceiptTicket receipt={activeReceipt} /> : null}
+            </BottomSheetScrollView>
+          </View>
+        </AppBottomSheet>
+      ) : null}
     </View>
   );
 }
@@ -1393,7 +2017,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     gap: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderLighter
+    borderBottomColor: colors.borderLighter,
   },
   headerRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   title: { flex: 1, color: colors.foreground, fontSize: 16, fontWeight: "900" },
@@ -1406,11 +2030,25 @@ const styles = StyleSheet.create({
     gap: 4,
     backgroundColor: colors.orangeBg,
     borderWidth: 1,
-    borderColor: colors.orangeBorder
+    borderColor: colors.orangeBorder,
   },
   collectText: { color: colors.orange, fontSize: 10, fontWeight: "900" },
-  smallIconButton: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.mutedBg, alignItems: "center", justifyContent: "center" },
-  addCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
+  smallIconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.mutedBg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   searchBox: {
     minHeight: 38,
     borderRadius: 10,
@@ -1420,9 +2058,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
-    paddingHorizontal: 10
+    paddingHorizontal: 10,
   },
-  searchInput: { flex: 1, color: colors.foreground, fontSize: 11, fontWeight: "600", paddingVertical: 0 },
+  searchInput: {
+    flex: 1,
+    color: colors.foreground,
+    fontSize: 11,
+    fontWeight: "600",
+    paddingVertical: 0,
+  },
   filters: { gap: 6, paddingBottom: 2 },
   chip: {
     color: colors.textMuted,
@@ -1432,7 +2076,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     fontSize: 10,
     fontWeight: "800",
-    overflow: "hidden"
+    overflow: "hidden",
   },
   chipActive: { color: colors.surface, backgroundColor: colors.primary },
   list: { padding: 10, paddingBottom: 150, gap: 10 },
@@ -1444,10 +2088,16 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: colors.surface,
     gap: 4,
-    ...shadows.card
+    ...shadows.card,
   },
   productListCard: { width: "100%" },
-  productArt: { height: 74, borderRadius: 12, alignItems: "center", justifyContent: "center", marginBottom: 2 },
+  productArt: {
+    height: 74,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
+  },
   qtyBadge: {
     position: "absolute",
     top: 6,
@@ -1458,17 +2108,48 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 5
+    paddingHorizontal: 5,
   },
   qtyBadgeText: { color: colors.surface, fontSize: 10, fontWeight: "900" },
-  productName: { color: colors.textSecondary, fontSize: 10, lineHeight: 13, fontWeight: "900" },
+  productName: {
+    color: colors.textSecondary,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: "900",
+  },
   sku: { color: colors.primary, fontSize: 8, fontWeight: "800" },
-  emptyText: { color: colors.textMuted, fontSize: 12, fontWeight: "700", textAlign: "center", paddingVertical: 24 },
-  priceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 5 },
+  emptyText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "center",
+    paddingVertical: 24,
+  },
+  priceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 5,
+  },
   price: { color: colors.foreground, fontSize: 12, fontWeight: "900" },
-  employeePrice: { flex: 1, minHeight: 20, color: colors.foreground, fontSize: 11, fontWeight: "900", paddingVertical: 0, paddingHorizontal: 0 },
+  employeePrice: {
+    flex: 1,
+    minHeight: 20,
+    color: colors.foreground,
+    fontSize: 11,
+    fontWeight: "900",
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+  },
   invalidPrice: { color: colors.error },
-  statusText: { borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2, overflow: "hidden", fontSize: 7, fontWeight: "900" },
+  statusText: {
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    overflow: "hidden",
+    fontSize: 7,
+    fontWeight: "900",
+  },
   error: { color: colors.error, fontSize: 8, fontWeight: "800" },
   stepper: {
     height: 28,
@@ -1478,21 +2159,50 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 7,
-    marginTop: 2
+    marginTop: 2,
   },
-  stepperButton: { width: 28, height: 24, alignItems: "center", justifyContent: "center" },
-  stepperQtyInput: { width: 48, color: colors.textMuted, fontSize: 10, fontWeight: "900", textAlign: "center", paddingVertical: 0 },
-  cartFab: { position: "absolute", left: 16, right: 16, bottom: spacing.cartFABBottom, borderRadius: 18, overflow: "hidden", ...shadows.cartFAB, zIndex: 60, elevation: 30 },
-  cartFabGradient: { height: 56, borderRadius: 18, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, gap: 10 },
+  stepperButton: {
+    width: 28,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepperQtyInput: {
+    width: 48,
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "900",
+    textAlign: "center",
+    paddingVertical: 0,
+  },
+  cartFab: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: spacing.cartFABBottom,
+    borderRadius: 18,
+    overflow: "hidden",
+    ...shadows.cartFAB,
+    zIndex: 60,
+    elevation: 30,
+  },
+  cartFabGradient: {
+    height: 56,
+    borderRadius: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    gap: 10,
+  },
   cartText: { color: colors.surface, fontSize: 14, fontWeight: "800", flex: 1 },
   cartTotal: { color: colors.surface, fontSize: 14, fontWeight: "800" },
   checkoutModal: {
     flex: 1,
     justifyContent: "flex-end",
-    backgroundColor: "rgba(15, 23, 42, 0.45)"
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
   },
   checkoutBackdrop: {
-    ...StyleSheet.absoluteFillObject
+    ...StyleSheet.absoluteFillObject,
   },
   checkoutSheet: {
     height: "99%",
@@ -1502,14 +2212,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 12,
     zIndex: 1,
-    elevation: 100
+    elevation: 100,
   },
   modalHandle: {
     alignSelf: "center",
     width: 32,
     height: 4,
     borderRadius: 999,
-    backgroundColor: colors.borderLight
+    backgroundColor: colors.borderLight,
   },
   sheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
   sheetScroller: { flex: 1 },
@@ -1517,19 +2227,40 @@ const styles = StyleSheet.create({
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "800" },
   checkoutActions: {
     gap: 8,
-    paddingTop: 4
+    paddingTop: 4,
   },
   checkoutEndSpacer: { height: 160 },
   cartRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   cartBody: { flex: 1 },
-  sheetItemName: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
+  sheetItemName: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
   meta: { color: colors.textPlaceholder, fontSize: 11, marginTop: 3 },
   lineTotal: { color: colors.foreground, fontSize: 13, fontWeight: "800" },
   section: { gap: 8 },
-  sectionTitle: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
+  sectionTitle: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
   methodGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  methodChip: { minHeight: 44, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: colors.surface },
-  methodChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  methodChip: {
+    minHeight: 44,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.borderLight,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    backgroundColor: colors.surface,
+  },
+  methodChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
   methodChipText: { color: colors.primary, fontSize: 12, fontWeight: "800" },
   methodChipTextActive: { color: colors.surface },
   newCustomerCard: { gap: 10 },
@@ -1542,17 +2273,44 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     paddingHorizontal: 12,
-    paddingVertical: 8
+    paddingVertical: 8,
   },
   customerList: { gap: 8 },
-  customerChip: { borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, padding: 12, backgroundColor: colors.surface },
-  customerChipActive: { borderColor: colors.primary, backgroundColor: colors.secondaryBg },
-  customerName: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
+  customerChip: {
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.borderLight,
+    padding: 12,
+    backgroundColor: colors.surface,
+  },
+  customerChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.secondaryBg,
+  },
+  customerName: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
   customerNameActive: { color: colors.primary },
-  customerOwes: { color: colors.error, fontSize: 11, fontWeight: "700", marginTop: 3 },
+  customerOwes: {
+    color: colors.error,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 3,
+  },
   totalCard: { gap: 8 },
-  totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  amountRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  amountRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
   inlineAmountInput: {
     minWidth: 120,
     minHeight: 38,
@@ -1564,7 +2322,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     textAlign: "right",
     paddingHorizontal: 10,
-    paddingVertical: 6
+    paddingVertical: 6,
   },
   referenceInput: {
     minHeight: 42,
@@ -1574,18 +2332,58 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontSize: 12,
     fontWeight: "700",
-    paddingHorizontal: 12
+    paddingHorizontal: 12,
   },
   totalValue: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
   grandLabel: { color: colors.foreground, fontSize: 15, fontWeight: "900" },
   grandValue: { color: colors.primary, fontSize: 16, fontWeight: "900" },
-  invoiceChip: { minHeight: 62, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, padding: 12, backgroundColor: colors.surface, flexDirection: "row", alignItems: "center", gap: 10 },
-  invoiceChipActive: { borderColor: colors.primary, backgroundColor: colors.secondaryBg },
+  invoiceChip: {
+    minHeight: 62,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.borderLight,
+    padding: 12,
+    backgroundColor: colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  invoiceChipActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.secondaryBg,
+  },
   quickRow: { flexDirection: "row", gap: 8 },
-  quickChip: { flex: 1, minHeight: 42, borderRadius: 14, backgroundColor: colors.secondaryBg, alignItems: "center", justifyContent: "center" },
+  quickChip: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 14,
+    backgroundColor: colors.secondaryBg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   quickText: { color: colors.primary, fontSize: 12, fontWeight: "900" },
-  amountInput: { minHeight: 52, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderLight, paddingHorizontal: 14, color: colors.foreground, fontSize: 20, fontWeight: "900" },
-  receiptHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  receiptActions: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 8, flexShrink: 1 },
-  printButton: { minHeight: 44, paddingHorizontal: 14 }
+  amountInput: {
+    minHeight: 52,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.borderLight,
+    paddingHorizontal: 14,
+    color: colors.foreground,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  receiptHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  receiptActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: 8,
+    flexShrink: 1,
+  },
+  printButton: { minHeight: 44, paddingHorizontal: 14 },
 });

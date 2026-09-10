@@ -34,6 +34,31 @@ function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function clampPaid(total: number, paid: number) {
+  return Math.min(Math.max(paid, 0), Math.max(total, 0));
+}
+
+function lineTotal(item: ApiCreditSale["sale"]["items"][number]) {
+  return money(item.totalAmount) || item.quantity * money(item.unitPrice);
+}
+
+function initialPaid(creditSale: ApiCreditSale) {
+  return (creditSale.sale.payments ?? [])
+    .filter((payment) => payment.paymentMethod !== "CREDIT")
+    .reduce((sum, payment) => sum + money(payment.amount), 0);
+}
+
+function creditPaymentsPaid(creditSale: ApiCreditSale) {
+  return (creditSale.payments ?? []).reduce((sum, payment) => sum + money(payment.amount), 0);
+}
+
+function invoiceTotals(creditSale: ApiCreditSale) {
+  const total = money(creditSale.sale.totalAmount) || creditSale.sale.items.reduce((sum, item) => sum + lineTotal(item), 0) || money(creditSale.totalCredit);
+  const paid = clampPaid(total, initialPaid(creditSale) + creditPaymentsPaid(creditSale));
+  const balance = Math.max(total - paid, 0);
+  return { total, paid, balance };
+}
+
 function activeActionRequest(creditSale: ApiCreditSale, action: CreditSaleEmployeeAction) {
   const now = Date.now();
   return creditSale.employeeActionRequests?.find((request) => {
@@ -206,27 +231,41 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
       qty: item.quantity,
       price: money(item.unitPrice)
     }));
-    const invoiceTotal = money(creditSale.sale.totalAmount || creditSale.totalCredit);
-    const amountPaid = money(creditSale.sale.amountPaid || creditSale.amountPaid);
-    const remainingBalance = money(creditSale.sale.balanceDue || creditSale.balance);
+    const totals = invoiceTotals(creditSale);
 
     return {
       id: creditSale.sale.saleNumber,
-      kind: remainingBalance > 0 ? "credit" : "sale",
+      kind: totals.balance > 0 ? "credit" : "sale",
       businessName: "EST JP MOTORS",
       title: "Credit Invoice",
       orderNumber: creditSale.sale.saleNumber,
       customerName: creditSale.customer.name,
       employeeName: creditSale.sale.salesperson.name || creditSale.sale.salesperson.username,
       items: receiptItems,
-      subtotal: money(creditSale.sale.subtotal || invoiceTotal),
+      subtotal: money(creditSale.sale.subtotal) || totals.total,
       tax: money(creditSale.sale.taxAmount),
-      total: invoiceTotal,
-      paid: amountPaid,
-      balance: remainingBalance,
-      method: remainingBalance > 0 ? "credit" : "cash",
+      total: totals.total,
+      paid: totals.paid,
+      balance: totals.balance,
+      method: totals.balance > 0 ? "credit" : "cash",
       createdAt: creditSale.sale.saleDate || creditSale.createdAt,
-      printed: false
+      printed: false,
+      paymentLines: [
+        ...(creditSale.sale.payments ?? [])
+          .filter((payment) => payment.paymentMethod !== "CREDIT")
+          .map((payment) => ({
+            date: payment.paymentDate,
+            amount: money(payment.amount),
+            method: payment.paymentMethod,
+            referenceNumber: payment.referenceNumber
+          })),
+        ...(creditSale.payments ?? []).map((payment) => ({
+          date: payment.paymentDate,
+          amount: money(payment.amount),
+          method: payment.paymentMethod,
+          referenceNumber: payment.referenceNumber
+        }))
+      ]
     };
   };
 
@@ -424,19 +463,20 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
 
     setProcessing(true);
     try {
+      const submittedPaymentDate = new Date(paymentDate).toISOString();
       const collectCreditPayment = canUseFinancialCredit ? creditSalesService.collectPayment : creditSalesService.collectPosPayment;
       const updated = await collectCreditPayment(selected.id, {
         amount: value,
         paymentMethod: toApiPaymentMethod(method),
-        paymentDate: new Date(paymentDate).toISOString(),
+        paymentDate: submittedPaymentDate,
         referenceNumber: reference.trim() || undefined
       });
       setSelected(updated);
       setAmount(String(money(updated.balance)));
       await loadCredits(query, false);
-      if (money(updated.balance) <= 0) {
-        paymentRef.current?.close();
-      }
+      setActiveReceipt({ ...buildCreditInvoiceReceipt(updated), createdAt: submittedPaymentDate });
+      setReceiptVisible(true);
+      paymentRef.current?.close();
     } catch (paymentError) {
       Alert.alert("Payment failed", paymentError instanceof Error ? paymentError.message : "Unable to record credit payment.");
     } finally {

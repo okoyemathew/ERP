@@ -211,6 +211,7 @@ export class BusinessService {
       salesToday,
       totalSales,
       paymentsToday,
+      creditPaymentsToday,
       expensesToday,
       totalExpenses,
       creditBalance,
@@ -241,6 +242,15 @@ export class BusinessService {
         where: {
           businessId: id,
           paymentDate: { gte: todayStart, lte: todayEnd },
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.creditPayment.aggregate({
+        where: {
+          paymentDate: { gte: todayStart, lte: todayEnd },
+          creditSale: {
+            sale: { businessId: id },
+          },
         },
         _sum: { amount: true },
       }),
@@ -354,7 +364,11 @@ export class BusinessService {
     return {
       totalSalesToday: salesToday._count ?? 0,
       totalRevenueToday: Number(salesToday._sum.totalAmount ?? 0),
-      totalPaymentsToday: Number(paymentsToday._sum.amount ?? 0),
+      totalPaymentsToday: Number(
+        new Prisma.Decimal(paymentsToday._sum.amount ?? 0).add(
+          creditPaymentsToday._sum.amount ?? 0,
+        ),
+      ),
       totalExpensesToday: Number(expensesToday._sum.amount ?? 0),
       todayProfit: Number(todayProfit),
       costOfGoodsSoldToday: Number(todayCostOfGoodsSold),

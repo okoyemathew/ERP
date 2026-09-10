@@ -187,6 +187,7 @@ export interface CollectCreditPaymentPayload {
   amount: number;
   paymentMethod: CustomerPaymentMethod | string;
   referenceNumber?: string;
+  paymentDate?: string;
   notes?: string;
   creditSaleId?: string;
 }

@@ -221,6 +221,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
       paid?: number;
       balance?: number;
       method?: ReceiptDocument["method"];
+      createdAt?: string;
       paymentLines?: ReceiptDocument["paymentLines"];
     }
   ): ReceiptDocument => {
@@ -248,7 +249,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
       paid: amountPaid,
       balance: remainingBalance,
       method: override?.method ?? (remainingBalance > 0 ? "credit" : "cash"),
-      createdAt: credit.sale?.saleDate ?? credit.createdAt,
+      createdAt: override?.createdAt ?? credit.sale?.saleDate ?? credit.createdAt,
       printed: false,
       paymentLines: override?.paymentLines ?? credit.payments?.map((payment) => ({
         date: payment.paymentDate,
@@ -326,8 +327,9 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
       const paidBeforePayment = creditInvoicePaid(selectedCredit);
       const remainingAfterPayment = Math.max(0, balance - value);
       const paidAfterPayment = Math.min(money(selectedCredit.sale?.totalAmount ?? selectedCredit.totalCredit), paidBeforePayment + value);
+      const paymentDate = new Date().toISOString();
       const paymentLine = {
-        date: new Date().toISOString(),
+        date: paymentDate,
         amount: value,
         method,
         referenceNumber: null
@@ -336,6 +338,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
         amount: value,
         paymentMethod: method,
         creditSaleId: selectedCredit.id,
+        paymentDate,
         referenceNumber: `MOB-${Date.now()}`
       });
       paymentRef.current?.close();
@@ -344,6 +347,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
         paid: paidAfterPayment,
         balance: remainingAfterPayment,
         method: receiptMethodFromPayment(method),
+        createdAt: paymentDate,
         paymentLines: [...(selectedCredit.payments ?? []).map((payment) => ({
           date: payment.paymentDate,
           amount: money(payment.amount),

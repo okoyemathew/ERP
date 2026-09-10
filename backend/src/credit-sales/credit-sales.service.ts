@@ -2170,6 +2170,8 @@ export class CreditSalesService {
         discountAmount: creditSale.sale.discountAmount,
         taxAmount: creditSale.sale.taxAmount,
         totalAmount: creditSale.sale.totalAmount,
+        amountPaid: creditSale.sale.amountPaid,
+        balanceDue: creditSale.sale.balanceDue,
         paymentStatus: creditSale.sale.paymentStatus,
         status: creditSale.sale.status,
         salesperson: {

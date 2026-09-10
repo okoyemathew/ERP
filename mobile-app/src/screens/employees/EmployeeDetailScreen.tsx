@@ -70,7 +70,9 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [supplySheetVisible, setSupplySheetVisible] = useState(false);
   const [supplyProducts, setSupplyProducts] = useState<ApiProduct[]>([]);
   const [supplyProductsLoading, setSupplyProductsLoading] = useState(false);
+  const [supplyProductSearch, setSupplyProductSearch] = useState("");
   const [selectedSupplyProductId, setSelectedSupplyProductId] = useState<string | null>(null);
+  const [expandedSupplyRunId, setExpandedSupplyRunId] = useState<string | null>(null);
   const [supplyQuantity, setSupplyQuantity] = useState("1");
   const [supplyRemarks, setSupplyRemarks] = useState("");
   const [supplying, setSupplying] = useState(false);
@@ -80,6 +82,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [selectedSale, setSelectedSale] = useState<ApiSale | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const supplyProductsRequestId = useRef(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -150,6 +153,39 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     };
   }, [supplySheetVisible]);
 
+  const loadSupplyProducts = useCallback(async (searchTerm = "") => {
+    const requestId = supplyProductsRequestId.current + 1;
+    supplyProductsRequestId.current = requestId;
+    setSupplyProductsLoading(true);
+    try {
+      const response = await productsService.list({
+        page: 1,
+        limit: 100,
+        search: searchTerm.trim() || undefined,
+        available: true,
+        sortBy: "name",
+        sortOrder: "asc"
+      });
+      if (requestId !== supplyProductsRequestId.current) return;
+      setSupplyProducts(response.data);
+      setSelectedSupplyProductId((current) => response.data.some((product) => product.id === current) ? current : response.data[0]?.id ?? null);
+    } catch (supplyError) {
+      if (requestId !== supplyProductsRequestId.current) return;
+      const message = supplyError instanceof Error ? supplyError.message : "Unable to load products for supply.";
+      Alert.alert("Unable to load products", message);
+    } finally {
+      if (requestId === supplyProductsRequestId.current) setSupplyProductsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!supplySheetVisible) return;
+    const timer = setTimeout(() => {
+      void loadSupplyProducts(supplyProductSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [loadSupplyProducts, supplyProductSearch, supplySheetVisible]);
+
   const openSale = (sale: ApiSale) => {
     setSelectedSale(sale);
   };
@@ -190,27 +226,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const openSupplySheet = async () => {
     if (isSelfProfile) return;
     setSupplySheetVisible(true);
-    if (supplyProducts.length) {
-      setSelectedSupplyProductId((current) => current ?? supplyProducts[0]?.id ?? null);
-      return;
-    }
-    setSupplyProductsLoading(true);
-    try {
-      const response = await productsService.list({
-        page: 1,
-        limit: 100,
-        available: true,
-        sortBy: "name",
-        sortOrder: "asc"
-      });
-      setSupplyProducts(response.data);
-      setSelectedSupplyProductId((current) => current ?? response.data[0]?.id ?? null);
-    } catch (supplyError) {
-      const message = supplyError instanceof Error ? supplyError.message : "Unable to load products for supply.";
-      Alert.alert("Unable to load products", message);
-    } finally {
-      setSupplyProductsLoading(false);
-    }
+    setSupplyProductSearch("");
   };
 
   const submitSupply = async () => {
@@ -239,6 +255,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       setSupplySheetVisible(false);
       setSelectedSupplyProductId(null);
       setSupplyProducts([]);
+      setSupplyProductSearch("");
       setSupplyQuantity("1");
       setSupplyRemarks("");
       setActiveTab("stock");
@@ -387,19 +404,45 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
             <InfoLine label="Total Supply Run" value={String(activity?.supplies.summary.totalSupplyRuns ?? 0)} />
             <InfoLine label="Total Value Supplied" value={formatCurrency(Number(activity?.supplies.summary.totalSuppliedValue ?? 0))} valueColor={colors.primary} />
           </Card>
-          {supplyRuns.length ? supplyRuns.map((run) => (
-            <Card key={run.id} style={styles.supplyCard}>
-              <View style={styles.productHead}>
-                <View style={styles.supplyIcon}><Archive size={16} color={colors.primary} /></View>
-                <View style={styles.productBody}>
-                  <Text style={styles.productTitle}>{run.disbursementNumber}</Text>
-                  <Text style={styles.productMeta}>{run.destination ?? "No destination"} | {compactDate(run.disbursementDate)}</Text>
-                </View>
-                <Text style={styles.quantity}>{run.totalQuantity}</Text>
-              </View>
-              <Text style={styles.productMeta}>{formatCurrency(Number(run.totalValue))} supplied value</Text>
-            </Card>
-          )) : (
+          {supplyRuns.length ? supplyRuns.map((run) => {
+            const expanded = expandedSupplyRunId === run.id;
+            return (
+              <Pressable
+                key={run.id}
+                onPress={() => setExpandedSupplyRunId((current) => current === run.id ? null : run.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`View products supplied in ${run.disbursementNumber}`}
+              >
+                <Card style={styles.supplyCard}>
+                  <View style={styles.productHead}>
+                    <View style={styles.supplyIcon}><Archive size={16} color={colors.primary} /></View>
+                    <View style={styles.productBody}>
+                      <Text style={styles.productTitle}>{run.disbursementNumber}</Text>
+                      <Text style={styles.productMeta}>{run.destination ?? "No destination"} | {compactDate(run.disbursementDate)}</Text>
+                    </View>
+                    <Text style={styles.quantity}>{run.totalQuantity}</Text>
+                  </View>
+                  <Text style={styles.productMeta}>{formatCurrency(Number(run.totalValue))} supplied value</Text>
+                  {expanded ? (
+                    <View style={styles.supplyItems}>
+                      {run.items.map((item) => {
+                        const unitValue = item.quantity > 0 ? Number(item.value) / item.quantity : 0;
+                        return (
+                          <View key={item.id} style={styles.productRow}>
+                            <View style={styles.saleBody}>
+                              <Text style={styles.item}>{item.productName}</Text>
+                              <Text style={styles.label}>{item.sku ?? item.barcode ?? item.productId.slice(0, 8)} | Qty {item.quantity} x {formatCurrency(unitValue)}</Text>
+                            </View>
+                            <Text style={styles.item}>{formatCurrency(Number(item.value))}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                </Card>
+              </Pressable>
+            );
+          }) : (
             <EmptyState icon={<Archive size={28} color={colors.textPlaceholder} />} title="No supply records yet" />
           )}
         </View>
@@ -585,7 +628,10 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       ) : null}
 
       {!isSelfProfile && supplySheetVisible ? (
-        <AppBottomSheet ref={supplySheetRef} snapPoints={["82%"]} onClose={() => setSupplySheetVisible(false)}>
+        <AppBottomSheet ref={supplySheetRef} snapPoints={["82%"]} onClose={() => {
+          setSupplySheetVisible(false);
+          setSupplyProductSearch("");
+        }}>
           <BottomSheetScrollView
             contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
             showsVerticalScrollIndicator
@@ -597,6 +643,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               <Text style={styles.sectionTitle}>Supply Products</Text>
               <Text style={styles.sectionMeta}>{name}</Text>
             </View>
+            <SearchBar value={supplyProductSearch} onChangeText={setSupplyProductSearch} placeholder="Search products" />
             {supplyProductsLoading ? (
               <LoadingState label="Loading products" />
             ) : supplyProducts.length ? (
@@ -621,7 +668,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                 })}
               </View>
             ) : (
-              <EmptyState icon={<Package size={28} color={colors.textPlaceholder} />} title="No available products" />
+              <EmptyState icon={<Package size={28} color={colors.textPlaceholder} />} title={supplyProductSearch.trim() ? "No products found" : "No available products"} />
             )}
             <View style={styles.formGroup}>
               <Text style={styles.infoLabel}>Quantity</Text>
@@ -647,7 +694,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                 accessibilityLabel="Supply remarks"
               />
             </View>
-            <Button label="Record Supply" loading={supplying} disabled={!supplyProducts.length || supplying} onPress={() => void submitSupply()} />
+            <Button label="Record Supply" loading={supplying} disabled={!supplyProducts.length || supplyProductsLoading || supplying} onPress={() => void submitSupply()} />
           </BottomSheetScrollView>
         </AppBottomSheet>
       ) : null}
@@ -742,6 +789,7 @@ const styles = StyleSheet.create({
   productPicker: { gap: 8 },
   productOption: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.borderLight, borderRadius: 8, padding: 10, backgroundColor: colors.surface },
   productOptionSelected: { borderColor: colors.primary, backgroundColor: colors.secondaryBg },
+  supplyItems: { gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.borderLighter, paddingTop: 8 },
   formGroup: { gap: 6 },
   textInput: { minHeight: 48, borderWidth: 1, borderColor: colors.borderLight, borderRadius: 8, paddingHorizontal: 12, color: colors.foreground, backgroundColor: colors.inputBg },
   remarksInput: { minHeight: 76, paddingTop: 12, textAlignVertical: "top" }

@@ -303,15 +303,18 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
 
     setProcessing(true);
     try {
+      const paymentDate = new Date().toISOString();
       const collectCreditPayment = canUseFinancialCredit ? creditSalesService.collectPayment : creditSalesService.collectPosPayment;
       const updated = await collectCreditPayment(selectedCredit.id, {
         amount: value,
         paymentMethod: toApiPaymentMethod(method),
-        paymentDate: new Date().toISOString(),
+        paymentDate,
         referenceNumber: reference.trim() || undefined
       });
       setSelectedCredit(updated);
       setPaymentVisible(false);
+      setActiveReceipt({ ...buildCreditInvoiceReceipt(updated, customerName), createdAt: paymentDate });
+      setReceiptVisible(true);
       await loadCustomerCredit();
     } catch (paymentError) {
       Alert.alert("Payment failed", paymentError instanceof Error ? paymentError.message : "Unable to record credit payment.");

@@ -15,7 +15,7 @@ export class BusinessDashboardService {
       throw new NotFoundException('Business not found');
     }
 
-    const [salesToday, paymentsToday, expensesToday, creditBalance] =
+    const [salesToday, paymentsToday, creditPaymentsToday, expensesToday, creditBalance] =
       await Promise.all([
         this.prisma.sale.aggregate({
           where: {
@@ -33,6 +33,17 @@ export class BusinessDashboardService {
             businessId,
             paymentDate: {
               gte: new Date(new Date().setHours(0, 0, 0, 0)),
+            },
+          },
+          _sum: { amount: true },
+        }),
+        this.prisma.creditPayment.aggregate({
+          where: {
+            paymentDate: {
+              gte: new Date(new Date().setHours(0, 0, 0, 0)),
+            },
+            creditSale: {
+              sale: { businessId },
             },
           },
           _sum: { amount: true },
@@ -82,7 +93,7 @@ export class BusinessDashboardService {
     return {
       totalSalesToday: salesToday._count ?? 0,
       totalRevenueToday: Number(salesToday._sum.totalAmount ?? 0),
-      totalPaymentsToday: Number(paymentsToday._sum.amount ?? 0),
+      totalPaymentsToday: Number(paymentsToday._sum.amount ?? 0) + Number(creditPaymentsToday._sum.amount ?? 0),
       totalExpensesToday: Number(expensesToday._sum.amount ?? 0),
       outstandingCreditBalance: Number(creditBalance._sum?.balance ?? 0),
       activeCustomersCount: customerCount,

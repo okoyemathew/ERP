@@ -877,7 +877,6 @@ export class EmployeeService {
             },
           },
           orderBy: { createdAt: 'desc' },
-          take: 500,
         }),
         this.prisma.goodsDisbursement.findMany({
           where: {
@@ -901,7 +900,6 @@ export class EmployeeService {
             },
           },
           orderBy: { disbursementDate: 'desc' },
-          take: 100,
         }),
         this.prisma.productReturnRequest.findMany({
           where: {
@@ -926,7 +924,6 @@ export class EmployeeService {
             },
           },
           orderBy: { reviewedAt: 'desc' },
-          take: 500,
         }),
         this.prisma.sale.count({
           where: {
@@ -1149,7 +1146,7 @@ export class EmployeeService {
           totalSuppliedQuantity,
           totalSuppliedValue,
         },
-        data: supplyRecords,
+        data: supplyRecords.slice(0, 100),
       },
     };
   }

@@ -36,6 +36,7 @@ import { ThemeSettingsScreen } from "@/screens/settings/ThemeSettingsScreen";
 import { EmployeeFormScreen } from "@/screens/employees/EmployeeFormScreen";
 import { useAuthStore } from "@/store/authStore";
 import { appRoleForUser, canAccess } from "@/utils/permissions";
+import { AppNavigationMenuProvider } from "./AppNavigationMenu";
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
@@ -75,7 +76,7 @@ const appScreens: Array<{
   { name: "AboutBusiness", component: AboutBusinessScreen },
   { name: "NotificationSettings", component: NotificationSettingsScreen },
   { name: "Notifications", component: NotificationsScreen },
-  { name: "Profile", component: ProfileScreen }
+  { name: "Profile", component: ProfileScreen },
 ];
 
 export function AppNavigator() {
@@ -84,11 +85,17 @@ export function AppNavigator() {
   const screens = appScreens.filter((screen) => canAccess(role, screen.name));
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Tabs" component={BottomTabNavigator} />
-      {screens.map((screen) => (
-        <Stack.Screen key={screen.name} name={screen.name} component={screen.component} />
-      ))}
-    </Stack.Navigator>
+    <AppNavigationMenuProvider>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Tabs" component={BottomTabNavigator} />
+        {screens.map((screen) => (
+          <Stack.Screen
+            key={screen.name}
+            name={screen.name}
+            component={screen.component}
+          />
+        ))}
+      </Stack.Navigator>
+    </AppNavigationMenuProvider>
   );
 }
