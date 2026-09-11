@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
-import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from "@gorhom/bottom-sheet";
 import { LinearGradient } from "expo-linear-gradient";
 import { Banknote, CreditCard, FileDown, Pencil, Printer, RotateCcw, Send, Smartphone, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -179,6 +179,10 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
     setSelectedCredit(credit);
     setAmount(String(money(credit.balance)));
     setPaymentSheetVisible(true);
+  };
+
+  const expandPaymentSheetForKeyboard = () => {
+    requestAnimationFrame(() => paymentRef.current?.snapToIndex(1));
   };
 
   const openReturnOptions = (credit: CustomerCreditSale) => {
@@ -511,7 +515,14 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
           </Card>
         ))}
       </ScrollView>
-      {paymentSheetVisible ? <AppBottomSheet ref={paymentRef} snapPoints={["64%"]} initialIndex={0} onClose={() => {
+      {paymentSheetVisible ? <AppBottomSheet
+        ref={paymentRef}
+        snapPoints={["64%", "94%"]}
+        initialIndex={0}
+        keyboardBehavior="extend"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
+        onClose={() => {
         setPaymentSheetVisible(false);
         setSelectedCredit(null);
       }}>
@@ -530,7 +541,14 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
                 <Text style={styles.largeAmount}>{formatCurrency(money(selectedCredit.balance))}</Text>
                 <Text style={styles.meta}>Outstanding credit balance</Text>
               </Card>
-              <TextInput value={amount} onChangeText={setAmount} keyboardType="numeric" style={styles.amountInput} accessibilityLabel="Payment amount" />
+              <BottomSheetTextInput
+                value={amount}
+                onChangeText={setAmount}
+                onFocus={expandPaymentSheetForKeyboard}
+                keyboardType="numeric"
+                style={styles.amountInput}
+                accessibilityLabel="Payment amount"
+              />
               <View style={styles.methodRow}>
                 {methods.map((item) => (
                   <Pressable key={item.value} onPress={() => setMethod(item.value)} style={[styles.methodChip, method === item.value && styles.methodChipActive]}>

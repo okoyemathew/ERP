@@ -937,16 +937,8 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     items: AddSaleItemDto[],
     user: AuthenticatedUser,
   ) {
-    const hasDiscount = items.some((item) => (item.discountAmount ?? 0) > 0);
-    const allowed = [
-      SYSTEM_ROLES.OWNER,
-      SYSTEM_ROLES.ADMIN,
-      SYSTEM_ROLES.MANAGER,
-    ].includes(user.roleName as never);
-
-    if (hasDiscount && !allowed) {
-      throw new ForbiddenException('User is not allowed to apply discounts');
-    }
+    void items;
+    void user;
   }
 
   private async findSellableProduct(
@@ -2080,7 +2072,14 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     });
 
     const activeRegister =
-      register ?? (await this.openRegisterForCashTransaction(tx, data));
+      register ??
+      ((await this.shouldAutoOpenCashRegister(data.businessId, tx))
+        ? await this.openRegisterForCashTransaction(tx, data)
+        : null);
+
+    if (!activeRegister) {
+      throw new BadRequestException('Open cash register is required for cash sales');
+    }
 
     const currentBalance =
       activeRegister.expectedBalance ??
@@ -2136,6 +2135,18 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     });
 
     return register;
+  }
+
+  private async shouldAutoOpenCashRegister(
+    businessId: string,
+    tx: Tx | PrismaService,
+  ) {
+    const settings = await tx.businessSettings.findUnique({
+      where: { businessId },
+      select: { autoOpenCashRegister: true },
+    });
+
+    return settings?.autoOpenCashRegister ?? true;
   }
 
   private async calculateRegisterCashBalance(tx: Tx, cashRegisterId: string) {

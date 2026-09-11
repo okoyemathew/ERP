@@ -2781,7 +2781,16 @@ export class CreditSalesService {
     });
 
     const activeRegister =
-      register ?? (await this.openRegisterForCashTransaction(tx, data));
+      register ??
+      ((await this.shouldAutoOpenCashRegister(data.businessId, tx))
+        ? await this.openRegisterForCashTransaction(tx, data)
+        : null);
+
+    if (!activeRegister) {
+      throw new BadRequestException(
+        'Open cash register is required for cash credit payments',
+      );
+    }
 
     const currentBalance =
       activeRegister.expectedBalance ??
@@ -2837,6 +2846,15 @@ export class CreditSalesService {
     });
 
     return register;
+  }
+
+  private async shouldAutoOpenCashRegister(businessId: string, tx: Tx) {
+    const settings = await tx.businessSettings.findUnique({
+      where: { businessId },
+      select: { autoOpenCashRegister: true },
+    });
+
+    return settings?.autoOpenCashRegister ?? true;
   }
 
   private async calculateRegisterCashBalance(tx: Tx, cashRegisterId: string) {

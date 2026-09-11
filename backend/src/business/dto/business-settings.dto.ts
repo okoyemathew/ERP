@@ -18,4 +18,7 @@ export class BusinessSettingsDto {
 
   @ApiProperty({ description: 'Whether offline mode is enabled' })
   enableOfflineMode!: boolean;
+
+  @ApiProperty({ description: 'Whether cash registers auto-open for users' })
+  autoOpenCashRegister!: boolean;
 }

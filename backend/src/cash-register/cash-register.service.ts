@@ -82,17 +82,43 @@ export class CashRegisterService {
   }
 
   async current(businessId: string, user: AuthenticatedUser) {
-    const register = await this.prisma.cashRegister.findFirst({
-      where: {
+    return this.prisma.$transaction(async (tx) => {
+      const register = await tx.cashRegister.findFirst({
+        where: {
+          businessId,
+          userId: user.id,
+          status: CashRegisterStatus.OPEN,
+        },
+        include: this.registerInclude(),
+        orderBy: { openedAt: 'desc' },
+      });
+
+      if (register) {
+        return this.formatRegister(register);
+      }
+
+      if (!(await this.shouldAutoOpenCashRegister(businessId, tx))) {
+        return null;
+      }
+
+      const opened = await this.openRegisterForCashTransaction(tx, {
         businessId,
         userId: user.id,
-        status: CashRegisterStatus.OPEN,
-      },
-      include: this.registerInclude(),
-      orderBy: { openedAt: 'desc' },
-    });
+        transactionDate: new Date(),
+        description: 'Auto-opened cash register',
+      });
 
-    return register ? this.formatRegister(register) : null;
+      await this.audit(tx, {
+        businessId,
+        userId: user.id,
+        action: AuditAction.CREATE,
+        entity: 'CashRegister',
+        entityId: opened.id,
+        description: 'Auto-opened cash register',
+      });
+
+      return this.findOne(businessId, opened.id, user, tx);
+    });
   }
 
   async findAll(
@@ -162,10 +188,12 @@ export class CashRegisterService {
     const amount = new Prisma.Decimal(dto.amount);
 
     return this.prisma.$transaction(async (tx) => {
+      const transactionDate = new Date();
       const register = await this.getOpenRegisterOrThrow(
         businessId,
         user.id,
         tx,
+        transactionDate,
       );
       const currentBalance =
         register.expectedBalance ??
@@ -187,6 +215,7 @@ export class CashRegisterService {
           amount,
           reference: dto.reference?.trim() || null,
           description: dto.description?.trim() || null,
+          transactionDate,
         },
       });
 
@@ -220,6 +249,8 @@ export class CashRegisterService {
         businessId,
         user.id,
         tx,
+        undefined,
+        false,
       );
       const expectedBalance =
         register.expectedBalance ??
@@ -391,6 +422,8 @@ export class CashRegisterService {
     businessId: string,
     userId: string,
     tx: Tx,
+    transactionDate = new Date(),
+    allowAutoOpen = true,
   ) {
     const register = await tx.cashRegister.findFirst({
       where: { businessId, userId, status: CashRegisterStatus.OPEN },
@@ -398,9 +431,65 @@ export class CashRegisterService {
       select: { id: true, openingBalance: true, expectedBalance: true },
     });
 
-    if (!register) {
-      throw new BadRequestException('Open cash register is required');
+    if (register) {
+      return register;
     }
+
+    if (allowAutoOpen && (await this.shouldAutoOpenCashRegister(businessId, tx))) {
+      return this.openRegisterForCashTransaction(tx, {
+        businessId,
+        userId,
+        transactionDate,
+        description: 'Auto-opened cash register',
+      });
+    }
+
+    throw new BadRequestException('Open cash register is required');
+  }
+
+  private async shouldAutoOpenCashRegister(
+    businessId: string,
+    tx: Tx | PrismaService,
+  ) {
+    const settings = await tx.businessSettings.findUnique({
+      where: { businessId },
+      select: { autoOpenCashRegister: true },
+    });
+
+    return settings?.autoOpenCashRegister ?? true;
+  }
+
+  private async openRegisterForCashTransaction(
+    tx: Tx,
+    data: {
+      businessId: string;
+      userId: string;
+      transactionDate: Date;
+      description: string;
+    },
+  ) {
+    const openingBalance = new Prisma.Decimal(0);
+    const register = await tx.cashRegister.create({
+      data: {
+        businessId: data.businessId,
+        userId: data.userId,
+        openingBalance,
+        expectedBalance: openingBalance,
+        status: CashRegisterStatus.OPEN,
+        openedAt: data.transactionDate,
+      },
+      select: { id: true, openingBalance: true, expectedBalance: true },
+    });
+
+    await tx.cashRegisterTransaction.create({
+      data: {
+        cashRegisterId: register.id,
+        transactionType: CashTransactionType.OPENING_BALANCE,
+        amount: openingBalance,
+        description: data.description,
+        transactionDate: data.transactionDate,
+      },
+    });
 
     return register;
   }

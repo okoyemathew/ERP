@@ -7,6 +7,7 @@ import { ScrollScreen } from "@/screens/shared/ScreenKit";
 import { cashRegisterService } from "@/services/cash-register.service";
 import { colors } from "@/theme";
 import type { CashRegisterSession, DailyBalance } from "@/types/cashRegister";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 import { formatCurrency } from "@/utils/format";
 
 const toNumber = (value: string | number | null | undefined) => Number(value ?? 0);
@@ -43,6 +44,10 @@ export function CashRegisterScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => dashboardEvents.subscribe(() => {
+    void load();
+  }), [load]);
 
   const open = async () => {
     const amount = Number(openingBalance || 0);

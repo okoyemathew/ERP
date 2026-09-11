@@ -9,7 +9,10 @@ export const dashboardEvents = {
       listeners.delete(listener);
     };
   },
-  notifySaleChanged() {
+  notifyActivityChanged() {
     listeners.forEach((listener) => listener());
+  },
+  notifySaleChanged() {
+    this.notifyActivityChanged();
   }
 };

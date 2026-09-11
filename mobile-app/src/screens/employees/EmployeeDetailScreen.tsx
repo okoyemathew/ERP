@@ -18,6 +18,7 @@ import type { ApiEmployee, EmployeeProfileResponse, EmployeeSalesResponse } from
 import type { ApiProduct } from "@/types/product";
 import type { ApiSale } from "@/types/sales";
 import { mapReceiptToDocument } from "@/types/sales";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 import { formatCurrency } from "@/utils/format";
 
 type ProfileTab = "stock" | "supplies" | "sales";
@@ -151,6 +152,11 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     }, 350);
     return () => clearTimeout(timer);
   }, [loadSales]);
+
+  useEffect(() => dashboardEvents.subscribe(() => {
+    void load();
+    void loadSales(1, false);
+  }), [load, loadSales]);
 
   useEffect(() => {
     if (!selectedSale) return;

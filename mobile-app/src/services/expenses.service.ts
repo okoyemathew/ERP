@@ -7,6 +7,7 @@ import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import { offlineSyncService } from "@/services/offline-sync.service";
 import { useAuthStore } from "@/store/authStore";
 import type { ApiExpense, CreateExpensePayload, ExpenseCategory, ExpenseListResponse, ExpenseSummary, UpdateExpensePayload } from "@/types/expense";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 
 const fallbackCategory: ExpenseCategory = {
   id: "offline-miscellaneous",
@@ -165,6 +166,7 @@ export const expensesService = {
       const queued = await offlineSyncService.enqueueExpense(payload);
       const offlineExpense = buildOfflineExpense(queued.id, queued.payload as CreateExpensePayload, categories);
       await offlineDbService.cacheExpense(businessId, offlineExpense);
+      dashboardEvents.notifyActivityChanged();
       return offlineExpense;
     };
 
@@ -175,6 +177,7 @@ export const expensesService = {
     try {
       const { data } = await api.post<ApiExpense>(endpoints.expenses.create, payload);
       await offlineDbService.cacheExpense(businessId, data);
+      dashboardEvents.notifyActivityChanged();
       return data;
     } catch (error) {
       if (isOfflineError(error)) {
@@ -205,6 +208,7 @@ export const expensesService = {
     try {
       const { data } = await api.patch<ApiExpense>(endpoints.expenses.update(id), payload);
       await offlineDbService.cacheExpense(businessId, data);
+      dashboardEvents.notifyActivityChanged();
       return data;
     } catch (error) {
       const current = (await offlineDbService.getCachedExpenses(businessId)).find((expense) => expense.id === id);
@@ -214,6 +218,7 @@ export const expensesService = {
         updatedAt: new Date().toISOString()
       } as ApiExpense;
       await offlineDbService.cacheExpense(businessId, fallback);
+      dashboardEvents.notifyActivityChanged();
       return queueOfflineMutation(error, { method: "PATCH", url: endpoints.expenses.update(id), data: payload }, fallback);
     }
   },
@@ -223,9 +228,11 @@ export const expensesService = {
     try {
       const { data } = await api.delete<{ id: string; deleted: true }>(endpoints.expenses.delete(id));
       await offlineDbService.removeCachedExpense(businessId, id);
+      dashboardEvents.notifyActivityChanged();
       return data;
     } catch (error) {
       await offlineDbService.removeCachedExpense(businessId, id);
+      dashboardEvents.notifyActivityChanged();
       return queueOfflineMutation(error, { method: "DELETE", url: endpoints.expenses.delete(id) }, { id, deleted: true });
     }
   },

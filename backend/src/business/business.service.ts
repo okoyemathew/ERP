@@ -97,6 +97,7 @@ export class BusinessService {
             language: 'en',
             allowCreditSales: true,
             enableOfflineMode: true,
+            autoOpenCashRegister: true,
           },
         });
       }
@@ -650,6 +651,8 @@ export class BusinessService {
           allowNegativeStock: updateBusinessSettingsDto.allowNegativeStock,
           allowCreditSales: updateBusinessSettingsDto.allowCreditSales,
           enableOfflineMode: updateBusinessSettingsDto.enableOfflineMode,
+          autoOpenCashRegister:
+            updateBusinessSettingsDto.autoOpenCashRegister,
         },
         create: {
           businessId: id,
@@ -660,6 +663,8 @@ export class BusinessService {
             updateBusinessSettingsDto.allowNegativeStock ?? false,
           allowCreditSales: updateBusinessSettingsDto.allowCreditSales ?? true,
           enableOfflineMode: updateBusinessSettingsDto.enableOfflineMode ?? true,
+          autoOpenCashRegister:
+            updateBusinessSettingsDto.autoOpenCashRegister ?? true,
         },
       });
 

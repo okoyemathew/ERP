@@ -426,6 +426,22 @@ export const offlineDbService = {
     });
   },
 
+  async getQueuedOfflineExpensePayloads(businessId: string, userId: string): Promise<Array<{ id: string; payload: CreateExpensePayload; status: SyncQueueStatus; createdAt: string; updatedAt: string }>> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{
+      id: string;
+      payload: string;
+      status: SyncQueueStatus;
+      createdAt: string;
+      updatedAt: string;
+    }>(
+      "SELECT id, payload, status, createdAt, updatedAt FROM sync_queue WHERE type = 'EXPENSE_CREATE' AND status IN ('PENDING', 'FAILED', 'SYNCING') AND (businessId = ? OR businessId IS NULL) AND (userId = ? OR userId IS NULL) ORDER BY createdAt DESC",
+      businessId,
+      userId
+    );
+    return rows.map((row) => ({ ...row, payload: JSON.parse(row.payload) as CreateExpensePayload }));
+  },
+
   async applySaleToCachedProducts(businessId: string, items: CreateSalePayload["items"]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();

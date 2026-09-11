@@ -9,9 +9,21 @@ interface AppBottomSheetProps {
   initialIndex?: number;
   onClose?: () => void;
   enableContentPanningGesture?: boolean;
+  keyboardBehavior?: "extend" | "fillParent" | "interactive";
+  keyboardBlurBehavior?: "none" | "restore";
+  android_keyboardInputMode?: "adjustPan" | "adjustResize";
 }
 
-export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>(({ children, snapPoints = ["82%"], initialIndex = -1, onClose, enableContentPanningGesture = true }, ref) => {
+export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>(({
+  children,
+  snapPoints = ["82%"],
+  initialIndex = -1,
+  onClose,
+  enableContentPanningGesture = true,
+  keyboardBehavior,
+  keyboardBlurBehavior,
+  android_keyboardInputMode
+}, ref) => {
   const points = useMemo(() => snapPoints, [snapPoints]);
   return (
     <GorhomBottomSheet
@@ -20,6 +32,9 @@ export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>
       snapPoints={points}
       enableDynamicSizing={false}
       enableContentPanningGesture={enableContentPanningGesture}
+      keyboardBehavior={keyboardBehavior}
+      keyboardBlurBehavior={keyboardBlurBehavior}
+      android_keyboardInputMode={android_keyboardInputMode}
       containerStyle={styles.container}
       enablePanDownToClose
       onClose={onClose}

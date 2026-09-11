@@ -1564,6 +1564,7 @@ model BusinessSettings {
   allowNegativeStock Boolean @default(false)
   allowCreditSales   Boolean @default(true)
   enableOfflineMode  Boolean @default(true)
+  autoOpenCashRegister Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

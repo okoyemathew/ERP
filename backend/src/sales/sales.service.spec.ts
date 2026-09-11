@@ -96,6 +96,9 @@ function createPrismaMock() {
     notificationSettings: {
       findUnique: jest.fn(),
     },
+    businessSettings: {
+      findUnique: jest.fn(),
+    },
     notification: {
       findFirst: jest.fn(),
       create: jest.fn(),

@@ -388,6 +388,7 @@ export class AuthService {
               language: 'en',
               allowCreditSales: true,
               enableOfflineMode: true,
+              autoOpenCashRegister: true,
             },
           },
           receiptSettings: {

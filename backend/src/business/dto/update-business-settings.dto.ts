@@ -42,4 +42,8 @@ export class UpdateBusinessSettingsDto {
   @IsOptional()
   @IsBoolean()
   enableOfflineMode?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  autoOpenCashRegister?: boolean;
 }

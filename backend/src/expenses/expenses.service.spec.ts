@@ -91,9 +91,13 @@ function createPrismaMock() {
     auditLog: {
       create: jest.fn(),
     },
+    businessSettings: {
+      findUnique: jest.fn(),
+    },
     cashRegister: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      create: jest.fn(),
       update: jest.fn(),
     },
     cashRegisterTransaction: {

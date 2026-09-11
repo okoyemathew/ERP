@@ -37,6 +37,7 @@ export interface BusinessConfig {
     allowNegativeStock: boolean;
     allowCreditSales: boolean;
     enableOfflineMode: boolean;
+    autoOpenCashRegister: boolean;
   } | null;
   receiptSettings: {
     businessName: string | null;
