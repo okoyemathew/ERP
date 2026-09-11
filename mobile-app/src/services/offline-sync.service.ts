@@ -24,7 +24,12 @@ export const offlineSyncService = {
     const { businessId, userId } = await getRequiredAuthContext();
     const { deviceId } = await deviceService.getDeviceInfo();
     const operationId = payload.idempotencyKey ?? createOperationId(deviceId);
-    const queuedPayload = { ...payload, deviceId, idempotencyKey: operationId };
+    const queuedPayload = {
+      ...payload,
+      saleDate: payload.saleDate ?? new Date().toISOString(),
+      deviceId,
+      idempotencyKey: operationId
+    };
     const queued = await offlineDbService.enqueueSale(operationId, businessId, userId, queuedPayload);
     await offlineDbService.applySaleToCachedProducts(businessId, payload.items);
     return queued;
@@ -132,17 +137,22 @@ export const offlineSyncService = {
 
     let synced = apiMutationResult.synced;
     let failed = apiMutationResult.failed;
+    let activityChanged = false;
     for (const result of data.results) {
       if (result.status === "SYNCED" || result.status === "DUPLICATE_CONFIRMED") {
         await offlineDbService.markSynced(result.operationId);
-        if (result.type === "SALE_CREATE") {
-          dashboardEvents.notifySaleChanged();
+        if (result.type === "SALE_CREATE" || result.type === "EXPENSE_CREATE") {
+          activityChanged = true;
         }
         synced += 1;
       } else {
         await offlineDbService.markFailed(result.operationId, result.error ?? "Sync failed");
         failed += 1;
       }
+    }
+
+    if (activityChanged) {
+      dashboardEvents.notifyActivityChanged();
     }
 
     return { synced, failed };

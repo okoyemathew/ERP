@@ -26,6 +26,7 @@ export interface CreateSalePayload {
   items: CreateSaleItemPayload[];
   payments: CreatePaymentPayload[];
   remarks?: string;
+  saleDate?: string;
   deviceId?: string;
   idempotencyKey?: string;
 }

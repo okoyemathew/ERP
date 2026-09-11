@@ -357,6 +357,7 @@ export const offlineDbService = {
       const payload = JSON.parse(row.payload) as CreateSalePayload;
       const items = payload.items ?? [];
       const payments = payload.payments ?? [];
+      const saleDate = payload.saleDate ?? row.createdAt;
       const subtotal = items.reduce((sum, item) => sum + item.quantity * Number(item.unitPrice ?? 0), 0);
       const discountAmount = items.reduce((sum, item) => sum + Number(item.discountAmount ?? 0), 0);
       const taxAmount = items.reduce((sum, item) => sum + Number(item.taxAmount ?? 0), 0);
@@ -383,7 +384,7 @@ export const offlineDbService = {
         balanceDue,
         paymentStatus: amountPaid >= totalAmount ? "PAID" : amountPaid > 0 ? "PARTIAL" : "UNPAID",
         status: payments.length > 0 ? "COMPLETED" : "PENDING",
-        saleDate: row.createdAt,
+        saleDate,
         customer: customer ?? null,
         user: {
           id: row.userId ?? userId,
@@ -417,7 +418,7 @@ export const offlineDbService = {
           paymentMethod: payment.paymentMethod,
           amount: payment.amount,
           referenceNumber: payment.referenceNumber ?? null,
-          paymentDate: row.createdAt
+          paymentDate: saleDate
         })),
         receipt: payments.length > 0
           ? { id: row.id, receiptNumber: saleNumber }

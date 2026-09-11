@@ -1023,6 +1023,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         items: saleItems,
         payments,
         remarks: paymentMethod === "credit" ? "Credit sale" : undefined,
+        saleDate: new Date().toISOString(),
       };
 
       const clearCheckout = async (refreshCreditInvoices = true) => {
@@ -1109,6 +1110,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
             items: saleItems,
             payments,
             remarks: paymentMethod === "credit" ? "Credit sale" : undefined,
+            saleDate: new Date().toISOString(),
           });
           const offlineReceipt = buildOfflineReceipt(queued.id);
           dashboardEvents.notifySaleChanged();

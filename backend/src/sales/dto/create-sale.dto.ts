@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsDateString,
   IsOptional,
   IsString,
   IsUUID,
@@ -44,6 +45,13 @@ export class CreateSaleDto {
   @IsString()
   @MaxLength(500)
   remarks?: string;
+
+  @ApiPropertyOptional({
+    description: 'Client sale timestamp used when syncing offline sales',
+  })
+  @IsOptional()
+  @IsDateString()
+  saleDate?: string;
 
   @ApiPropertyOptional({ description: 'Device identifier' })
   @IsOptional()

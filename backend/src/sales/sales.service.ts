@@ -509,6 +509,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     const balanceDue = amountPaid.gte(totals.totalAmount)
       ? new Prisma.Decimal(0)
       : new Prisma.Decimal(totals.totalAmount).sub(amountPaid);
+    const completedAt = this.resolveClientSaleDate(dto.saleDate);
 
     await tx.payment.deleteMany({ where: { saleId: id } });
     await tx.creditSale.deleteMany({ where: { saleId: id } });
@@ -530,6 +531,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           amount: payment.amount,
           referenceNumber: payment.referenceNumber?.trim() || null,
           notes: payment.notes?.trim() || null,
+          paymentDate: completedAt,
         },
       });
 
@@ -541,7 +543,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           amount: new Prisma.Decimal(payment.amount),
           reference: sale.saleNumber,
           description: `Cash sale: ${sale.saleNumber}`,
-          transactionDate: new Date(),
+          transactionDate: completedAt,
         });
       }
     }
@@ -595,7 +597,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         balanceDue,
         paymentStatus,
         status: SaleStatus.COMPLETED,
-        saleDate: new Date(),
+        saleDate: completedAt,
         remarks: dto.remarks?.trim() || sale.remarks,
         deviceId: dto.deviceId ?? undefined,
         syncVersion: { increment: 1 },
@@ -656,6 +658,19 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       const data = await this.buildItemData(businessId, item, tx, seller);
       await tx.saleItem.create({ data: { saleId, ...data } });
     }
+  }
+
+  private resolveClientSaleDate(value?: string) {
+    if (!value) {
+      return new Date();
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Invalid sale date');
+    }
+
+    return date;
   }
 
   private async buildItemData(
