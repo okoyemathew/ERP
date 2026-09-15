@@ -528,6 +528,11 @@ export function SalesRecordsScreen() {
                   <View style={styles.body}>
                     <Text style={styles.itemTitle}>{item.product.name}</Text>
                     <Text style={styles.meta}>Qty {item.quantity} x {formatCurrency(Number(item.unitPrice))}</Text>
+                    {Number(item.returnedQuantity ?? 0) > 0 ? (
+                      <Text style={styles.meta}>
+                        Original Qty {item.originalQuantity ?? item.quantity + Number(item.returnedQuantity ?? 0)} | Returned {item.returnedQuantity} ({formatCurrency(Number(item.returnedValue ?? 0))})
+                      </Text>
+                    ) : null}
                   </View>
                   <View style={styles.itemActions}>
                     <Text style={styles.amount}>{formatCurrency(Number(item.totalAmount))}</Text>

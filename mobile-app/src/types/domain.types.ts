@@ -70,6 +70,10 @@ export interface SaleItem {
   name: string;
   qty: number;
   price: number;
+  originalQty?: number;
+  returnedQty?: number;
+  returnedValue?: number;
+  originalTotal?: number;
 }
 
 export interface Sale {

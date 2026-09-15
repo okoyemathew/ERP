@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type GorhomBottomSheet from "@gorhom/bottom-sheet";
-import { BottomSheetScrollView, BottomSheetTextInput } from "@gorhom/bottom-sheet";
-import { Alert, Keyboard, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Archive, DollarSign, FileDown, Package, PackagePlus, Printer, Search, Send, ShoppingBag } from "lucide-react-native";
+import { Archive, DollarSign, FileDown, Package, PackagePlus, Printer, Search, Send, ShoppingBag, Trash2, Wallet } from "lucide-react-native";
 import { AppBottomSheet, Avatar, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
 import { employeesService } from "@/services/employees.service";
 import { goodsDisbursementService } from "@/services/goods-disbursement.service";
@@ -75,7 +76,6 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const isSelfProfile = route.name === "EmployeeSelfProfile";
   const employeeId = isSelfProfile ? user?.employeeId ?? "" : (route.params?.employeeId as string | undefined) ?? "";
   const saleSheetRef = useRef<GorhomBottomSheet>(null);
-  const supplySheetRef = useRef<GorhomBottomSheet>(null);
   const [profile, setProfile] = useState<EmployeeProfileResponse | null>(null);
   const [sales, setSales] = useState<EmployeeSalesResponse | null>(null);
   const [stockQuery, setStockQuery] = useState("");
@@ -89,6 +89,14 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [selectedSupplyProductId, setSelectedSupplyProductId] = useState<string | null>(null);
   const [expandedSupplyRunId, setExpandedSupplyRunId] = useState<string | null>(null);
   const [supplyQuantity, setSupplyQuantity] = useState("1");
+  const [supplyReview, setSupplyReview] = useState(false);
+  const [supplyKeyboardHeight, setSupplyKeyboardHeight] = useState(0);
+  const supplyScrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", (event) => setSupplyKeyboardHeight(event.endCoordinates.height));
+    const hide = Keyboard.addListener("keyboardDidHide", () => setSupplyKeyboardHeight(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   const [supplyCart, setSupplyCart] = useState<{ product: ApiProduct; quantity: number }[]>([]);
   const supplySubmitting = useRef(false);
   useEffect(() => {
@@ -172,16 +180,6 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     requestAnimationFrame(() => saleSheetRef.current?.snapToIndex(0));
   }, [selectedSale]);
 
-  useEffect(() => {
-    if (!supplySheetVisible) return;
-    const frame = requestAnimationFrame(() => supplySheetRef.current?.snapToIndex(0));
-    const timer = setTimeout(() => supplySheetRef.current?.snapToIndex(0), 50);
-    return () => {
-      cancelAnimationFrame(frame);
-      clearTimeout(timer);
-    };
-  }, [supplySheetVisible]);
-
   const loadSupplyProducts = useCallback(async (searchTerm = "") => {
     const requestId = supplyProductsRequestId.current + 1;
     supplyProductsRequestId.current = requestId;
@@ -254,6 +252,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
 
   const openSupplySheet = async () => {
     if (isSelfProfile) return;
+    setSupplyReview(false);
     setSupplySheetVisible(true);
     setSupplyProductSearch("");
   };
@@ -297,7 +296,6 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
         remarks: supplyRemarks.trim() || `Supplied to ${targetName} (${profile.employee.employeeCode})`,
         items: items.map(({ product, quantity }) => ({ productId: product.id, quantity }))
       });
-      supplySheetRef.current?.close();
       setSupplySheetVisible(false);
       setSelectedSupplyProductId(null);
       setSupplyProducts([]);
@@ -428,6 +426,10 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const canManageStockProducts = !isSelfProfile && (isOwner || canManageProducts);
   const salesToday = activity?.stats.salesToday ?? 0;
   const totalSupplied = activity?.stats.totalSupplied ?? 0;
+  const supplyCartCount = supplyCart.reduce((sum, item) => sum + item.quantity, 0);
+  const supplyCartTotal = supplyCart.reduce((sum, item) => sum + item.quantity * Number(item.product.purchasePrice ?? 0), 0);
+  const supplyReviewActionPadding = supplyReview ? 112 : 0;
+  const supplyScrollPadding = Math.max(insets.bottom, 24) + 120 + supplyKeyboardHeight + supplyReviewActionPadding;
 
   const renderTabContent = () => {
     if (activeTab === "stock") {
@@ -714,105 +716,162 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       ) : null}
 
       {!isSelfProfile && supplySheetVisible ? (
-        <AppBottomSheet ref={supplySheetRef} snapPoints={["82%", "94%"]}
-          keyboardBehavior="extend" keyboardBlurBehavior="restore" android_keyboardInputMode="adjustResize" onClose={() => {
-          setSupplySheetVisible(false);
-          setSupplyProductSearch("");
-        }}>
-          <BottomSheetScrollView
-            contentContainerStyle={[styles.sheetContent, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
-            showsVerticalScrollIndicator
-            persistentScrollbar
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
-          >
-            <View>
-              <Text style={styles.sectionTitle}>Supply Products</Text>
-              <Text style={styles.sectionMeta}>{name}</Text>
-            </View>
-            <SearchBar bottomSheet onFocus={() => supplySheetRef.current?.expand()} value={supplyProductSearch} onChangeText={setSupplyProductSearch} placeholder="Search products" />
-            {supplyProductsLoading ? (
-              <LoadingState label="Loading products" />
-            ) : supplyProducts.length ? (
-              <View style={styles.productPicker}>
-                {supplyProducts.map((product) => {
-                  const selected = product.id === selectedSupplyProductId;
-                  return (
-                    <Pressable
-                      key={product.id}
-                      style={[styles.productOption, selected && styles.productOptionSelected]}
-                      onPress={() => {
-                        setSelectedSupplyProductId(product.id);
-                        setSupplyQuantity(String(supplyCart.find((item) => item.product.id === product.id)?.quantity ?? 1));
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Select ${product.name}`}
-                    >
-                      <View style={styles.saleBody}>
-                        <Text style={styles.item}>{product.name}</Text>
-                        <Text style={styles.label}>{product.sku} | Available: {product.inventory?.quantityAvailable ?? 0}</Text>
+        <Modal transparent animationType="slide" statusBarTranslucent visible onRequestClose={() => { Keyboard.dismiss(); setSupplySheetVisible(false); }}>
+          <View style={styles.supplyModal}>
+            <Pressable style={StyleSheet.absoluteFillObject} accessibilityLabel="Close supply" onPress={() => { Keyboard.dismiss(); setSupplySheetVisible(false); }} />
+            <View style={[styles.supplyModalSheet, { height: supplyKeyboardHeight ? "94%" : "82%" }]}>
+              <View style={styles.supplyHandle} />
+              <ScrollView
+                ref={supplyScrollRef}
+                style={styles.supplySheetScroller}
+                scrollEnabled
+                overScrollMode="always"
+                keyboardDismissMode="on-drag"
+                contentContainerStyle={[styles.sheetContent, { paddingBottom: supplyScrollPadding }]}
+                showsVerticalScrollIndicator
+                persistentScrollbar
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+              >
+                <View>
+                  <Text style={styles.sectionTitle}>{supplyReview ? "Complete supply" : "Supply Products"}</Text>
+                  <Text style={styles.sectionMeta}>{name}</Text>
+                </View>
+                {!supplyReview ? (
+                  <>
+                    <SearchBar value={supplyProductSearch} onChangeText={setSupplyProductSearch} placeholder="Search products" />
+                    {supplyProductsLoading ? (
+                      <LoadingState label="Loading products" />
+                    ) : supplyProducts.length ? (
+                      <View style={styles.productPicker}>
+                        {supplyProducts.map((product) => {
+                          const selected = product.id === selectedSupplyProductId;
+                          return (
+                            <Pressable
+                              key={product.id}
+                              style={[styles.productOption, selected && styles.productOptionSelected]}
+                              onPress={() => {
+                                setSelectedSupplyProductId(product.id);
+                                setSupplyQuantity(String(supplyCart.find((item) => item.product.id === product.id)?.quantity ?? 1));
+                              }}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Select ${product.name}`}
+                            >
+                              <View style={styles.saleBody}>
+                                <Text style={styles.item}>{product.name}</Text>
+                                <Text style={styles.label}>{product.sku} | Available: {product.inventory?.quantityAvailable ?? 0}</Text>
+                              </View>
+                              <Badge label={selected ? "Selected" : "Supply"} variant={selected ? "success" : "neutral"} />
+                            </Pressable>
+                          );
+                        })}
                       </View>
-                      <Badge label={selected ? "Selected" : "Supply"} variant={selected ? "success" : "neutral"} />
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : (
-              <EmptyState icon={<Package size={28} color={colors.textPlaceholder} />} title={supplyProductSearch.trim() ? "No products found" : "No available products"} />
-            )}
-            <View style={styles.formGroup}>
-              <Text style={styles.infoLabel}>Quantity</Text>
-              <BottomSheetTextInput
-                onFocus={() => supplySheetRef.current?.expand()}
-                editable={!supplying}
-                value={supplyQuantity}
-                onChangeText={setSupplyQuantity}
-                keyboardType="number-pad"
-                style={styles.textInput}
-                placeholder="1"
-                placeholderTextColor={colors.textPlaceholder}
-                accessibilityLabel="Supply quantity"
-              />
-            </View>
-            <Button
-              label={supplyCart.some((item) => item.product.id === selectedSupplyProductId) ? "Update cart" : "Add to cart"}
-              variant="ghost" disabled={supplying || supplyProductsLoading || !selectedSupplyProductId}
-              onPress={addToSupplyCart}
-            />
-            {supplyCart.length ? (
-              <View style={styles.productPicker}>
-                <Text style={styles.sectionTitle}>Supply cart ({supplyCart.length})</Text>
-                <Text style={styles.label}>Record Supply submits the products below. Add or update a product before recording.</Text>
-                {supplyCart.map(({ product, quantity }) => (
-                  <View key={product.id} style={styles.productOption}>
-                    <View style={styles.saleBody}>
-                      <Text style={styles.item}>{product.name}</Text>
-                      <Text style={styles.label}>Quantity: {quantity}</Text>
+                    ) : (
+                      <EmptyState icon={<Package size={28} color={colors.textPlaceholder} />} title={supplyProductSearch.trim() ? "No products found" : "No available products"} />
+                    )}
+                    <View style={styles.formGroup}>
+                      <Text style={styles.infoLabel}>Quantity</Text>
+                      <TextInput
+                        editable={!supplying}
+                        value={supplyQuantity}
+                        onChangeText={setSupplyQuantity}
+                        keyboardType="number-pad"
+                        style={styles.textInput}
+                        placeholder="1"
+                        placeholderTextColor={colors.textPlaceholder}
+                        accessibilityLabel="Supply quantity"
+                        onFocus={() => setTimeout(() => supplyScrollRef.current?.scrollToEnd({ animated: true }), 250)}
+                      />
                     </View>
-                    <Button label="Remove" variant="ghost" disabled={supplying}
-                      accessibilityLabel={`Remove ${product.name} from supply cart`}
-                      onPress={() => setSupplyCart((current) => current.filter((item) => item.product.id !== product.id))} />
-                  </View>
-                ))}
-              </View>
-            ) : null}
-            <View style={styles.formGroup}>
-              <Text style={styles.infoLabel}>Remarks</Text>
-              <BottomSheetTextInput
-                onFocus={() => supplySheetRef.current?.expand()}
-                editable={!supplying}
-                value={supplyRemarks}
-                onChangeText={setSupplyRemarks}
-                style={[styles.textInput, styles.remarksInput]}
-                placeholder="Optional"
-                placeholderTextColor={colors.textPlaceholder}
-                multiline
-                accessibilityLabel="Supply remarks"
-              />
+                    <Button
+                      label={supplyCart.some((item) => item.product.id === selectedSupplyProductId) ? "Update cart" : "Add to cart"}
+                      variant="ghost"
+                      disabled={supplying || supplyProductsLoading || !selectedSupplyProductId}
+                      onPress={addToSupplyCart}
+                    />
+                  </>
+                ) : (
+                  <>
+                    {supplyCart.map(({ product, quantity }) => (
+                      <Card key={product.id} style={styles.supplyCartRow}>
+                        <View style={styles.cartBody}>
+                          <Text style={styles.supplyCartName}>{product.name}</Text>
+                          <Text style={styles.supplyCartMeta}>{quantity} x {formatCurrency(Number(product.purchasePrice ?? 0))}</Text>
+                        </View>
+                        <Text style={styles.supplyCartValue}>{formatCurrency(quantity * Number(product.purchasePrice ?? 0))}</Text>
+                        <Pressable
+                          style={styles.removeCartItemButton}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove ${product.name}`}
+                          disabled={supplying}
+                          onPress={() => setSupplyCart((current) => current.filter((item) => item.product.id !== product.id))}
+                          hitSlop={12}
+                        >
+                          <Trash2 size={16} color={colors.error} />
+                        </Pressable>
+                      </Card>
+                    ))}
+                    <Card style={styles.supplyTotalCard}>
+                      <View style={styles.totalLine}>
+                        <Text style={styles.label}>Items</Text>
+                        <Text style={styles.supplyCartValue}>{supplyCartCount}</Text>
+                      </View>
+                      <View style={styles.totalLine}>
+                        <Text style={styles.sectionTitle}>Total</Text>
+                        <Text style={styles.supplyCartTotal}>{formatCurrency(supplyCartTotal)}</Text>
+                      </View>
+                    </Card>
+                    <View style={styles.formGroup}>
+                      <Text style={styles.infoLabel}>Remarks</Text>
+                      <TextInput
+                        editable={!supplying}
+                        onFocus={() => setTimeout(() => supplyScrollRef.current?.scrollToEnd({ animated: true }), 250)}
+                        value={supplyRemarks}
+                        onChangeText={setSupplyRemarks}
+                        style={[styles.textInput, styles.remarksInput]}
+                        placeholder="Optional"
+                        placeholderTextColor={colors.textPlaceholder}
+                        multiline
+                        accessibilityLabel="Supply remarks"
+                      />
+                    </View>
+                    <Button label="Add More Products" variant="ghost" disabled={supplying} onPress={() => setSupplyReview(false)} />
+                    <Button
+                      label="Clear Cart"
+                      variant="danger"
+                      icon={<Trash2 size={16} color={colors.error} />}
+                      disabled={supplying}
+                      onPress={() => { setSupplyCart([]); setSupplyReview(false); }}
+                    />
+                  </>
+                )}
+              </ScrollView>
+              {!supplyReview && supplyCart.length > 0 ? (
+                <Pressable
+                  style={[styles.supplyCartFab, { bottom: Math.max(insets.bottom, 16) }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open supply cart"
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setSupplyReview(true);
+                    supplyScrollRef.current?.scrollTo({ y: 0, animated: false });
+                  }}
+                >
+                  <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.supplyCartGradient}>
+                    <Wallet size={18} color={colors.surface} />
+                    <Text style={styles.supplyCartText}>{supplyCartCount} items</Text>
+                    <Text style={styles.supplyCartTextTotal}>{formatCurrency(supplyCartTotal)}</Text>
+                  </LinearGradient>
+                </Pressable>
+              ) : null}
+              {supplyReview ? (
+                <View style={[styles.supplyStickyActions, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+                  <Button label="Record Supply" loading={supplying} disabled={supplying || supplyCart.length === 0} onPress={() => void submitSupply()} />
+                </View>
+              ) : null}
             </View>
-            <Button label="Record Supply" loading={supplying} disabled={supplying || (!supplyCart.length && (!supplyProducts.length || supplyProductsLoading))} onPress={() => void submitSupply()} />
-          </BottomSheetScrollView>
-        </AppBottomSheet>
+          </View>
+        </Modal>
       ) : null}
     </View>
   );
@@ -838,6 +897,34 @@ function InfoLine({ label, value, valueColor }: { label: string; value: string; 
 }
 
 const styles = StyleSheet.create({
+  supplyModal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },
+  supplyModalSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 12, overflow: "hidden" },
+  supplyHandle: { alignSelf: "center", width: 32, height: 4, borderRadius: 999, backgroundColor: colors.borderLight },
+  supplySheetScroller: { flex: 1 },
+  supplyStickyActions: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderLighter,
+  },
+  supplyCartFab: { position: "absolute", left: 16, right: 16, borderRadius: 18, overflow: "hidden", elevation: 30 },
+  supplyCartGradient: { height: 56, borderRadius: 18, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, gap: 10 },
+  supplyCartText: { color: colors.surface, fontSize: 14, fontWeight: "800", flex: 1 },
+  supplyCartTextTotal: { color: colors.surface, fontSize: 14, fontWeight: "800" },
+  supplyCartRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  cartBody: { flex: 1 },
+  removeCartItemButton: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
+  supplyCartName: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
+  supplyCartMeta: { color: colors.textPlaceholder, fontSize: 11, marginTop: 3 },
+  supplyCartValue: { color: colors.foreground, fontSize: 13, fontWeight: "800" },
+  supplyCartTotal: { color: colors.primary, fontSize: 15, fontWeight: "900" },
+  supplyTotalCard: { gap: 8 },
+  totalLine: { minHeight: 28, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   screen: { flex: 1, backgroundColor: colors.background },
   scroller: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingHorizontal: spacing.screenHorizontal, paddingTop: 12, gap: 12 },

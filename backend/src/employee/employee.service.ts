@@ -916,11 +916,7 @@ export class EmployeeService {
               name: true,
               sku: true,
               barcode: true,
-              sellingPrice: true,
-
               purchasePrice: true,
-
-              baseSellingPrice: true,
               inventory: {
                 select: {
                   quantityOnHand: true,
@@ -946,9 +942,7 @@ export class EmployeeService {
                   name: true,
                   sku: true,
                   barcode: true,
-                  sellingPrice: true,
                   purchasePrice: true,
-                  baseSellingPrice: true,
                   isActive: true,
                 },
               },
@@ -974,9 +968,7 @@ export class EmployeeService {
               name: true,
               sku: true,
               barcode: true,
-              sellingPrice: true,
               purchasePrice: true,
-              baseSellingPrice: true,
               isActive: true,
             },
           },
@@ -1083,8 +1075,6 @@ export class EmployeeService {
         quantityReturned: number;
         suppliedQuantity: number;
         unitValue: Prisma.Decimal;
-        sellingPrice: Prisma.Decimal;
-        baseSellingPrice: Prisma.Decimal;
         totalSoldValue: Prisma.Decimal;
         lastActivityAt: Date;
       }
@@ -1117,8 +1107,6 @@ export class EmployeeService {
           0,
         suppliedQuantity: suppliedByProduct.get(item.productId) ?? 0,
         unitValue,
-        sellingPrice: item.product.sellingPrice,
-        baseSellingPrice: item.product.baseSellingPrice,
         totalSoldValue: (existing?.totalSoldValue ?? new Prisma.Decimal(0)).add(
           totalSoldValue,
         ),
@@ -1146,8 +1134,6 @@ export class EmployeeService {
         quantityReturned: returnedByProduct.get(productId) ?? 0,
         suppliedQuantity: quantity,
         unitValue: new Prisma.Decimal(suppliedItem.product.purchasePrice),
-        sellingPrice: suppliedItem.product.sellingPrice,
-        baseSellingPrice: suppliedItem.product.baseSellingPrice,
         totalSoldValue: new Prisma.Decimal(0),
         lastActivityAt: suppliedItem.createdAt,
       });
@@ -1168,8 +1154,6 @@ export class EmployeeService {
         quantityReturned: returnedByProduct.get(item.productId) ?? 0,
         suppliedQuantity: suppliedByProduct.get(item.productId) ?? 0,
         unitValue: new Prisma.Decimal(item.product.purchasePrice),
-        sellingPrice: item.product.sellingPrice,
-        baseSellingPrice: item.product.baseSellingPrice,
         totalSoldValue: new Prisma.Decimal(0),
         lastActivityAt: item.reviewedAt ?? item.requestedAt,
       });

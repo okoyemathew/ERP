@@ -66,10 +66,14 @@ export interface ApiSale {
     id: string;
     productId: string;
     quantity: number;
+    originalQuantity?: number;
+    returnedQuantity?: number;
     unitPrice: string | number;
     discountAmount: string | number;
     taxAmount: string | number;
     totalAmount: string | number;
+    originalTotalAmount?: string | number;
+    returnedValue?: string | number;
     product: {
       id: string;
       name: string;
@@ -115,10 +119,14 @@ export interface ApiReceipt {
     productId?: string | null;
     productName: string;
     quantity: number;
+    originalQuantity?: number;
+    returnedQuantity?: number;
     unitPrice: string | number;
     discountAmount: string | number;
     taxAmount: string | number;
     totalAmount: string | number;
+    originalTotalAmount?: string | number;
+    returnedValue?: string | number;
   }>;
   payments: Array<{
     id: string;
@@ -157,7 +165,11 @@ export function mapReceiptToDocument(receipt: ApiReceipt): ReceiptDocument {
     productId: item.productId ?? item.id,
     name: item.productName,
     qty: item.quantity,
-    price: Number(item.unitPrice)
+    price: Number(item.unitPrice),
+    originalQty: item.originalQuantity,
+    returnedQty: item.returnedQuantity,
+    returnedValue: item.returnedValue == null ? undefined : Number(item.returnedValue),
+    originalTotal: item.originalTotalAmount == null ? undefined : Number(item.originalTotalAmount)
   }));
   const primaryPayment = receipt.payments[0]?.paymentMethod ?? "CREDIT";
 

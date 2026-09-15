@@ -81,7 +81,11 @@ function buildCreditInvoiceReceipt(creditSale: ApiCreditSale, customerName: stri
     productId: item.productId,
     name: item.productName || "Product",
     qty: item.quantity,
-    price: money(item.unitPrice)
+    price: money(item.unitPrice),
+    originalQty: item.originalQuantity,
+    returnedQty: item.returnedQuantity,
+    returnedValue: item.returnedValue == null ? undefined : money(item.returnedValue),
+    originalTotal: item.originalTotalAmount == null ? undefined : money(item.originalTotalAmount)
   }));
 
   return {
@@ -483,6 +487,11 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
                           <View style={styles.body}>
                             <Text style={styles.title}>{item.productName}</Text>
                             <Text style={styles.meta}>{item.quantity} x {formatCurrency(money(item.unitPrice))}</Text>
+                            {Number(item.returnedQuantity ?? 0) > 0 ? (
+                              <Text style={styles.meta}>
+                                Original Qty {item.originalQuantity ?? item.quantity + Number(item.returnedQuantity ?? 0)} | Returned {item.returnedQuantity} ({formatCurrency(money(item.returnedValue ?? 0))})
+                              </Text>
+                            ) : null}
                           </View>
                           <View style={styles.productReturnActions}>
                             <Text style={styles.amount}>{formatCurrency(lineTotal(item))}</Text>

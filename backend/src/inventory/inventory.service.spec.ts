@@ -206,9 +206,30 @@ function createPrismaMock() {
     },
     creditSale: {
       update: jest.fn(),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { balance: new Prisma.Decimal(0) } }),
     },
     sale: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: saleId,
+        businessId,
+        customerId,
+        payments: [],
+        creditSale: null,
+        items: [{
+          id: saleItemId,
+          productId,
+          quantity: 5,
+          unitPrice: new Prisma.Decimal(100),
+          discountAmount: new Prisma.Decimal(0),
+          taxAmount: new Prisma.Decimal(0),
+          totalAmount: new Prisma.Decimal(500),
+          productReturnRequests: [{ quantity: 2 }],
+        }],
+      }),
       update: jest.fn(),
+    },
+    creditPayment: {
+      aggregate: jest.fn().mockResolvedValue({ _sum: { amount: new Prisma.Decimal(0) } }),
     },
     customer: {
       findFirst: jest
@@ -411,10 +432,12 @@ describe('InventoryService product returns', () => {
         }),
       }),
     );
-    expect(prisma.sale.update).toHaveBeenCalledWith({
-      where: { id: saleId },
-      data: { status: SaleStatus.COMPLETED },
-    });
+    expect(prisma.sale.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: saleId },
+        data: expect.objectContaining({ status: SaleStatus.COMPLETED }),
+      }),
+    );
   });
 
   it('allows additional return requests from sales already marked refunded', async () => {

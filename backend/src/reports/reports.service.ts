@@ -2126,25 +2126,7 @@ export class ReportsService {
   ) {
     const rows = await this.prisma.$queryRaw<InventoryValueRow[]>`
       SELECT COALESCE(SUM(
-        i."quantityOnHand" * COALESCE(
-          i."averageCost",
-          (
-            SELECT it."unitCost"
-            FROM "InventoryTransaction" it
-            WHERE it."businessId" = i."businessId"
-              AND it."productId" = i."productId"
-              AND it."unitCost" IS NOT NULL
-              AND it."transactionType" IN (
-                ${InventoryTransactionType.PURCHASE}::"InventoryTransactionType",
-                ${InventoryTransactionType.STOCK_IN}::"InventoryTransactionType",
-                ${InventoryTransactionType.RETURN}::"InventoryTransactionType"
-              )
-            ORDER BY it."transactionDate" DESC
-            LIMIT 1
-          ),
-          p."purchasePrice",
-          0
-        )
+        i."quantityOnHand" * COALESCE(p."purchasePrice", 0)
       ), 0) AS "inventoryValue"
       FROM "Inventory" i
       JOIN "Product" p ON p.id = i."productId"

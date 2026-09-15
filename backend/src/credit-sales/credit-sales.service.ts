@@ -18,6 +18,7 @@ import {
   PaymentMethod,
   PaymentStatus,
   Prisma,
+  ProductReturnRequestStatus,
   SaleStatus,
 } from '@prisma/client';
 import {
@@ -2185,18 +2186,9 @@ export class CreditSalesService {
           name: `${creditSale.sale.user.firstName} ${creditSale.sale.user.lastName}`.trim(),
           username: creditSale.sale.user.username,
         },
-        items: creditSale.sale.items.map((item) => ({
-          id: item.id,
-          productId: item.productId,
-          productName: item.product.name,
-          sku: item.product.sku,
-          barcode: item.product.barcode,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discountAmount: item.discountAmount,
-          taxAmount: item.taxAmount,
-          totalAmount: item.totalAmount,
-        })),
+        items: creditSale.sale.items.map((item) =>
+          this.netSaleItemForCredit(item),
+        ),
         payments: creditSale.sale.payments.map((payment) => ({
           id: payment.id,
           paymentMethod: payment.paymentMethod,
@@ -2329,6 +2321,10 @@ export class CreditSalesService {
                   sku: true,
                   barcode: true,
                 },
+              },
+              productReturnRequests: {
+                where: { status: ProductReturnRequestStatus.APPROVED },
+                select: { quantity: true },
               },
             },
             orderBy: { createdAt: 'asc' },
@@ -2538,6 +2534,59 @@ export class CreditSalesService {
     username: string;
   }) {
     return `${user.firstName} ${user.lastName}`.trim() || user.username;
+  }
+
+  private approvedReturnedQuantity(item: {
+    productReturnRequests?: Array<{ quantity: number }>;
+  }) {
+    return (item.productReturnRequests ?? []).reduce(
+      (sum, request) => sum + request.quantity,
+      0,
+    );
+  }
+
+  private netSaleItemForCredit(item: {
+    id: string;
+    productId: string;
+    product: { name: string; sku: string | null; barcode: string | null };
+    quantity: number;
+    unitPrice: Prisma.Decimal;
+    discountAmount: Prisma.Decimal;
+    taxAmount: Prisma.Decimal;
+    totalAmount: Prisma.Decimal;
+    productReturnRequests?: Array<{ quantity: number }>;
+  }) {
+    const returnedQuantity = Math.min(
+      item.quantity,
+      this.approvedReturnedQuantity(item),
+    );
+    const quantity = Math.max(0, item.quantity - returnedQuantity);
+    const ratio = item.quantity > 0
+      ? new Prisma.Decimal(returnedQuantity).div(item.quantity)
+      : new Prisma.Decimal(0);
+    const returnedValue = new Prisma.Decimal(item.totalAmount)
+      .mul(ratio)
+      .toDecimalPlaces(2);
+
+    return {
+      id: item.id,
+      productId: item.productId,
+      productName: item.product.name,
+      sku: item.product.sku,
+      barcode: item.product.barcode,
+      quantity,
+      originalQuantity: item.quantity,
+      returnedQuantity,
+      unitPrice: item.unitPrice,
+      discountAmount: item.discountAmount,
+      taxAmount: item.taxAmount,
+      totalAmount: Prisma.Decimal.max(
+        new Prisma.Decimal(0),
+        new Prisma.Decimal(item.totalAmount).sub(returnedValue),
+      ),
+      originalTotalAmount: item.totalAmount,
+      returnedValue,
+    };
   }
 
   private async nextSaleNumber(businessId: string, tx: Tx) {

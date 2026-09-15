@@ -91,7 +91,22 @@ export const printingService = {
       ...(receipt.employeeName ? [row("Employee", receipt.employeeName)] : []),
       row("Method", receipt.method.toUpperCase()),
       divider,
-      ...receipt.items.flatMap((item) => [item.name, row(`${item.qty} x ${formatCurrency(item.price)}`, formatCurrency(item.qty * item.price))]),
+      ...receipt.items.flatMap((item) => [
+        item.name,
+        row(`${item.qty} x ${formatCurrency(item.price)}`, formatCurrency(item.qty * item.price)),
+        ...(Number(item.returnedQty ?? 0) > 0
+          ? [
+              row(
+                `Original Qty ${item.originalQty ?? item.qty + Number(item.returnedQty ?? 0)}`,
+                formatCurrency(Number(item.originalTotal ?? 0)),
+              ),
+              row(
+                `Returned Qty ${item.returnedQty}`,
+                `-${formatCurrency(Number(item.returnedValue ?? 0))}`,
+              ),
+            ]
+          : []),
+      ]),
       divider,
       row("Subtotal", formatCurrency(receipt.subtotal)),
       row("Tax", formatCurrency(receipt.tax)),

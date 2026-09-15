@@ -66,6 +66,11 @@ export function ReceiptTicket({ receipt, receiptId, items = [], method = "cash" 
             <Text style={styles.caption}>
               {item.qty} x {formatCurrency(item.price)}
             </Text>
+            {Number(item.returnedQty ?? 0) > 0 ? (
+              <Text style={styles.caption}>
+                Original Qty {item.originalQty ?? item.qty + Number(item.returnedQty ?? 0)} | Returned {item.returnedQty} ({formatCurrency(Number(item.returnedValue ?? 0))})
+              </Text>
+            ) : null}
             <Text style={styles.itemTotal}>{formatCurrency(item.qty * item.price)}</Text>
           </View>
         ))}

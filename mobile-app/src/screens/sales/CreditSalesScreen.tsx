@@ -230,7 +230,11 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
       productId: item.productId,
       name: item.productName || "Product",
       qty: item.quantity,
-      price: money(item.unitPrice)
+      price: money(item.unitPrice),
+      originalQty: item.originalQuantity,
+      returnedQty: item.returnedQuantity,
+      returnedValue: item.returnedValue == null ? undefined : money(item.returnedValue),
+      originalTotal: item.originalTotalAmount == null ? undefined : money(item.originalTotalAmount)
     }));
     const totals = invoiceTotals(creditSale);
 

@@ -193,7 +193,9 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       return {
         data: ids.flatMap((id) => {
           const sale = byId.get(id);
-          return sale ? [{ ...sale, ...collected.get(id) }] : [];
+          return sale
+            ? [{ ...this.presentSale(sale), ...collected.get(id) }]
+            : [];
         }),
         meta: {
           page,
@@ -216,14 +218,16 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     return {
-      data,
+      data: data.map((sale) => this.presentSale(sale)),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
 
   async findOne(businessId: string, id: string, user?: AuthenticatedUser) {
     await this.clearExpiredPendingSales(businessId);
-    return this.getSaleOrThrow(businessId, id, this.prisma, user);
+    return this.presentSale(
+      await this.getSaleOrThrow(businessId, id, this.prisma, user),
+    );
   }
 
   async lookupProduct(
@@ -1471,6 +1475,9 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     const business = sale.business;
     const settings = business.receiptSettings;
     const saleItems = sale.items;
+    const displayItems = saleItems.map((saleItem, index) =>
+      this.netReceiptItem(saleItem, receipt.items[index]),
+    );
 
     return {
       id: receipt.id,
@@ -1522,19 +1529,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
             name: 'Walk-in Customer',
             phone: null,
           },
-      items: receipt.items.map((item, index) => ({
-        id: item.id,
-        productId: saleItems[index]?.productId ?? null,
-        productName: item.productName,
-        sku: saleItems[index]?.product.sku ?? null,
-        barcode: saleItems[index]?.product.barcode ?? null,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountAmount:
-          saleItems[index]?.discountAmount ?? new Prisma.Decimal(0),
-        taxAmount: saleItems[index]?.taxAmount ?? new Prisma.Decimal(0),
-        totalAmount: item.totalAmount,
-      })),
+      items: displayItems,
       payments: sale.payments.map((payment) => ({
         id: payment.id,
         paymentMethod: payment.paymentMethod,
@@ -1623,6 +1618,20 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           right: this.money(item.totalAmount, currency),
         },
       );
+      if (item.returnedQuantity > 0) {
+        lines.push(
+          {
+            type: 'row',
+            left: `Original Qty ${item.originalQuantity}`,
+            right: this.money(item.originalTotalAmount, currency),
+          },
+          {
+            type: 'row',
+            left: `Returned Qty ${item.returnedQuantity}`,
+            right: `-${this.money(item.returnedValue, currency)}`,
+          },
+        );
+      }
       if (Number(item.discountAmount) > 0) {
         lines.push({
           type: 'row',
@@ -2044,6 +2053,148 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       : { userId: user.id };
   }
 
+  private approvedReturnedQuantity(item: {
+    productReturnRequests?: Array<{ quantity: number }>;
+  }) {
+    return (item.productReturnRequests ?? []).reduce(
+      (sum, request) => sum + request.quantity,
+      0,
+    );
+  }
+
+  private presentSale(
+    sale: Prisma.SaleGetPayload<{
+      include: ReturnType<SalesService['saleInclude']>;
+    }>,
+  ) {
+    const items = sale.items.map((item) => this.netSaleItem(item));
+    const returnedValue = items.reduce(
+      (sum, item) => sum.add(item.returnedValue),
+      new Prisma.Decimal(0),
+    );
+    const netTotal = Prisma.Decimal.max(
+      new Prisma.Decimal(0),
+      new Prisma.Decimal(sale.totalAmount),
+    );
+    const effectiveTotal = returnedValue.gt(0)
+      ? items.reduce(
+          (sum, item) => sum.add(item.totalAmount),
+          new Prisma.Decimal(0),
+        )
+      : netTotal;
+    const amountPaid = Prisma.Decimal.min(
+      effectiveTotal,
+      new Prisma.Decimal(sale.amountPaid),
+    );
+
+    return {
+      ...sale,
+      subtotal: returnedValue.gt(0)
+        ? items.reduce(
+            (sum, item) =>
+              sum.add(new Prisma.Decimal(item.unitPrice).mul(item.quantity)),
+            new Prisma.Decimal(0),
+          )
+        : sale.subtotal,
+      totalAmount: returnedValue.gt(0) ? effectiveTotal : sale.totalAmount,
+      amountPaid,
+      balanceDue: returnedValue.gt(0)
+        ? Prisma.Decimal.max(new Prisma.Decimal(0), effectiveTotal.sub(amountPaid))
+        : sale.balanceDue,
+      items,
+    };
+  }
+
+  private netSaleItem(item: {
+    id: string;
+    productId: string;
+    product: { id: string; name: string; sku: string | null; barcode: string | null };
+    quantity: number;
+    unitPrice: Prisma.Decimal;
+    discountAmount: Prisma.Decimal;
+    taxAmount: Prisma.Decimal;
+    totalAmount: Prisma.Decimal;
+    productReturnRequests?: Array<{ quantity: number }>;
+  }) {
+    const returnedQuantity = Math.min(
+      item.quantity,
+      this.approvedReturnedQuantity(item),
+    );
+    const quantity = Math.max(0, item.quantity - returnedQuantity);
+    const ratio = item.quantity > 0
+      ? new Prisma.Decimal(returnedQuantity).div(item.quantity)
+      : new Prisma.Decimal(0);
+    const returnedValue = new Prisma.Decimal(item.totalAmount)
+      .mul(ratio)
+      .toDecimalPlaces(2);
+
+    return {
+      ...item,
+      quantity,
+      originalQuantity: item.quantity,
+      returnedQuantity,
+      totalAmount: Prisma.Decimal.max(
+        new Prisma.Decimal(0),
+        new Prisma.Decimal(item.totalAmount).sub(returnedValue),
+      ),
+      originalTotalAmount: item.totalAmount,
+      returnedValue,
+    };
+  }
+
+  private netReceiptItem(
+    saleItem: {
+      id: string;
+      productId: string;
+      product: { name: string; sku: string | null; barcode: string | null };
+      quantity: number;
+      unitPrice: Prisma.Decimal;
+      discountAmount: Prisma.Decimal;
+      taxAmount: Prisma.Decimal;
+      totalAmount: Prisma.Decimal;
+      productReturnRequests?: Array<{ quantity: number }>;
+    },
+    receiptItem?: {
+      id: string;
+      productName: string;
+      quantity: number;
+      unitPrice: Prisma.Decimal;
+      totalAmount: Prisma.Decimal;
+    },
+  ) {
+    const returnedQuantity = Math.min(
+      saleItem.quantity,
+      this.approvedReturnedQuantity(saleItem),
+    );
+    const quantity = Math.max(0, saleItem.quantity - returnedQuantity);
+    const ratio = saleItem.quantity > 0
+      ? new Prisma.Decimal(returnedQuantity).div(saleItem.quantity)
+      : new Prisma.Decimal(0);
+    const returnedValue = new Prisma.Decimal(saleItem.totalAmount)
+      .mul(ratio)
+      .toDecimalPlaces(2);
+
+    return {
+      id: receiptItem?.id ?? saleItem.id,
+      productId: saleItem.productId,
+      productName: receiptItem?.productName ?? saleItem.product.name,
+      sku: saleItem.product.sku,
+      barcode: saleItem.product.barcode,
+      quantity,
+      originalQuantity: saleItem.quantity,
+      returnedQuantity,
+      unitPrice: receiptItem?.unitPrice ?? saleItem.unitPrice,
+      discountAmount: saleItem.discountAmount,
+      taxAmount: saleItem.taxAmount,
+      totalAmount: Prisma.Decimal.max(
+        new Prisma.Decimal(0),
+        new Prisma.Decimal(saleItem.totalAmount).sub(returnedValue),
+      ),
+      originalTotalAmount: receiptItem?.totalAmount ?? saleItem.totalAmount,
+      returnedValue,
+    };
+  }
+
   private saleInclude() {
     return {
       customer: true,
@@ -2064,6 +2215,10 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
               sku: true,
               barcode: true,
             },
+          },
+          productReturnRequests: {
+            where: { status: ProductReturnRequestStatus.APPROVED },
+            select: { quantity: true },
           },
         },
       },
@@ -2099,6 +2254,10 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
                   sku: true,
                   barcode: true,
                 },
+              },
+              productReturnRequests: {
+                where: { status: ProductReturnRequestStatus.APPROVED },
+                select: { quantity: true },
               },
             },
           },

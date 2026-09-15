@@ -516,6 +516,12 @@ export class InventoryService {
       });
 
       if (request.saleId) {
+        await this.recalculateSaleAfterApprovedReturns(
+          businessId,
+          request.saleId,
+          dto,
+          tx,
+        );
         const items = await tx.saleItem.findMany({
           where: { saleId: request.saleId },
           include: {
@@ -837,6 +843,175 @@ export class InventoryService {
       .div(item.quantity)
       .toDecimalPlaces(2)
       .sub(total.mul(alreadyApproved).div(item.quantity).toDecimalPlaces(2));
+  }
+
+  private async recalculateSaleAfterApprovedReturns(
+    businessId: string,
+    saleId: string,
+    dto: ProductReturnRequestDecisionDto,
+    tx: Prisma.TransactionClient,
+  ) {
+    const sale = await tx.sale.findFirst({
+      where: { id: saleId, businessId, deletedAt: null },
+      include: {
+        customer: { select: { id: true } },
+        payments: { select: { amount: true, paymentMethod: true } },
+        creditSale: { select: { id: true, dueDate: true } },
+        items: {
+          include: {
+            productReturnRequests: {
+              where: { status: ProductReturnRequestStatus.APPROVED },
+              select: { quantity: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!sale) return;
+
+    const totals = sale.items.reduce(
+      (sum, item) => {
+        const returnedQuantity = Math.min(
+          item.quantity,
+          item.productReturnRequests.reduce((qty, row) => qty + row.quantity, 0),
+        );
+        const netQuantity = Math.max(0, item.quantity - returnedQuantity);
+        const ratio = item.quantity > 0
+          ? new Prisma.Decimal(returnedQuantity).div(item.quantity)
+          : new Prisma.Decimal(0);
+        const returnedSubtotal = new Prisma.Decimal(item.unitPrice)
+          .mul(returnedQuantity)
+          .toDecimalPlaces(2);
+        const returnedDiscount = new Prisma.Decimal(item.discountAmount)
+          .mul(ratio)
+          .toDecimalPlaces(2);
+        const returnedTax = new Prisma.Decimal(item.taxAmount)
+          .mul(ratio)
+          .toDecimalPlaces(2);
+        const returnedTotal = new Prisma.Decimal(item.totalAmount)
+          .mul(ratio)
+          .toDecimalPlaces(2);
+
+        return {
+          subtotal: sum.subtotal.add(
+            new Prisma.Decimal(item.unitPrice).mul(netQuantity),
+          ),
+          discountAmount: sum.discountAmount.add(
+            Prisma.Decimal.max(
+              new Prisma.Decimal(0),
+              new Prisma.Decimal(item.discountAmount).sub(returnedDiscount),
+            ),
+          ),
+          taxAmount: sum.taxAmount.add(
+            Prisma.Decimal.max(
+              new Prisma.Decimal(0),
+              new Prisma.Decimal(item.taxAmount).sub(returnedTax),
+            ),
+          ),
+          totalAmount: sum.totalAmount.add(
+            Prisma.Decimal.max(
+              new Prisma.Decimal(0),
+              new Prisma.Decimal(item.totalAmount).sub(returnedTotal),
+            ),
+          ),
+          returnedValue: sum.returnedValue.add(returnedTotal),
+          returnedSubtotal: sum.returnedSubtotal.add(returnedSubtotal),
+        };
+      },
+      {
+        subtotal: new Prisma.Decimal(0),
+        discountAmount: new Prisma.Decimal(0),
+        taxAmount: new Prisma.Decimal(0),
+        totalAmount: new Prisma.Decimal(0),
+        returnedValue: new Prisma.Decimal(0),
+        returnedSubtotal: new Prisma.Decimal(0),
+      },
+    );
+
+    const initialPaid = sale.payments
+      .filter((payment) => payment.paymentMethod !== PaymentMethod.CREDIT)
+      .reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(0));
+    const creditPaid = sale.creditSale
+      ? ((
+          await tx.creditPayment.aggregate({
+            where: { creditSaleId: sale.creditSale.id },
+            _sum: { amount: true },
+          })
+        )._sum.amount ?? new Prisma.Decimal(0))
+      : new Prisma.Decimal(0);
+    const totalPaidHistory = initialPaid.add(creditPaid);
+    const saleAmountPaid = Prisma.Decimal.min(totals.totalAmount, totalPaidHistory);
+    const saleBalanceDue = Prisma.Decimal.max(
+      new Prisma.Decimal(0),
+      totals.totalAmount.sub(saleAmountPaid),
+    );
+
+    await tx.sale.update({
+      where: { id: sale.id },
+      data: {
+        subtotal: totals.subtotal,
+        discountAmount: totals.discountAmount,
+        taxAmount: totals.taxAmount,
+        totalAmount: totals.totalAmount,
+        amountPaid: saleAmountPaid,
+        balanceDue: saleBalanceDue,
+        paymentStatus: saleBalanceDue.eq(0)
+          ? PaymentStatus.PAID
+          : saleAmountPaid.gt(0)
+            ? PaymentStatus.PARTIAL
+            : PaymentStatus.UNPAID,
+        syncVersion: { increment: 1 },
+        deviceId: dto.deviceId ?? undefined,
+      },
+    });
+
+    if (sale.creditSale) {
+      const creditPrincipal = Prisma.Decimal.max(
+        new Prisma.Decimal(0),
+        totals.totalAmount.sub(initialPaid),
+      );
+      const creditAmountPaid = Prisma.Decimal.min(creditPrincipal, creditPaid);
+      const creditBalance = Prisma.Decimal.max(
+        new Prisma.Decimal(0),
+        creditPrincipal.sub(creditAmountPaid),
+      );
+
+      await tx.creditSale.update({
+        where: { id: sale.creditSale.id },
+        data: {
+          totalCredit: creditPrincipal,
+          amountPaid: creditAmountPaid,
+          balance: creditBalance,
+          status: this.creditStatus(
+            creditPrincipal,
+            creditAmountPaid,
+            sale.creditSale.dueDate,
+          ),
+        },
+      });
+    }
+
+    if (sale.customerId) {
+      const creditBalance = await tx.creditSale.aggregate({
+        where: {
+          customerId: sale.customerId,
+          deletedAt: null,
+          sale: { businessId, deletedAt: null },
+        },
+        _sum: { balance: true },
+      });
+
+      await tx.customer.update({
+        where: { id: sale.customerId },
+        data: {
+          outstandingBalance: creditBalance._sum.balance ?? new Prisma.Decimal(0),
+          isSynced: true,
+          syncVersion: { increment: 1 },
+          deviceId: dto.deviceId ?? undefined,
+        },
+      });
+    }
   }
 
   async returnAvailability(

@@ -76,8 +76,12 @@ export interface ApiCreditSale {
       sku?: string | null;
       barcode?: string | null;
       quantity: number;
+      originalQuantity?: number;
+      returnedQuantity?: number;
       unitPrice: string | number;
       totalAmount: string | number;
+      originalTotalAmount?: string | number;
+      returnedValue?: string | number;
     }>;
     payments?: Array<{
       id: string;

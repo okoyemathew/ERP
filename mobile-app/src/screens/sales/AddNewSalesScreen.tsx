@@ -273,10 +273,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               sku: item.sku ?? item.barcode ?? item.productId.slice(0, 8),
               barcode: item.barcode,
               category: "Supplied Products",
-              price: moneyValue(item.sellingPrice),
+              price: 0,
               cost: unitValue,
               stock: item.quantityInHand,
-              floorPrice: item.baseSellingPrice == null ? Number.POSITIVE_INFINITY : moneyValue(item.baseSellingPrice),
+              floorPrice: 0,
               iconColor: productIconColor(name),
             };
           }),
@@ -460,7 +460,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       "Selling price",
       reason === "missing"
         ? "Enter the selling price before adding this product."
-        : "Selling price cannot be below the owner-set base price.",
+        : "Enter a valid selling price for this product.",
     );
   };
 
@@ -828,7 +828,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       const net = item.qty * item.price - distributeAmount(discountAmount, item.qty * item.price);
       return !product || Math.round(net * 100) < Math.round(minimumSellingPrice(product) * item.qty * 100);
     })) {
-      Alert.alert("Check selling price", "Each product must sell at or above its base price after discount. Refresh products if pricing is unavailable.");
+      Alert.alert("Check selling price", "Enter a valid selling price for each product.");
       return;
     }
     if (Number.isNaN(discountAmount) || Number.isNaN(taxAmount)) {
@@ -907,7 +907,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       const net = item.qty * item.price - distributeAmount(discountAmount, item.qty * item.price);
       return !product || Math.round(net * 100) < Math.round(minimumSellingPrice(product) * item.qty * 100);
     })) {
-      Alert.alert("Check selling price", "Each product must sell at or above its base price after discount. Refresh products if pricing is unavailable.");
+      Alert.alert("Check selling price", "Enter a valid selling price for each product.");
       return;
     }
     if (
