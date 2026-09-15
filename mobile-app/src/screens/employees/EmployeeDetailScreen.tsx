@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type GorhomBottomSheet from "@gorhom/bottom-sheet";
-import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { BottomSheetScrollView, BottomSheetTextInput } from "@gorhom/bottom-sheet";
+import { Alert, Keyboard, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -89,6 +89,14 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [selectedSupplyProductId, setSelectedSupplyProductId] = useState<string | null>(null);
   const [expandedSupplyRunId, setExpandedSupplyRunId] = useState<string | null>(null);
   const [supplyQuantity, setSupplyQuantity] = useState("1");
+  const [supplyCart, setSupplyCart] = useState<{ product: ApiProduct; quantity: number }[]>([]);
+  const supplySubmitting = useRef(false);
+  useEffect(() => {
+    setSupplyCart([]);
+    setSupplyQuantity("1");
+    setSupplyRemarks("");
+    setSupplySheetVisible(false);
+  }, [employeeId]);
   const [supplyRemarks, setSupplyRemarks] = useState("");
   const [supplying, setSupplying] = useState(false);
   const [salesLoading, setSalesLoading] = useState(true);
@@ -121,6 +129,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       if (!employeeId && !isSelfProfile) throw new Error("Employee profile is not available");
       const params = {
         page,
+        basis: "collections",
         limit: 10,
         search: salesQuery.trim() || undefined,
         sortBy: "saleDate",
@@ -249,27 +258,44 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     setSupplyProductSearch("");
   };
 
-  const submitSupply = async () => {
-    if (!profile || supplying || isSelfProfile) return;
-    const quantity = Number.parseInt(supplyQuantity, 10);
-    const selectedProduct = supplyProducts.find((product) => product.id === selectedSupplyProductId);
-    const targetName = employeeName(profile.employee);
-    if (!selectedProduct) {
-      Alert.alert("Select product", "Choose a product to supply to this employee.");
-      return;
-    }
-    if (!Number.isFinite(quantity) || quantity < 1) {
-      Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
-      return;
-    }
+  const selectedSupplyItem = () => {
+    const product = supplyProducts.find((item) => item.id === selectedSupplyProductId);
+    if (!product) throw new Error("Choose a product to supply to this employee.");
+    const quantity = Number(supplyQuantity);
+    if (!Number.isSafeInteger(quantity) || quantity < 1) throw new Error("Enter a whole quantity of at least 1.");
+    if (quantity > (product.inventory?.quantityAvailable ?? 0)) throw new Error("Quantity exceeds available stock.");
+    return { product, quantity };
+  };
 
+  const addToSupplyCart = () => {
+    try {
+      const item = selectedSupplyItem();
+      setSupplyCart((current) => [...current.filter((entry) => entry.product.id !== item.product.id), item]);
+      Keyboard.dismiss();
+    } catch (error) {
+      Alert.alert("Check supply", error instanceof Error ? error.message : "Invalid quantity.");
+    }
+  };
+
+  const submitSupply = async () => {
+    if (!profile || supplySubmitting.current || isSelfProfile) return;
+    let items: { product: ApiProduct; quantity: number }[];
+    try {
+      items = supplyCart.length ? supplyCart : [selectedSupplyItem()];
+    } catch (error) {
+      Alert.alert("Check supply", error instanceof Error ? error.message : "Invalid quantity.");
+      return;
+    }
+    const targetName = employeeName(profile.employee);
+    supplySubmitting.current = true;
+    Keyboard.dismiss();
     setSupplying(true);
     try {
       await goodsDisbursementService.create({
         employeeId: profile.employee.id,
         destination: targetName,
         remarks: supplyRemarks.trim() || `Supplied to ${targetName} (${profile.employee.employeeCode})`,
-        items: [{ productId: selectedProduct.id, quantity }]
+        items: items.map(({ product, quantity }) => ({ productId: product.id, quantity }))
       });
       supplySheetRef.current?.close();
       setSupplySheetVisible(false);
@@ -278,13 +304,15 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       setSupplyProductSearch("");
       setSupplyQuantity("1");
       setSupplyRemarks("");
+      setSupplyCart([]);
       setActiveTab("stock");
       await load();
-      Alert.alert("Supply recorded", `${selectedProduct.name} was supplied to ${targetName}.`);
+      Alert.alert("Supply recorded", `${items.map(({ product, quantity }) => `${product.name} ? ${quantity}`).join(", ")} supplied to ${targetName}.`);
     } catch (supplyError) {
       const message = supplyError instanceof Error ? supplyError.message : "Unable to supply product.";
       Alert.alert("Supply failed", message);
     } finally {
+      supplySubmitting.current = false;
       setSupplying(false);
     }
   };
@@ -551,10 +579,10 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                   <View style={styles.saleIcon}><ShoppingBag size={15} color={colors.primary} /></View>
                   <View style={styles.saleBody}>
                     <Text style={styles.item}>{sale.saleNumber}</Text>
-                    <Text style={styles.label}>{compactDate(sale.saleDate)} | {salePaymentMethod(sale)}</Text>
+                    <Text style={styles.label}>{compactDate(sale.collectionDate ?? sale.saleDate)} | {salePaymentMethod(sale)}</Text>
                   </View>
                   <View style={styles.saleRight}>
-                    <Text style={styles.item}>{formatCurrency(Number(sale.totalAmount))}</Text>
+                    <Text style={styles.item}>{formatCurrency(Number(sale.collectedAmount ?? sale.totalAmount))}</Text>
                     <Badge label={sale.status} variant={statusVariant(sale.status)} />
                   </View>
                 </Pressable>
@@ -633,6 +661,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
             showsVerticalScrollIndicator
             persistentScrollbar
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             nestedScrollEnabled
           >
             <View style={styles.sectionHeader}>
@@ -685,7 +714,8 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       ) : null}
 
       {!isSelfProfile && supplySheetVisible ? (
-        <AppBottomSheet ref={supplySheetRef} snapPoints={["82%"]} onClose={() => {
+        <AppBottomSheet ref={supplySheetRef} snapPoints={["82%", "94%"]}
+          keyboardBehavior="extend" keyboardBlurBehavior="restore" android_keyboardInputMode="adjustResize" onClose={() => {
           setSupplySheetVisible(false);
           setSupplyProductSearch("");
         }}>
@@ -700,7 +730,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               <Text style={styles.sectionTitle}>Supply Products</Text>
               <Text style={styles.sectionMeta}>{name}</Text>
             </View>
-            <SearchBar value={supplyProductSearch} onChangeText={setSupplyProductSearch} placeholder="Search products" />
+            <SearchBar bottomSheet onFocus={() => supplySheetRef.current?.expand()} value={supplyProductSearch} onChangeText={setSupplyProductSearch} placeholder="Search products" />
             {supplyProductsLoading ? (
               <LoadingState label="Loading products" />
             ) : supplyProducts.length ? (
@@ -711,7 +741,10 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                     <Pressable
                       key={product.id}
                       style={[styles.productOption, selected && styles.productOptionSelected]}
-                      onPress={() => setSelectedSupplyProductId(product.id)}
+                      onPress={() => {
+                        setSelectedSupplyProductId(product.id);
+                        setSupplyQuantity(String(supplyCart.find((item) => item.product.id === product.id)?.quantity ?? 1));
+                      }}
                       accessibilityRole="button"
                       accessibilityLabel={`Select ${product.name}`}
                     >
@@ -729,7 +762,9 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
             )}
             <View style={styles.formGroup}>
               <Text style={styles.infoLabel}>Quantity</Text>
-              <TextInput
+              <BottomSheetTextInput
+                onFocus={() => supplySheetRef.current?.expand()}
+                editable={!supplying}
                 value={supplyQuantity}
                 onChangeText={setSupplyQuantity}
                 keyboardType="number-pad"
@@ -739,9 +774,33 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                 accessibilityLabel="Supply quantity"
               />
             </View>
+            <Button
+              label={supplyCart.some((item) => item.product.id === selectedSupplyProductId) ? "Update cart" : "Add to cart"}
+              variant="ghost" disabled={supplying || supplyProductsLoading || !selectedSupplyProductId}
+              onPress={addToSupplyCart}
+            />
+            {supplyCart.length ? (
+              <View style={styles.productPicker}>
+                <Text style={styles.sectionTitle}>Supply cart ({supplyCart.length})</Text>
+                <Text style={styles.label}>Record Supply submits the products below. Add or update a product before recording.</Text>
+                {supplyCart.map(({ product, quantity }) => (
+                  <View key={product.id} style={styles.productOption}>
+                    <View style={styles.saleBody}>
+                      <Text style={styles.item}>{product.name}</Text>
+                      <Text style={styles.label}>Quantity: {quantity}</Text>
+                    </View>
+                    <Button label="Remove" variant="ghost" disabled={supplying}
+                      accessibilityLabel={`Remove ${product.name} from supply cart`}
+                      onPress={() => setSupplyCart((current) => current.filter((item) => item.product.id !== product.id))} />
+                  </View>
+                ))}
+              </View>
+            ) : null}
             <View style={styles.formGroup}>
               <Text style={styles.infoLabel}>Remarks</Text>
-              <TextInput
+              <BottomSheetTextInput
+                onFocus={() => supplySheetRef.current?.expand()}
+                editable={!supplying}
                 value={supplyRemarks}
                 onChangeText={setSupplyRemarks}
                 style={[styles.textInput, styles.remarksInput]}
@@ -751,7 +810,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                 accessibilityLabel="Supply remarks"
               />
             </View>
-            <Button label="Record Supply" loading={supplying} disabled={!supplyProducts.length || supplyProductsLoading || supplying} onPress={() => void submitSupply()} />
+            <Button label="Record Supply" loading={supplying} disabled={supplying || (!supplyCart.length && (!supplyProducts.length || supplyProductsLoading))} onPress={() => void submitSupply()} />
           </BottomSheetScrollView>
         </AppBottomSheet>
       ) : null}

@@ -1,3 +1,4 @@
+import { saleCollections, collectionsBySale } from '../sales/sale-collections';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -15,53 +16,21 @@ export class BusinessDashboardService {
       throw new NotFoundException('Business not found');
     }
 
-    const [salesToday, paymentsToday, creditPaymentsToday, expensesToday, creditBalance] =
-      await Promise.all([
-        this.prisma.sale.aggregate({
-          where: {
-            businessId,
-            status: 'COMPLETED',
-            saleDate: {
-              gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            },
+    const [expensesToday, creditBalance] = await Promise.all([
+      this.prisma.expense.aggregate({
+        where: {
+          businessId,
+          createdAt: {
+            gte: new Date(new Date().setHours(0, 0, 0, 0)),
           },
-          _count: true,
-          _sum: { totalAmount: true },
-        }),
-        this.prisma.payment.aggregate({
-          where: {
-            businessId,
-            paymentDate: {
-              gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            },
-          },
-          _sum: { amount: true },
-        }),
-        this.prisma.creditPayment.aggregate({
-          where: {
-            paymentDate: {
-              gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            },
-            creditSale: {
-              sale: { businessId },
-            },
-          },
-          _sum: { amount: true },
-        }),
-        this.prisma.expense.aggregate({
-          where: {
-            businessId,
-            createdAt: {
-              gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            },
-          },
-          _sum: { amount: true },
-        }),
-        this.prisma.creditSale.aggregate({
-          where: { sale: { businessId } },
-          _sum: { balance: true },
-        }),
-      ]);
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.creditSale.aggregate({
+        where: { sale: { businessId } },
+        _sum: { balance: true },
+      }),
+    ]);
 
     const [
       customerCount,
@@ -90,10 +59,22 @@ export class BusinessDashboardService {
       this.prisma.user.count({ where: { businessId, status: 'ACTIVE' } }),
     ]);
 
+    const collections = await saleCollections(
+      this.prisma,
+      { businessId },
+      {
+        startDate: new Date(new Date().setHours(0, 0, 0, 0)),
+        endDate: new Date(new Date().setHours(23, 59, 59, 999)),
+      },
+    );
+    const collectedTotal = collections.reduce(
+      (sum, row) => sum + Number(row.amount),
+      0,
+    );
     return {
-      totalSalesToday: salesToday._count ?? 0,
-      totalRevenueToday: Number(salesToday._sum.totalAmount ?? 0),
-      totalPaymentsToday: Number(paymentsToday._sum.amount ?? 0) + Number(creditPaymentsToday._sum.amount ?? 0),
+      totalSalesToday: collectionsBySale(collections).size,
+      totalRevenueToday: collectedTotal,
+      totalPaymentsToday: collectedTotal,
       totalExpensesToday: Number(expensesToday._sum.amount ?? 0),
       outstandingCreditBalance: Number(creditBalance._sum?.balance ?? 0),
       activeCustomersCount: customerCount,
@@ -120,23 +101,6 @@ export class BusinessDashboardService {
     startDate.setDate(today.getDate() - 6);
     startDate.setHours(0, 0, 0, 0);
 
-    const sales = await this.prisma.sale.groupBy({
-      by: ['saleDate'],
-      where: {
-        businessId,
-        saleDate: { gte: startDate },
-        status: 'COMPLETED',
-      },
-      _sum: { totalAmount: true },
-      _count: { id: true },
-    });
-
-    const payments = await this.prisma.payment.groupBy({
-      by: ['paymentDate'],
-      where: { businessId, paymentDate: { gte: startDate } },
-      _sum: { amount: true },
-    });
-
     const expenses = await this.prisma.expense.groupBy({
       by: ['createdAt'],
       where: { businessId, createdAt: { gte: startDate } },
@@ -151,32 +115,35 @@ export class BusinessDashboardService {
 
     const formatDate = (date: Date) => date.toISOString().slice(0, 10);
 
-    const salesMap = new Map(
-      sales.map((item) => [formatDate(new Date(item.saleDate)), item]),
-    );
-    const paymentsMap = new Map(
-      payments.map((item) => [formatDate(new Date(item.paymentDate)), item]),
-    );
     const expensesMap = new Map(
       expenses.map((item) => [formatDate(new Date(item.createdAt)), item]),
     );
 
+    const collections = await saleCollections(
+      this.prisma,
+      { businessId },
+      { startDate, endDate: new Date(new Date().setHours(23, 59, 59, 999)) },
+    );
     const salesLast7Days = dailyRange.map((date) => {
       const key = formatDate(date);
-      const item = salesMap.get(key);
+      const rows = collections.filter(
+        (row) => formatDate(row.paymentDate) === key,
+      );
       return {
         date: key,
-        revenue: Number(item?._sum.totalAmount ?? 0),
-        salesCount: item?._count.id ?? 0,
+        revenue: rows.reduce((sum, row) => sum + Number(row.amount), 0),
+        salesCount: collectionsBySale(rows).size,
       };
     });
 
     const paymentsLast7Days = dailyRange.map((date) => {
       const key = formatDate(date);
-      const item = paymentsMap.get(key);
+      const rows = collections.filter(
+        (row) => formatDate(row.paymentDate) === key,
+      );
       return {
         date: key,
-        amount: Number(item?._sum.amount ?? 0),
+        amount: rows.reduce((sum, row) => sum + Number(row.amount), 0),
       };
     });
 

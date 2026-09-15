@@ -109,6 +109,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
   const [returnCredit, setReturnCredit] = useState<CustomerCreditSale | null>(null);
   const [returnItem, setReturnItem] = useState<CustomerSaleItem | null>(null);
   const [returnQuantity, setReturnQuantity] = useState("1");
+  const [returnAvailability, setReturnAvailability] = useState<Awaited<ReturnType<typeof productsService.returnAvailability>> | null>(null);
   const [returnRemarks, setReturnRemarks] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
@@ -194,21 +195,31 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
 
     setReturnCredit(credit);
     if (items.length === 1) {
-      setReturnItem(items[0]);
-      setReturnQuantity(Number(items[0].quantity) > 0 ? "1" : "0");
-      setReturnRemarks("");
+      void openReturnForm(credit, items[0]);
       return;
     }
 
     setReturnPickerVisible(true);
   };
 
-  const openReturnForm = (credit: CustomerCreditSale, item: CustomerSaleItem) => {
-    setReturnCredit(credit);
-    setReturnItem(item);
-    setReturnQuantity(Number(item.quantity) > 0 ? "1" : "0");
-    setReturnRemarks("");
-    setReturnPickerVisible(false);
+  const openReturnForm = async (credit: CustomerCreditSale, item: CustomerSaleItem) => {
+    if (returnSubmitting) return;
+    setReturnAvailability(null);
+    try {
+      const available = await productsService.returnAvailability(item.id);
+      if (available.quantityAvailable <= 0) {
+        Alert.alert("No quantity available", "All units have already been returned or are awaiting approval.");
+        return;
+      }
+      setReturnAvailability(available);
+      setReturnCredit(credit);
+      setReturnPickerVisible(false);
+      setReturnItem(item);
+      setReturnQuantity("1");
+      setReturnRemarks("");
+    } catch (error) {
+      Alert.alert("Unable to load return", error instanceof Error ? error.message : "Connect to the internet to check the remaining quantity.");
+    }
   };
 
   const closeReturnForm = () => {
@@ -272,8 +283,7 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
   const submitReturnRequest = async () => {
     if (!returnCredit || !returnItem || returnSubmitting) return;
 
-    const quantity = Number.parseInt(returnQuantity, 10);
-    const soldQuantity = Number(returnItem.quantity);
+    const quantity = Number(returnQuantity.trim());
     const productId = returnItem.product?.id;
     const productName = returnItem.product?.name ?? "Product";
     const saleNumber = returnCredit.sale?.saleNumber ?? returnCredit.id.slice(0, 8).toUpperCase();
@@ -283,13 +293,13 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
       return;
     }
 
-    if (!Number.isFinite(quantity) || quantity < 1) {
+    if (!/^\d+$/.test(returnQuantity.trim()) || !Number.isSafeInteger(quantity) || quantity < 1) {
       Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
       return;
     }
 
-    if (quantity > soldQuantity) {
-      Alert.alert("Invalid quantity", `This credit sale only has ${soldQuantity} unit(s) of ${productName}.`);
+    if (!returnAvailability || quantity > returnAvailability.quantityAvailable) {
+      Alert.alert("Invalid quantity", `Only ${returnAvailability?.quantityAvailable ?? 0} unit(s) remain available to return.`);
       return;
     }
 
@@ -299,7 +309,6 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
         productId,
         saleItemId: returnItem.id,
         quantity,
-        unitCost: money(returnItem.unitPrice),
         referenceNumber: saleNumber,
         remarks: returnRemarks.trim() || `Customer return from credit sale ${saleNumber}`
       });
@@ -308,10 +317,11 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
       setReturnQuantity("1");
       setReturnRemarks("");
       await loadCustomer();
-      Alert.alert("Return submitted", `${productName} is now waiting for owner approval.`);
+      Alert.alert("Return submitted", `${quantity} unit(s) of ${productName} are now waiting for owner approval.`);
     } catch (returnError) {
       const message = returnError instanceof Error ? returnError.message : "Unable to submit return request.";
       Alert.alert("Return failed", message);
+      try { setReturnAvailability(await productsService.returnAvailability(returnItem.id)); } catch { setReturnAvailability(null); }
     } finally {
       setReturnSubmitting(false);
     }
@@ -653,6 +663,10 @@ export function CustomerDetailScreen({ route, navigation }: { route: any; naviga
                 <X size={15} color={colors.textMuted} />
               </Pressable>
             </View>
+            <Text style={styles.meta}>Quantity Sold: {returnAvailability?.quantitySold ?? Number(returnItem?.quantity ?? 0)}</Text>
+            <Text style={styles.meta}>Quantity Already Returned: {returnAvailability?.quantityReturned ?? 0}</Text>
+            <Text style={styles.meta}>Quantity Pending Approval: {returnAvailability?.quantityPending ?? 0}</Text>
+            <Text style={styles.meta}>Quantity Available to Return: {returnAvailability?.quantityAvailable ?? 0}</Text>
             <TextInput
               value={returnQuantity}
               onChangeText={setReturnQuantity}

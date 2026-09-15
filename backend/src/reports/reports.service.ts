@@ -1,3 +1,4 @@
+import { saleCollections, collectionsBySale } from '../sales/sale-collections';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   AuditAction,
@@ -165,11 +166,83 @@ export class ReportsService {
 
     const scopedQuery = this.scopeUserQuery(normalizedQuery, user);
 
-    const [summary, paymentBreakdown, data] = await Promise.all([
-      this.salesSummary(businessId, scopedQuery),
-      this.paymentBreakdown(businessId, scopedQuery),
-      this.periodSalesData(businessId, period, timezone, scopedQuery),
-    ]);
+    const [invoiceSummary, invoicePaymentBreakdown, invoiceData] =
+      await Promise.all([
+        this.salesSummary(businessId, scopedQuery),
+        this.paymentBreakdown(businessId, scopedQuery),
+        this.periodSalesData(businessId, period, timezone, scopedQuery),
+      ]);
+
+    const collections = await saleCollections(
+      this.prisma,
+      this.buildSaleWhere(businessId, {
+        ...scopedQuery,
+        startDate: undefined,
+        endDate: undefined,
+        paymentMethod: undefined,
+      }),
+      scopedQuery,
+      scopedQuery.paymentMethod,
+    );
+    const total = collections.reduce(
+      (sum, row) => sum.add(row.amount),
+      new Prisma.Decimal(0),
+    );
+    const count = collectionsBySale(collections).size;
+    const summary = {
+      totalSales: this.money(total),
+      amountPaid: this.money(total),
+      transactionCount: count,
+      averageTransactionValue: this.money(count ? total.div(count) : 0),
+    };
+    const paymentBreakdown = PAYMENT_METHODS.filter(
+      (method) => method !== PaymentMethod.CREDIT,
+    ).map((paymentMethod) => {
+      const rows = collections.filter(
+        (row) => row.paymentMethod === paymentMethod,
+      );
+      return {
+        paymentMethod,
+        transactionCount: rows.length,
+        totalAmount: this.money(
+          rows.reduce((sum, row) => sum.add(row.amount), new Prisma.Decimal(0)),
+        ),
+      };
+    });
+    const buckets = new Map<string, typeof collections>();
+    for (const row of collections) {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(row.paymentDate);
+      const value = (type: string) =>
+        parts.find((part) => part.type === type)!.value;
+      const date = new Date(
+        value('year') +
+          '-' +
+          value('month') +
+          '-' +
+          value('day') +
+          'T00:00:00Z',
+      );
+      if (period === 'week')
+        date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+      if (period === 'month' || period === 'year') date.setUTCDate(1);
+      if (period === 'year') date.setUTCMonth(0);
+      const key = date.toISOString();
+      buckets.set(key, [...(buckets.get(key) ?? []), row]);
+    }
+    const data = [...buckets]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([periodStart, rows]) => ({
+        periodStart,
+        totalSales: this.money(
+          rows.reduce((sum, row) => sum.add(row.amount), new Prisma.Decimal(0)),
+        ),
+        transactionCount: collectionsBySale(rows).size,
+      }));
 
     await this.auditReportAccess(
       businessId,
@@ -180,6 +253,10 @@ export class ReportsService {
 
     return {
       reportType: `${period}_sales`,
+      basis: 'collections',
+      invoiceSummary,
+      invoiceData,
+      invoicePaymentBreakdown,
       period,
       timezone,
       range: this.responseRange(scopedQuery),
@@ -308,12 +385,7 @@ export class ReportsService {
     const [summary, data, periodData] = await Promise.all([
       this.salesSummary(businessId, scopedQuery),
       this.employeeSalesData(businessId, scopedQuery),
-      this.employeeSalesPeriodData(
-        businessId,
-        period,
-        timezone,
-        scopedQuery,
-      ),
+      this.employeeSalesPeriodData(businessId, period, timezone, scopedQuery),
     ]);
 
     await this.auditReportAccess(
@@ -381,6 +453,17 @@ export class ReportsService {
       this.employeeSalesData(businessId, todayQuery, 5),
     ]);
 
+    const collections = await saleCollections(
+      this.prisma,
+      this.buildSaleWhere(businessId, {
+        ...todayQuery,
+        startDate: undefined,
+        endDate: undefined,
+        paymentMethod: undefined,
+      }),
+      todayQuery,
+      todayQuery.paymentMethod,
+    );
     const netSales = this.decimal(todaySales.netSales);
     const grossProfit = netSales.sub(todayCogs);
     const todayProfit = grossProfit.sub(todayExpenses.totalExpenses);
@@ -397,8 +480,13 @@ export class ReportsService {
       timezone,
       range: this.responseRange(todayQuery),
       summary: {
-        todaySales: todaySales.totalSales,
-        todayTransactions: todaySales.transactionCount,
+        todaySales: this.money(
+          collections.reduce(
+            (sum, row) => sum.add(row.amount),
+            new Prisma.Decimal(0),
+          ),
+        ),
+        todayTransactions: collectionsBySale(collections).size,
         todayExpenses: todayExpenses.totalExpenses,
         todayProfit: this.money(todayProfit),
         outstandingCredit: this.money(outstandingCredit._sum.balance),
@@ -1216,8 +1304,22 @@ export class ReportsService {
     const totalDiscounts = this.decimal(sales._sum.discountAmount);
     const totalTax = this.decimal(sales._sum.taxAmount);
     const totalSales = this.decimal(sales._sum.totalAmount);
-    const amountPaid = this.decimal(sales._sum.amountPaid);
-    const outstandingAmount = this.decimal(sales._sum.balanceDue);
+    // Older credit invoices may have been marked paid when CREDIT was tendered.
+    const [creditBalance, otherBalance] = await Promise.all([
+      this.prisma.creditSale.aggregate({
+        where: { sale: saleWhere },
+        _sum: { balance: true },
+      }),
+      this.prisma.sale.aggregate({
+        where: { AND: [saleWhere, { creditSale: { is: null } }] },
+        _sum: { balanceDue: true },
+      }),
+    ]);
+    const outstandingAmount = this.decimal(creditBalance._sum.balance).add(
+      this.decimal(otherBalance._sum.balanceDue),
+    );
+    const invoicePayments = await saleCollections(this.prisma, saleWhere);
+    const amountPaid = invoicePayments.reduce((sum, row) => sum.add(row.amount), new Prisma.Decimal(0));
     const netSales = grossSales.sub(totalDiscounts);
 
     return {

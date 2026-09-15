@@ -80,7 +80,7 @@ function saleCustomerName(sale: ApiSale) {
 }
 
 function saleAmount(sale: ApiSale) {
-  return Number(sale.totalAmount ?? 0);
+  return Number(sale.collectedAmount ?? 0);
 }
 
 function buildChartData(sales: ApiSale[]): ChartPoint[] {
@@ -97,7 +97,7 @@ function buildChartData(sales: ApiSale[]): ChartPoint[] {
     days.map((date) => [date.toISOString().slice(0, 10), 0]),
   );
 
-  sales.forEach((sale) => {
+  sales.flatMap(sale => (sale.collectionPayments ?? []).map(payment => ({ ...sale, saleDate: payment.paymentDate, collectedAmount: payment.amount }))).forEach((sale) => {
     const key = new Date(sale.saleDate).toISOString().slice(0, 10);
     if (buckets.has(key)) {
       buckets.set(key, (buckets.get(key) ?? 0) + saleAmount(sale));
@@ -142,6 +142,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
         const [nextTodaySales, nextWeeklySales, nextRecentSales] =
           await Promise.all([
             salesService.list({
+              basis: "collections",
               userId: user.id,
               status: "COMPLETED",
               startDate: todayStart.toISOString(),
@@ -149,6 +150,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
               limit: 200,
             }),
             salesService.list({
+              basis: "collections",
               userId: user.id,
               status: "COMPLETED",
               startDate: weekStart.toISOString(),
@@ -156,6 +158,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
               limit: 200,
             }),
             salesService.list({
+              basis: "collections",
               userId: user.id,
               status: "COMPLETED",
               limit: 10,

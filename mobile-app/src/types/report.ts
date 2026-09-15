@@ -42,6 +42,8 @@ export interface DashboardStatistics {
 }
 
 export interface ReportResponse {
+  invoiceSummary?: Record<string, unknown>;
+  invoiceData?: Array<Record<string, unknown>>;
   reportType: string;
   period?: string;
   summary?: Record<string, unknown>;

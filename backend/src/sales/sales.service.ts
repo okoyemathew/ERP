@@ -1,3 +1,4 @@
+import { saleCollections, collectionsBySale } from './sale-collections';
 import {
   BadRequestException,
   ForbiddenException,
@@ -60,9 +61,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly prisma: PrismaService) {}
 
   onModuleInit() {
-    this.pendingSaleCleanupTimer = setInterval(() => {
-      void this.clearExpiredPendingSales();
-    }, 60 * 60 * 1000);
+    this.pendingSaleCleanupTimer = setInterval(
+      () => {
+        void this.clearExpiredPendingSales();
+      },
+      60 * 60 * 1000,
+    );
     this.pendingSaleCleanupTimer.unref?.();
     void this.clearExpiredPendingSales();
   }
@@ -162,7 +166,43 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy ?? 'saleDate';
     const sortOrder = query.sortOrder ?? 'desc';
-    const where = this.buildWhere(businessId, query, user);
+    const where = this.buildWhere(
+      businessId,
+      query.basis === 'collections'
+        ? { ...query, startDate: undefined, endDate: undefined }
+        : query,
+      user,
+    );
+    if (query.basis === 'collections') {
+      const collected = collectionsBySale(
+        await saleCollections(this.prisma, where, query),
+      );
+      const ordered = [...collected].sort(
+        (a, b) =>
+          (a[1].collectionDate.getTime() - b[1].collectionDate.getTime()) *
+          (sortOrder === 'asc' ? 1 : -1),
+      );
+      const ids = ordered
+        .slice((page - 1) * limit, page * limit)
+        .map(([id]) => id);
+      const sales = await this.prisma.sale.findMany({
+        where: { AND: [where, { id: { in: ids } }] },
+        include: this.saleInclude(),
+      });
+      const byId = new Map(sales.map((sale) => [sale.id, sale]));
+      return {
+        data: ids.flatMap((id) => {
+          const sale = byId.get(id);
+          return sale ? [{ ...sale, ...collected.get(id) }] : [];
+        }),
+        meta: {
+          page,
+          limit,
+          total: collected.size,
+          totalPages: Math.ceil(collected.size / limit),
+        },
+      };
+    }
 
     const [total, data] = await Promise.all([
       this.prisma.sale.count({ where }),
@@ -704,9 +744,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const unitPrice = new Prisma.Decimal(
-      dto.unitPrice ?? product.sellingPrice,
-    );
+    const unitPrice = new Prisma.Decimal(dto.unitPrice ?? product.sellingPrice);
     const baseSellingPrice = new Prisma.Decimal(product.baseSellingPrice);
 
     if (unitPrice.lt(baseSellingPrice)) {
@@ -718,6 +756,12 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     const discountAmount = new Prisma.Decimal(dto.discountAmount ?? 0);
     const taxAmount = new Prisma.Decimal(dto.taxAmount ?? 0);
     const gross = unitPrice.mul(dto.quantity);
+
+    if (gross.sub(discountAmount).lt(baseSellingPrice.mul(dto.quantity))) {
+      throw new BadRequestException(
+        'Sale price after discount is below the allowed selling price.',
+      );
+    }
 
     if (discountAmount.gt(gross)) {
       throw new BadRequestException('Discount cannot exceed item subtotal');
@@ -1171,7 +1215,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
           businessId,
           userId: seller.userId,
           deletedAt: null,
-          status: SaleStatus.COMPLETED,
+          status: { in: [SaleStatus.COMPLETED, SaleStatus.REFUNDED] },
           saleDate: { gte: firstInboundAt },
         },
       },
@@ -2093,7 +2137,9 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         : null);
 
     if (!activeRegister) {
-      throw new BadRequestException('Open cash register is required for cash sales');
+      throw new BadRequestException(
+        'Open cash register is required for cash sales',
+      );
     }
 
     const currentBalance =

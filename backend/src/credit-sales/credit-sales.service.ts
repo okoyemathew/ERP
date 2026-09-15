@@ -1132,6 +1132,7 @@ export class CreditSalesService {
     const idempotencyKey = dto.idempotencyKey?.trim();
 
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT s.id FROM "Sale" s JOIN "CreditSale" c ON c."saleId" = s.id WHERE c.id = ${id}::uuid AND s."businessId" = ${businessId}::uuid FOR UPDATE OF s`;
       if (idempotencyKey) {
         const existingPayment = await tx.creditPayment.findUnique({
           where: { idempotencyKey },
@@ -1245,20 +1246,19 @@ export class CreditSalesService {
         creditSale.sale.totalAmount,
         initialPaid.add(newAmountPaid),
       );
-      const saleBalanceDue = Prisma.Decimal.max(
-        new Prisma.Decimal(0),
-        creditSale.sale.totalAmount.sub(saleAmountPaid),
-      );
+      // Credit principal may already have been reduced by approved product returns.
+      const saleBalanceDue = newBalance;
 
       await tx.sale.update({
         where: { id: creditSale.saleId },
         data: {
           amountPaid: saleAmountPaid,
           balanceDue: saleBalanceDue,
-          paymentStatus: this.paymentStatus(
-            saleAmountPaid,
-            creditSale.sale.totalAmount,
-          ),
+          paymentStatus: newBalance.eq(0)
+            ? PaymentStatus.PAID
+            : saleAmountPaid.gt(0)
+              ? PaymentStatus.PARTIAL
+              : PaymentStatus.UNPAID,
         },
       });
 
@@ -1319,6 +1319,12 @@ export class CreditSalesService {
       const discountAmount = new Prisma.Decimal(item.discountAmount ?? 0);
       const taxAmount = new Prisma.Decimal(item.taxAmount ?? 0);
       const gross = unitPrice.mul(item.quantity);
+
+      if (gross.sub(discountAmount).lt(baseSellingPrice.mul(item.quantity))) {
+        throw new BadRequestException(
+          'Sale price after discount is below the allowed selling price.',
+        );
+      }
 
       if (discountAmount.gt(gross)) {
         throw new BadRequestException('Discount cannot exceed item subtotal');

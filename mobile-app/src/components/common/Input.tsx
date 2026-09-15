@@ -1,15 +1,18 @@
+import { BottomSheetTextInput } from "@gorhom/bottom-sheet";
 import React, { useState } from "react";
 import { StyleSheet, TextInput, TextInputProps, View } from "react-native";
 import { Text, useTranslation } from "@/i18n";
 import { colors, borderRadius, typography } from "@/theme";
 
 interface InputProps extends TextInputProps {
+  bottomSheet?: boolean;
   label?: string;
   icon?: React.ReactNode;
   error?: string;
 }
 
-export function Input({ label, icon, error, style, onFocus, onBlur, ...props }: InputProps) {
+export function Input({ bottomSheet = false, label, icon, error, style, onFocus, onBlur, ...props }: InputProps) {
+  const InputComponent = bottomSheet ? BottomSheetTextInput : TextInput;
   const [focused, setFocused] = useState(false);
   const { t } = useTranslation();
   const placeholder = typeof props.placeholder === "string" ? t(props.placeholder) : props.placeholder;
@@ -20,7 +23,7 @@ export function Input({ label, icon, error, style, onFocus, onBlur, ...props }: 
       {label ? <Text style={styles.label}>{label}</Text> : null}
       <View style={[styles.inputWrap, focused && styles.focused, error && styles.errored]}>
         {icon ? <View style={styles.icon}>{icon}</View> : null}
-        <TextInput
+        <InputComponent
           placeholderTextColor={colors.textPlaceholder}
           style={[styles.input, icon ? styles.withIcon : null, style]}
           onFocus={(event) => {

@@ -313,11 +313,11 @@ describe('SalesService sale item price and quantity validation', () => {
     };
   }
 
-  async function buildItem(quantity: number, unitPrice: number) {
+  async function buildItem(quantity: number, unitPrice: number, discountAmount = 0) {
     return (service as unknown as {
       buildItemData: (
         businessId: string,
-        dto: { productId: string; quantity: number; unitPrice: number },
+        dto: { productId: string; quantity: number; unitPrice: number; discountAmount: number },
         tx: unknown,
       ) => Promise<{
         quantity: number;
@@ -326,7 +326,7 @@ describe('SalesService sale item price and quantity validation', () => {
       }>;
     }).buildItemData(
       businessId,
-      { productId, quantity, unitPrice },
+      { productId, quantity, unitPrice, discountAmount },
       prisma,
     );
   }
@@ -347,6 +347,12 @@ describe('SalesService sale item price and quantity validation', () => {
 
     expect(item.quantity).toBe(50);
     expect(Number(item.totalAmount)).toBe(600000);
+  });
+
+  it('rejects discounts that reduce the effective price below base', async () => {
+    prisma.product.findFirst.mockResolvedValue(sellableProduct());
+    await expect(buildItem(2, 11000, 2001)).rejects.toThrow('Sale price after discount is below the allowed selling price.');
+    expect(Number((await buildItem(2, 11000, 2000)).totalAmount)).toBe(20000);
   });
 
   it('rejects direct API attempts below base selling price', async () => {

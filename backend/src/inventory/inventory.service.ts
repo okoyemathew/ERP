@@ -10,6 +10,8 @@ import {
   CreditSaleStatus,
   InventoryTransactionType,
   NotificationType,
+  PaymentStatus,
+  PaymentMethod,
   Prisma,
   ProductReturnRequestStatus,
   SaleStatus,
@@ -242,6 +244,11 @@ export class InventoryService {
     user: AuthenticatedUser,
   ) {
     await this.assertInventoryContext(businessId, dto.productId);
+    if (!Number.isSafeInteger(dto.quantity) || dto.quantity <= 0) {
+      throw new BadRequestException(
+        'Return quantity must be a positive whole number.',
+      );
+    }
     this.validateDelta(
       dto.quantity,
       'Return quantity must be greater than zero.',
@@ -250,6 +257,8 @@ export class InventoryService {
     );
 
     return this.prisma.$transaction(async (tx) => {
+      // Serialize reservations for all lines of an invoice before reading totals.
+      await tx.$queryRaw`SELECT s.id FROM "Sale" s JOIN "SaleItem" i ON i."saleId" = s.id WHERE i.id = ${dto.saleItemId}::uuid AND s."businessId" = ${businessId}::uuid FOR UPDATE OF s`;
       const saleItem = await this.getReturnableSaleItemOrThrow(
         businessId,
         dto,
@@ -295,7 +304,7 @@ export class InventoryService {
           originalSellerId: saleItem.sale.userId,
           requestedById: user.id,
           quantity: dto.quantity,
-          unitCost: dto.unitCost ?? saleItem.unitPrice,
+          unitCost: saleItem.product.purchasePrice,
           referenceNumber: dto.referenceNumber ?? saleItem.sale.saleNumber,
           remarks: dto.remarks ?? null,
           status: ProductReturnRequestStatus.PENDING,
@@ -389,7 +398,9 @@ export class InventoryService {
                   lastName: { contains: search, mode: 'insensitive' },
                 },
               },
-              { sale: { saleNumber: { contains: search, mode: 'insensitive' } } },
+              {
+                sale: { saleNumber: { contains: search, mode: 'insensitive' } },
+              },
               {
                 customer: {
                   firstName: { contains: search, mode: 'insensitive' },
@@ -451,6 +462,30 @@ export class InventoryService {
         id,
         tx,
       );
+      const approved = await tx.productReturnRequest.aggregate({
+        where: {
+          businessId,
+          saleItemId: request.saleItemId,
+          status: ProductReturnRequestStatus.APPROVED,
+        },
+        _sum: { quantity: true },
+      });
+      if (
+        request.saleItem &&
+        (approved._sum.quantity ?? 0) + request.quantity >
+          request.saleItem.quantity
+      ) {
+        throw new BadRequestException(
+          'Return quantity exceeds the quantity remaining on this sale item',
+        );
+      }
+      const returnValue = request.saleItem
+        ? this.returnValue(
+            request.saleItem,
+            request.quantity,
+            approved._sum.quantity ?? 0,
+          )
+        : new Prisma.Decimal(request.unitCost ?? 0).mul(request.quantity);
       const transaction = this.shouldReturnToMainInventory(request)
         ? await this.applyApprovedReturnToMainInventory(
             businessId,
@@ -460,14 +495,13 @@ export class InventoryService {
           )
         : null;
 
-      await this.applyCreditReturnAdjustment(businessId, request, dto, tx);
-
-      if (request.saleId) {
-        await tx.sale.update({
-          where: { id: request.saleId },
-          data: { status: SaleStatus.REFUNDED },
-        });
-      }
+      await this.applyCreditReturnAdjustment(
+        businessId,
+        request,
+        dto,
+        tx,
+        returnValue,
+      );
 
       const updated = await tx.productReturnRequest.update({
         where: { id: request.id },
@@ -480,6 +514,33 @@ export class InventoryService {
         },
         include: this.returnRequestInclude(),
       });
+
+      if (request.saleId) {
+        const items = await tx.saleItem.findMany({
+          where: { saleId: request.saleId },
+          include: {
+            productReturnRequests: {
+              where: { status: ProductReturnRequestStatus.APPROVED },
+              select: { quantity: true },
+            },
+          },
+        });
+        const fullyReturned =
+          items.length > 0 &&
+          items.every(
+            (item) =>
+              item.productReturnRequests.reduce(
+                (sum, row) => sum + row.quantity,
+                0,
+              ) >= item.quantity,
+          );
+        await tx.sale.update({
+          where: { id: request.saleId },
+          data: {
+            status: fullyReturned ? SaleStatus.REFUNDED : SaleStatus.COMPLETED,
+          },
+        });
+      }
 
       if (request.requestedById !== user.id) {
         await tx.notification.create({
@@ -500,7 +561,7 @@ export class InventoryService {
           action: AuditAction.UPDATE,
           entity: 'ProductReturnRequest',
           entityId: request.id,
-          description: `Approved return request ${request.id}`,
+          description: `Approved return ${request.id}: ${request.quantity} unit(s) of ${request.product.name}; return value ${returnValue.toFixed(2)}`,
           deviceId: dto.deviceId ?? null,
         },
       });
@@ -564,7 +625,7 @@ export class InventoryService {
 
   private async getReturnableSaleItemOrThrow(
     businessId: string,
-    dto: CreateProductReturnRequestDto,
+    dto: { saleItemId: string; productId?: string },
     tx: Prisma.TransactionClient,
   ) {
     const saleItem = await tx.saleItem.findFirst({
@@ -582,6 +643,7 @@ export class InventoryService {
           select: {
             id: true,
             name: true,
+            purchasePrice: true,
           },
         },
         sale: {
@@ -616,7 +678,9 @@ export class InventoryService {
       include: ReturnType<InventoryService['returnRequestInclude']>;
     }>,
   ) {
-    return !request.originalSellerId || this.isOwnerUser(request.originalSeller);
+    // Owners and employees both hold personal supplied stock. Approved requests
+    // are credited to originalSellerId by the seller-stock ledger.
+    return !request.originalSellerId;
   }
 
   private async applyApprovedReturnToMainInventory(
@@ -627,6 +691,7 @@ export class InventoryService {
     dto: ProductReturnRequestDecisionDto,
     tx: Prisma.TransactionClient,
   ) {
+    await tx.$queryRaw`SELECT id FROM "Inventory" WHERE "businessId" = ${businessId}::uuid AND "productId" = ${request.productId}::uuid FOR UPDATE`;
     const inventory = await tx.inventory.findFirst({
       where: { businessId, productId: request.productId },
     });
@@ -646,7 +711,7 @@ export class InventoryService {
         quantityReserved: inventory.quantityReserved,
         quantityAvailable: quantityAfter,
         lastStockUpdate: new Date(),
-        averageCost: request.unitCost ?? inventory.averageCost ?? null,
+        averageCost: inventory.averageCost ?? request.unitCost ?? null,
         syncVersion: (inventory.syncVersion ?? 1) + 1,
         isSynced: true,
         deviceId: dto.deviceId ?? inventory.deviceId,
@@ -679,15 +744,11 @@ export class InventoryService {
     }>,
     dto: ProductReturnRequestDecisionDto,
     tx: Prisma.TransactionClient,
+    returnValue: Prisma.Decimal,
   ) {
     if (!request.creditSale) {
       return;
     }
-
-    const unitValue = new Prisma.Decimal(
-      request.unitCost ?? request.saleItem?.unitPrice ?? 0,
-    );
-    const returnValue = unitValue.mul(request.quantity);
 
     if (returnValue.lte(0)) {
       return;
@@ -718,7 +779,29 @@ export class InventoryService {
       },
     });
 
+    if (request.saleId) {
+      const actuallyPaid = (request.sale?.payments ?? [])
+        .filter((payment) => payment.paymentMethod !== PaymentMethod.CREDIT)
+        .reduce(
+          (sum, payment) => sum.add(payment.amount),
+          new Prisma.Decimal(request.creditSale.amountPaid),
+        );
+      await tx.sale.update({
+        where: { id: request.saleId },
+        data: {
+          amountPaid: actuallyPaid,
+          balanceDue: nextBalance,
+          paymentStatus: nextBalance.eq(0)
+            ? PaymentStatus.PAID
+            : actuallyPaid.gt(0)
+              ? PaymentStatus.PARTIAL
+              : PaymentStatus.UNPAID,
+        },
+      });
+    }
+
     if (request.customerId) {
+      await tx.$queryRaw`SELECT id FROM "Customer" WHERE id = ${request.customerId}::uuid AND "businessId" = ${businessId}::uuid FOR UPDATE`;
       const customer = await tx.customer.findFirst({
         where: { id: request.customerId, businessId },
         select: { outstandingBalance: true },
@@ -739,6 +822,64 @@ export class InventoryService {
         });
       }
     }
+  }
+
+  private returnValue(
+    item: { quantity: number; totalAmount: Prisma.Decimal },
+    quantity: number,
+    alreadyApproved: number,
+  ) {
+    // Allocate the saved sale-line total, including its discount and tax.
+    // Cumulative rounding ensures multiple partial returns never exceed that total.
+    const total = new Prisma.Decimal(item.totalAmount);
+    return total
+      .mul(alreadyApproved + quantity)
+      .div(item.quantity)
+      .toDecimalPlaces(2)
+      .sub(total.mul(alreadyApproved).div(item.quantity).toDecimalPlaces(2));
+  }
+
+  async returnAvailability(
+    businessId: string,
+    saleItemId: string,
+    user: AuthenticatedUser,
+  ) {
+    const item = await this.getReturnableSaleItemOrThrow(
+      businessId,
+      { saleItemId },
+      this.prisma,
+    );
+    if (item.sale.userId !== user.id && !this.canViewAllReturnRequests(user)) {
+      throw new ForbiddenException(
+        'Only the original seller can access this return',
+      );
+    }
+    const history = await this.prisma.productReturnRequest.findMany({
+      where: { businessId, saleItemId },
+      select: {
+        id: true,
+        quantity: true,
+        status: true,
+        requestedAt: true,
+        reviewedAt: true,
+      },
+      orderBy: { requestedAt: 'asc' },
+    });
+    const approved = history
+      .filter((row) => row.status === ProductReturnRequestStatus.APPROVED)
+      .reduce((sum, row) => sum + row.quantity, 0);
+    const pending = history
+      .filter((row) => row.status === ProductReturnRequestStatus.PENDING)
+      .reduce((sum, row) => sum + row.quantity, 0);
+    return {
+      saleItemId,
+      productId: item.productId,
+      quantitySold: item.quantity,
+      quantityReturned: approved,
+      quantityPending: pending,
+      quantityAvailable: Math.max(0, item.quantity - approved - pending),
+      history,
+    };
   }
 
   private creditStatus(
@@ -861,6 +1002,8 @@ export class InventoryService {
           id: true,
           saleNumber: true,
           saleDate: true,
+          amountPaid: true,
+          payments: { select: { amount: true, paymentMethod: true } },
           customerId: true,
           userId: true,
         },
@@ -891,6 +1034,8 @@ export class InventoryService {
     id: string,
     tx: Prisma.TransactionClient,
   ) {
+    await tx.$queryRaw`SELECT s.id FROM "Sale" s JOIN "ProductReturnRequest" r ON r."saleId" = s.id WHERE r.id = ${id}::uuid AND r."businessId" = ${businessId}::uuid FOR UPDATE OF s`;
+    await tx.$queryRaw`SELECT id FROM "ProductReturnRequest" WHERE id = ${id}::uuid AND "businessId" = ${businessId}::uuid FOR UPDATE`;
     const request = await tx.productReturnRequest.findFirst({
       where: {
         id,

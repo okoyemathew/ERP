@@ -273,10 +273,10 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               sku: item.sku ?? item.barcode ?? item.productId.slice(0, 8),
               barcode: item.barcode,
               category: "Supplied Products",
-              price: unitValue,
+              price: moneyValue(item.sellingPrice),
               cost: unitValue,
               stock: item.quantityInHand,
-              floorPrice: unitValue,
+              floorPrice: item.baseSellingPrice == null ? Number.POSITIVE_INFINITY : moneyValue(item.baseSellingPrice),
               iconColor: productIconColor(name),
             };
           }),
@@ -438,7 +438,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const productPriceInput = (product: ProductTile) => prices[product.id] ?? "";
   const minimumSellingPrice = (product: ProductTile) =>
-    Math.max(0, Number(product.price || 0));
+    Math.max(0, Number(product.floorPrice ?? product.price ?? 0));
 
   const parsePositiveMoney = (value: string) => {
     const trimmed = value.trim();
@@ -460,7 +460,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       "Selling price",
       reason === "missing"
         ? "Enter the selling price before adding this product."
-        : "Selling price cannot be below the owner-set selling price.",
+        : "Selling price cannot be below the owner-set base price.",
     );
   };
 
@@ -823,6 +823,14 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const handleSavePendingSale = async () => {
     if (cartItems.length === 0) return;
+    if (cartItems.some((item) => {
+      const product = productTiles.find((entry) => entry.id === item.productId);
+      const net = item.qty * item.price - distributeAmount(discountAmount, item.qty * item.price);
+      return !product || Math.round(net * 100) < Math.round(minimumSellingPrice(product) * item.qty * 100);
+    })) {
+      Alert.alert("Check selling price", "Each product must sell at or above its base price after discount. Refresh products if pricing is unavailable.");
+      return;
+    }
     if (Number.isNaN(discountAmount) || Number.isNaN(taxAmount)) {
       Alert.alert("Check amounts", "Discount and tax must be valid numbers.");
       return;
@@ -894,6 +902,14 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
   const handleCheckout = async () => {
     if (cartItems.length === 0) return;
+    if (cartItems.some((item) => {
+      const product = productTiles.find((entry) => entry.id === item.productId);
+      const net = item.qty * item.price - distributeAmount(discountAmount, item.qty * item.price);
+      return !product || Math.round(net * 100) < Math.round(minimumSellingPrice(product) * item.qty * 100);
+    })) {
+      Alert.alert("Check selling price", "Each product must sell at or above its base price after discount. Refresh products if pricing is unavailable.");
+      return;
+    }
     if (
       Number.isNaN(discountAmount) ||
       Number.isNaN(taxAmount) ||

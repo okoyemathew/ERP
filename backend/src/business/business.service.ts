@@ -1,3 +1,4 @@
+import { saleCollections, collectionsBySale } from '../sales/sale-collections';
 import {
   ForbiddenException,
   Injectable,
@@ -69,8 +70,11 @@ export class BusinessService {
     user: AuthenticatedUser,
   ) {
     await this.ensureBusinessAccess(id, user);
-    const { currency: requestedCurrency, timezone, ...businessData } =
-      updateBusinessDto;
+    const {
+      currency: requestedCurrency,
+      timezone,
+      ...businessData
+    } = updateBusinessDto;
     const currency = assertSupportedCurrency(requestedCurrency);
 
     const business = await this.prisma.$transaction(async (tx) => {
@@ -208,6 +212,12 @@ export class BusinessService {
     const todayEnd = new Date(todayStart);
     todayEnd.setHours(23, 59, 59, 999);
 
+    const collections = await saleCollections(
+      this.prisma,
+      { businessId: id },
+      { startDate: todayStart, endDate: todayEnd },
+    );
+    const collectedBySale = collectionsBySale(collections);
     const [
       salesToday,
       totalSales,
@@ -218,7 +228,7 @@ export class BusinessService {
       creditBalance,
       todayCostRows,
       recentSales,
-      employeeSales,
+      employeeCollectionSales,
     ] = await Promise.all([
       this.prisma.sale.aggregate({
         where: {
@@ -242,6 +252,8 @@ export class BusinessService {
       this.prisma.payment.aggregate({
         where: {
           businessId: id,
+          paymentMethod: { not: 'CREDIT' },
+          sale: { status: 'COMPLETED', deletedAt: null },
           paymentDate: { gte: todayStart, lte: todayEnd },
         },
         _sum: { amount: true },
@@ -250,7 +262,7 @@ export class BusinessService {
         where: {
           paymentDate: { gte: todayStart, lte: todayEnd },
           creditSale: {
-            sale: { businessId: id },
+            sale: { businessId: id, status: 'COMPLETED', deletedAt: null },
           },
         },
         _sum: { amount: true },
@@ -287,7 +299,12 @@ export class BusinessService {
             AND s."saleDate" <= ${todayEnd}
         `,
       this.prisma.sale.findMany({
-        where: { businessId: id, status: 'COMPLETED', deletedAt: null },
+        where: {
+          businessId: id,
+          status: 'COMPLETED',
+          deletedAt: null,
+          id: { in: [...collectedBySale.keys()] },
+        },
         include: {
           customer: true,
           items: { select: { id: true } },
@@ -303,17 +320,9 @@ export class BusinessService {
         orderBy: { saleDate: 'desc' },
         take: 20,
       }),
-      this.prisma.sale.groupBy({
-        by: ['userId'],
-        where: {
-          businessId: id,
-          status: 'COMPLETED',
-          saleDate: { gte: todayStart, lte: todayEnd },
-        },
-        _count: { _all: true },
-        _sum: { totalAmount: true },
-        orderBy: { _sum: { totalAmount: 'desc' } },
-        take: 5,
+      this.prisma.sale.findMany({
+        where: { businessId: id, id: { in: [...collectedBySale.keys()] } },
+        select: { id: true, userId: true },
       }),
     ]);
 
@@ -344,6 +353,29 @@ export class BusinessService {
       this.prisma.user.count({ where: { businessId: id, status: 'ACTIVE' } }),
     ]);
 
+    const employeeTotals = new Map<
+      string,
+      {
+        userId: string;
+        _count: { _all: number };
+        _sum: { totalAmount: Prisma.Decimal };
+      }
+    >();
+    for (const sale of employeeCollectionSales) {
+      const current = employeeTotals.get(sale.userId);
+      employeeTotals.set(sale.userId, {
+        userId: sale.userId,
+        _count: { _all: (current?._count._all ?? 0) + 1 },
+        _sum: {
+          totalAmount: (current?._sum.totalAmount ?? new Prisma.Decimal(0)).add(
+            collectedBySale.get(sale.id)!.collectedAmount,
+          ),
+        },
+      });
+    }
+    const employeeSales = [...employeeTotals.values()]
+      .sort((a, b) => b._sum.totalAmount.comparedTo(a._sum.totalAmount))
+      .slice(0, 5);
     const employeeUsers = employeeSales.length
       ? await this.prisma.user.findMany({
           where: { id: { in: employeeSales.map((row) => row.userId) } },
@@ -363,8 +395,13 @@ export class BusinessService {
       .sub(todayExpenseTotal);
 
     return {
-      totalSalesToday: salesToday._count ?? 0,
-      totalRevenueToday: Number(salesToday._sum.totalAmount ?? 0),
+      totalSalesToday: collectionsBySale(collections).size,
+      totalRevenueToday: Number(
+        collections.reduce(
+          (sum, row) => sum.add(row.amount),
+          new Prisma.Decimal(0),
+        ),
+      ),
       totalPaymentsToday: Number(
         new Prisma.Decimal(paymentsToday._sum.amount ?? 0).add(
           creditPaymentsToday._sum.amount ?? 0,
@@ -387,7 +424,7 @@ export class BusinessService {
       recentSales: recentSales.map((sale) => ({
         id: sale.id,
         saleNumber: sale.saleNumber,
-        saleDate: sale.saleDate,
+        saleDate: collectedBySale.get(sale.id)!.collectionDate,
         customerName: sale.customer
           ? sale.customer.companyName ||
             [sale.customer.firstName, sale.customer.lastName]
@@ -395,7 +432,7 @@ export class BusinessService {
               .join(' ')
           : 'Walk-in Customer',
         itemCount: sale.items.length,
-        totalAmount: Number(sale.totalAmount),
+        totalAmount: Number(collectedBySale.get(sale.id)!.collectedAmount),
         employee: {
           id: sale.user.id,
           name: `${sale.user.firstName} ${sale.user.lastName}`.trim(),
@@ -426,31 +463,14 @@ export class BusinessService {
     startDate.setDate(endDate.getDate() - 6);
     startDate.setHours(0, 0, 0, 0);
 
-    const [sales, payments, expenses] = await Promise.all([
-      this.prisma.sale.findMany({
-        where: {
-          businessId: id,
-          status: 'COMPLETED',
-          saleDate: { gte: startDate, lte: endDate },
-        },
-        select: { saleDate: true, totalAmount: true },
-      }),
-      this.prisma.payment.findMany({
-        where: {
-          businessId: id,
-          paymentDate: { gte: startDate, lte: endDate },
-        },
-        select: { paymentDate: true, amount: true },
-      }),
-      this.prisma.expense.findMany({
-        where: {
-          businessId: id,
-          deletedAt: null,
-          expenseDate: { gte: startDate, lte: endDate },
-        },
-        select: { expenseDate: true, amount: true },
-      }),
-    ]);
+    const expenses = await this.prisma.expense.findMany({
+      where: {
+        businessId: id,
+        deletedAt: null,
+        expenseDate: { gte: startDate, lte: endDate },
+      },
+      select: { expenseDate: true, amount: true },
+    });
 
     const salesByDate = new Map<
       string,
@@ -461,15 +481,24 @@ export class BusinessService {
 
     const formatDate = (date: Date) => date.toISOString().slice(0, 10);
 
-    sales.forEach((sale) => {
-      const key = formatDate(sale.saleDate);
+    const collections = await saleCollections(
+      this.prisma,
+      { businessId: id },
+      { startDate, endDate },
+    );
+    const dailySales = new Map<string, Set<string>>();
+    collections.forEach((sale) => {
+      const key = formatDate(sale.paymentDate);
       const existing = salesByDate.get(key) ?? { revenue: 0, salesCount: 0 };
-      existing.revenue += Number(sale.totalAmount);
-      existing.salesCount += 1;
+      existing.revenue += Number(sale.amount);
+      const ids = dailySales.get(key) ?? new Set<string>();
+      ids.add(sale.saleId);
+      dailySales.set(key, ids);
+      existing.salesCount = ids.size;
       salesByDate.set(key, existing);
     });
 
-    payments.forEach((payment) => {
+    collections.forEach((payment) => {
       const key = formatDate(payment.paymentDate);
       paymentsByDate.set(
         key,
@@ -651,8 +680,7 @@ export class BusinessService {
           allowNegativeStock: updateBusinessSettingsDto.allowNegativeStock,
           allowCreditSales: updateBusinessSettingsDto.allowCreditSales,
           enableOfflineMode: updateBusinessSettingsDto.enableOfflineMode,
-          autoOpenCashRegister:
-            updateBusinessSettingsDto.autoOpenCashRegister,
+          autoOpenCashRegister: updateBusinessSettingsDto.autoOpenCashRegister,
         },
         create: {
           businessId: id,
@@ -662,7 +690,8 @@ export class BusinessService {
           allowNegativeStock:
             updateBusinessSettingsDto.allowNegativeStock ?? false,
           allowCreditSales: updateBusinessSettingsDto.allowCreditSales ?? true,
-          enableOfflineMode: updateBusinessSettingsDto.enableOfflineMode ?? true,
+          enableOfflineMode:
+            updateBusinessSettingsDto.enableOfflineMode ?? true,
           autoOpenCashRegister:
             updateBusinessSettingsDto.autoOpenCashRegister ?? true,
         },

@@ -164,6 +164,7 @@ function pendingReturn(
 
 function createPrismaMock() {
   const prisma: any = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
       callback(prisma),
     ),
@@ -189,6 +190,7 @@ function createPrismaMock() {
       })),
     },
     saleItem: {
+      findMany: jest.fn().mockResolvedValue([{ quantity: 5, productReturnRequests: [{ quantity: 2 }] }]),
       findFirst: jest.fn(),
     },
     productReturnRequest: {
@@ -411,7 +413,7 @@ describe('InventoryService product returns', () => {
     );
     expect(prisma.sale.update).toHaveBeenCalledWith({
       where: { id: saleId },
-      data: { status: SaleStatus.REFUNDED },
+      data: { status: SaleStatus.COMPLETED },
     });
   });
 
@@ -461,7 +463,7 @@ describe('InventoryService product returns', () => {
     );
   });
 
-  it('approves an owner-sold return back into main owner inventory', async () => {
+  it('approves an owner-sold return without changing warehouse inventory', async () => {
     const { service, prisma, inventoryTransactionService } = createService();
     prisma.productReturnRequest.findFirst.mockResolvedValue(
       pendingReturn('Owner'),
@@ -474,23 +476,11 @@ describe('InventoryService product returns', () => {
       owner,
     );
 
-    expect(prisma.inventory.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          quantityOnHand: 12,
-          quantityAvailable: 12,
-        }),
-      }),
-    );
-    expect(inventoryTransactionService.createTransaction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        transactionType: InventoryTransactionType.RETURN,
-        quantity: 2,
-        quantityBefore: 10,
-        quantityAfter: 12,
-      }),
-      prisma,
-    );
+    expect(prisma.inventory.update).not.toHaveBeenCalled();
+    expect(inventoryTransactionService.createTransaction).not.toHaveBeenCalled();
+    expect(prisma.productReturnRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: ProductReturnRequestStatus.APPROVED, inventoryTransactionId: null }),
+    }));
   });
 
   it('adjusts credit balance without deleting payment history when approved', async () => {

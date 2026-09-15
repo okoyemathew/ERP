@@ -57,7 +57,8 @@ function createPrismaMock() {
   const prisma: any = {
     employee: { findFirst: jest.fn() },
     sale: { count: jest.fn(), aggregate: jest.fn() },
-    payment: { count: jest.fn() },
+    creditPayment: { findMany: jest.fn().mockResolvedValue([]) },
+    payment: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn() },
     expense: { count: jest.fn() },
     userSession: { findMany: jest.fn() },
     saleItem: { findMany: jest.fn() },
@@ -103,6 +104,8 @@ describe('EmployeeService profile stock', () => {
               sku: 'SALT-6',
               barcode: null,
               sellingPrice: new Prisma.Decimal(80),
+              purchasePrice: new Prisma.Decimal(50),
+              baseSellingPrice: new Prisma.Decimal(60),
               isActive: true,
             },
             createdAt: new Date('2026-09-09T10:00:00.000Z'),
@@ -124,6 +127,8 @@ describe('EmployeeService profile stock', () => {
           sku: 'SALT-6',
           barcode: null,
           sellingPrice: new Prisma.Decimal(80),
+          purchasePrice: new Prisma.Decimal(50),
+          baseSellingPrice: new Prisma.Decimal(60),
           inventory: { quantityOnHand: 0, quantityAvailable: 0 },
         },
       },
@@ -177,6 +182,8 @@ describe('EmployeeService profile stock', () => {
             sku: 'SALT-6',
             barcode: null,
             sellingPrice: new Prisma.Decimal(80),
+            purchasePrice: new Prisma.Decimal(50),
+            baseSellingPrice: new Prisma.Decimal(60),
             isActive: true,
           },
           createdAt: new Date(2026, 8, 9, 10, index),
@@ -201,8 +208,8 @@ describe('EmployeeService profile stock', () => {
     const response = await service.getProfile(businessId, employeeId);
 
     expect(response.profileActivity?.stats.totalSupplied).toBe(101);
-    expect(String(response.profileActivity?.stats.stockValue)).toBe('8080');
-    expect(String(response.profileActivity?.supplies.summary.totalSuppliedValue)).toBe('8080');
+    expect(String(response.profileActivity?.stats.stockValue)).toBe('5050');
+    expect(String(response.profileActivity?.supplies.summary.totalSuppliedValue)).toBe('5050');
     expect(response.profileActivity?.supplies.summary.totalSupplyRuns).toBe(101);
     expect(response.profileActivity?.supplies.data).toHaveLength(100);
     expect(response.profileActivity?.stock[0]).toEqual(
@@ -232,6 +239,8 @@ describe('EmployeeService profile stock', () => {
           sku: `SKU-${index + 1}`,
           barcode: null,
           sellingPrice: new Prisma.Decimal(100 + index),
+          purchasePrice: new Prisma.Decimal(50),
+          baseSellingPrice: new Prisma.Decimal(60),
           isActive: true,
         },
         createdAt: new Date(2026, 8, 9, 10, index),

@@ -235,10 +235,30 @@ export class InventoryController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     this.assertBusinessAccess(businessId, user);
-    return this.inventoryService.rejectReturnRequest(
+    return this.inventoryService.rejectReturnRequest(businessId, id, dto, user);
+  }
+
+  @Get('return-availability/:saleItemId')
+  @Roles(
+    SYSTEM_ROLES.OWNER,
+    SYSTEM_ROLES.ADMIN,
+    SYSTEM_ROLES.MANAGER,
+    SYSTEM_ROLES.INVENTORY_OFFICER,
+    SYSTEM_ROLES.SALESPERSON,
+    SYSTEM_ROLES.CASHIER,
+  )
+  @ApiOperation({
+    summary: 'Get remaining returnable quantity for a sale item',
+  })
+  returnAvailability(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @Param('saleItemId', ParseUUIDPipe) saleItemId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    this.assertBusinessAccess(businessId, user);
+    return this.inventoryService.returnAvailability(
       businessId,
-      id,
-      dto,
+      saleItemId,
       user,
     );
   }
@@ -403,10 +423,7 @@ export class InventoryController {
 
   @Post('return')
   @Permissions('inventory.manage')
-  @Roles(
-    SYSTEM_ROLES.OWNER,
-    SYSTEM_ROLES.ADMIN,
-  )
+  @Roles(SYSTEM_ROLES.OWNER, SYSTEM_ROLES.ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Record stock return directly as owner/admin' })
   stockReturn(

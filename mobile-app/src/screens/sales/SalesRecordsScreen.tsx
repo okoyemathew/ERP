@@ -78,6 +78,7 @@ export function SalesRecordsScreen() {
   const [selectedSale, setSelectedSale] = useState<ApiSale | null>(null);
   const [returnItem, setReturnItem] = useState<SaleLineItem | null>(null);
   const [returnQuantity, setReturnQuantity] = useState("1");
+  const [returnAvailability, setReturnAvailability] = useState<Awaited<ReturnType<typeof productsService.returnAvailability>> | null>(null);
   const [returnRemarks, setReturnRemarks] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
@@ -98,7 +99,7 @@ export function SalesRecordsScreen() {
       const search = query.trim();
       if (search) params.search = search;
       if (filter === "Today") {
-        Object.assign(params, todaySaleRange());
+        Object.assign(params, todaySaleRange(), { basis: "collections", status: "COMPLETED" });
       }
       if (filter === "Refunded") {
         const [salesResponse, returnsResponse] = await Promise.all([
@@ -237,11 +238,22 @@ export function SalesRecordsScreen() {
     }
   };
 
-  const openReturnForm = (item: SaleLineItem) => {
-    if (selectedSale?.status === "PENDING" || selectedSale?.localSyncStatus) return;
-    setReturnItem(item);
-    setReturnQuantity(item.quantity > 0 ? "1" : "0");
-    setReturnRemarks("");
+  const openReturnForm = async (item: SaleLineItem) => {
+    if (returnSubmitting || selectedSale?.status === "PENDING" || selectedSale?.localSyncStatus) return;
+    setReturnAvailability(null);
+    try {
+      const available = await productsService.returnAvailability(item.id);
+      if (available.quantityAvailable <= 0) {
+        Alert.alert("No quantity available", "All units have already been returned or are awaiting approval.");
+        return;
+      }
+      setReturnAvailability(available);
+      setReturnItem(item);
+      setReturnQuantity("1");
+      setReturnRemarks("");
+    } catch (error) {
+      Alert.alert("Unable to load return", error instanceof Error ? error.message : "Connect to the internet to check the remaining quantity.");
+    }
   };
 
   const completePendingSale = async () => {
@@ -324,14 +336,14 @@ export function SalesRecordsScreen() {
   const submitReturnRequest = async () => {
     if (!selectedSale || !returnItem || returnSubmitting) return;
 
-    const quantity = Number.parseInt(returnQuantity, 10);
-    if (!Number.isFinite(quantity) || quantity < 1) {
+    const quantity = Number(returnQuantity.trim());
+    if (!/^\d+$/.test(returnQuantity.trim()) || !Number.isSafeInteger(quantity) || quantity < 1) {
       Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
       return;
     }
 
-    if (quantity > returnItem.quantity) {
-      Alert.alert("Invalid quantity", `This sale only has ${returnItem.quantity} unit(s) of ${returnItem.product.name}.`);
+    if (!returnAvailability || quantity > returnAvailability.quantityAvailable) {
+      Alert.alert("Invalid quantity", `Only ${returnAvailability?.quantityAvailable ?? 0} unit(s) of ${returnItem.product.name} remain available to return.`);
       return;
     }
 
@@ -341,7 +353,6 @@ export function SalesRecordsScreen() {
         productId: returnItem.productId,
         saleItemId: returnItem.id,
         quantity,
-        unitCost: Number(returnItem.unitPrice),
         referenceNumber: selectedSale.saleNumber,
         remarks: returnRemarks.trim() || `Customer return from sale ${selectedSale.saleNumber}`
       });
@@ -349,10 +360,12 @@ export function SalesRecordsScreen() {
       setReturnItem(null);
       setReturnQuantity("1");
       setReturnRemarks("");
-      Alert.alert("Return submitted", `${productName} is now waiting for owner approval.`);
+      dashboardEvents.notifySaleChanged();
+      Alert.alert("Return submitted", `${quantity} unit(s) of ${productName} are now waiting for owner approval.`);
     } catch (returnError) {
       const message = returnError instanceof Error ? returnError.message : "Unable to submit return request.";
       Alert.alert("Return failed", message);
+      try { setReturnAvailability(await productsService.returnAvailability(returnItem.id)); } catch { setReturnAvailability(null); }
     } finally {
       setReturnSubmitting(false);
     }
@@ -399,13 +412,13 @@ export function SalesRecordsScreen() {
                 <Text style={styles.meta}>{item.saleNumber} | {item.items.length} items</Text>
                 <View style={styles.row}>
                   <Clock size={12} color={colors.textPlaceholder} />
-                  <Text style={styles.meta}>{compactDate(item.saleDate)}</Text>
+                  <Text style={styles.meta}>{compactDate(item.collectionDate ?? item.saleDate)}</Text>
                   <CreditCard size={12} color={colors.textPlaceholder} />
                   <Text style={styles.meta}>{paymentMethod(item)}</Text>
                 </View>
               </View>
               <View style={styles.right}>
-                <Text style={styles.amount}>{formatCurrency(Number(item.totalAmount))}</Text>
+                <Text style={styles.amount}>{formatCurrency(Number(item.collectedAmount ?? item.totalAmount))}</Text>
                 <Badge label={item.status} variant={statusVariant(item.status)} />
               </View>
             </Card>
@@ -575,6 +588,10 @@ export function SalesRecordsScreen() {
                 <X size={16} color={colors.textMuted} />
               </Pressable>
             </View>
+            <Text style={styles.meta}>Quantity Sold: {returnAvailability?.quantitySold ?? returnItem?.quantity ?? 0}</Text>
+            <Text style={styles.meta}>Quantity Already Returned: {returnAvailability?.quantityReturned ?? 0}</Text>
+            <Text style={styles.meta}>Quantity Pending Approval: {returnAvailability?.quantityPending ?? 0}</Text>
+            <Text style={styles.meta}>Quantity Available to Return: {returnAvailability?.quantityAvailable ?? 0}</Text>
             <TextInput
               value={returnQuantity}
               onChangeText={setReturnQuantity}

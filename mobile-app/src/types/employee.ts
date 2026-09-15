@@ -73,6 +73,8 @@ export interface EmployeeProfileResponse {
       quantitySold: number;
       suppliedQuantity: number;
       unitValue: string | number;
+      sellingPrice?: string | number;
+      baseSellingPrice?: string | number;
       totalSoldValue: string | number;
       lastActivityAt: string;
     }>;

@@ -32,6 +32,9 @@ export interface CreateSalePayload {
 }
 
 export interface ApiSale {
+  collectedAmount?: string | number;
+  collectionDate?: string;
+  collectionPayments?: Array<{ amount: string | number; paymentDate: string }>;
   id: string;
   localSyncStatus?: "PENDING" | "SYNCING" | "FAILED" | "SYNCED";
   saleNumber: string;

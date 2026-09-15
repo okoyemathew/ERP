@@ -86,16 +86,21 @@ export function ReportsScreen() {
 
   const buildExportText = () => {
     const paymentBreakdown = salesReport?.paymentBreakdown as Array<{ paymentMethod?: string; totalAmount?: string | number }> | undefined;
-    const salesRows = salesReport?.data as Array<Record<string, unknown>> | undefined;
+    const invoiceSummary = (salesReport?.invoiceSummary ?? summary) as Record<string, unknown>;
+    const salesRows = salesReport?.invoiceData as Array<Record<string, unknown>> | undefined;
     const lines = [
       businessName ?? "Business",
       `${period.toUpperCase()} REPORT`,
       `Generated: ${new Date().toLocaleString()}`,
       "",
       "SUMMARY",
-      `Revenue: ${formatCurrency(numberValue(summary.totalSales))}`,
+      `Payments received in period: ${formatCurrency(numberValue(summary.totalSales))}`,
+      `Full sales including credit: ${formatCurrency(numberValue(invoiceSummary.totalSales))}`,
+      `Collected against these invoices: ${formatCurrency(numberValue(invoiceSummary.amountPaid))}`,
+      `Outstanding on these invoices: ${formatCurrency(numberValue(invoiceSummary.outstandingAmount))}`,
       `Profit: ${formatCurrency(numberValue(profitSummary.netProfit))}`,
-      `Orders: ${numberValue(summary.transactionCount)}`,
+      `Invoices including credit: ${numberValue(invoiceSummary.transactionCount)}`,
+      `Invoices with payments received: ${numberValue(summary.transactionCount)}`,
       `Expenses: ${formatCurrency(numberValue(expenseSummary.totalExpenses))}`,
       "",
       "SALES BY PAYMENT",
@@ -110,9 +115,9 @@ export function ReportsScreen() {
       "",
       "REPORT DATA",
       ...(salesRows?.length
-        ? salesRows.slice(0, 20).map((row, index) => {
-            const label = String(row.saleNumber ?? row.period ?? row.date ?? `Row ${index + 1}`);
-            const amount = numberValue(row.totalAmount ?? row.revenue ?? row.amount);
+        ? salesRows.map((row, index) => {
+            const label = String(row.saleNumber ?? row.periodStart ?? row.period ?? row.date ?? `Row ${index + 1}`);
+            const amount = numberValue(row.totalSales ?? row.totalAmount ?? row.revenue ?? row.amount);
             return `${label}: ${formatCurrency(amount)}`;
           })
         : ["No detailed rows found"])
@@ -159,7 +164,7 @@ export function ReportsScreen() {
         ))}
       </View>
       <View style={styles.grid}>
-        <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(summary.totalSales))}</Text><Text style={styles.label}>Revenue</Text></Card>
+        <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(summary.totalSales))}</Text><Text style={styles.label}>Payments Received</Text></Card>
         <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(profitSummary.netProfit))}</Text><Text style={styles.label}>Profit</Text></Card>
         <Card style={styles.stat}><Text style={styles.value}>{numberValue(summary.transactionCount)}</Text><Text style={styles.label}>Orders</Text></Card>
         <Card style={styles.stat}><Text style={styles.value}>{formatCurrency(numberValue(expenseSummary.totalExpenses))}</Text><Text style={styles.label}>Expenses</Text></Card>

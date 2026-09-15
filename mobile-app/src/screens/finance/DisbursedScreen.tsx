@@ -36,7 +36,7 @@ function disbursementEmployeeName(disbursement: ApiGoodsDisbursement) {
 }
 
 function itemUnitPrice(item: ApiGoodsDisbursementItem) {
-  return Number(item.product?.sellingPrice ?? 0);
+  return Number(item.product?.purchasePrice ?? 0);
 }
 
 function visibleQuantity(item: ApiGoodsDisbursementItem, quantities: Record<string, string>) {

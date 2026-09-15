@@ -13,6 +13,11 @@ import {
 } from 'class-validator';
 
 export class EmployeeActivityQueryDto {
+  @ApiPropertyOptional({ enum: ['invoices', 'collections'] })
+  @IsOptional()
+  @IsIn(['invoices', 'collections'])
+  basis?: 'invoices' | 'collections';
+
   @ApiPropertyOptional({ description: 'Page number', default: 1 })
   @IsOptional()
   @Type(() => Number)

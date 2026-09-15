@@ -112,7 +112,7 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   }, [load, query]);
 
   const stats = useMemo(() => {
-    const totalValue = products.reduce((sum, product) => sum + Number(product.sellingPrice) * (product.inventory?.quantityAvailable ?? 0), 0);
+    const totalValue = products.reduce((sum, product) => sum + Number(product.purchasePrice) * (product.inventory?.quantityAvailable ?? 0), 0);
     const totalUnits = products.reduce((sum, product) => sum + (product.inventory?.quantityAvailable ?? 0), 0);
     const lowStock = products.filter((p) => (p.inventory?.quantityAvailable ?? 0) > 0 && (p.inventory?.quantityAvailable ?? 0) <= p.minimumStock).length;
     const outOfStock = products.filter((p) => (p.inventory?.quantityAvailable ?? 0) === 0).length;

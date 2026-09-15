@@ -1,3 +1,4 @@
+import { saleCollections, collectionsBySale } from '../sales/sale-collections';
 import {
   BadRequestException,
   ForbiddenException,
@@ -498,7 +499,11 @@ export class EmployeeService {
       throw new NotFoundException('Employee not found');
     }
 
-    this.assertOwnerCanManageEmployee(current, actor, 'update login access for');
+    this.assertOwnerCanManageEmployee(
+      current,
+      actor,
+      'update login access for',
+    );
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
@@ -595,10 +600,12 @@ export class EmployeeService {
         create: {
           businessId,
           name: roleName,
-          description: `Custom permissions for ${current.firstName} ${current.lastName}`.trim(),
+          description:
+            `Custom permissions for ${current.firstName} ${current.lastName}`.trim(),
         },
         update: {
-          description: `Custom permissions for ${current.firstName} ${current.lastName}`.trim(),
+          description:
+            `Custom permissions for ${current.firstName} ${current.lastName}`.trim(),
         },
       });
 
@@ -719,31 +726,36 @@ export class EmployeeService {
   async getProfile(businessId: string, id: string) {
     const employee = await this.findOne(businessId, id);
     const userId = employee.userId;
-    const [salesCount, paymentsCount, expensesCount, sessions, profileActivity] =
-      await Promise.all([
-        this.prisma.sale.count({
-          where: { businessId, userId, deletedAt: null },
-        }),
-        this.prisma.payment.count({ where: { businessId, userId } }),
-        this.prisma.expense.count({ where: { businessId, userId } }),
-        this.prisma.userSession.findMany({
-          where: { userId },
-          select: {
-            id: true,
-            deviceName: true,
-            deviceId: true,
-            deviceType: true,
-            ipAddress: true,
-            status: true,
-            expiresAt: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-        }),
-        this.getEmployeeProfileActivity(businessId, employee),
-      ]);
+    const [
+      salesCount,
+      paymentsCount,
+      expensesCount,
+      sessions,
+      profileActivity,
+    ] = await Promise.all([
+      this.prisma.sale.count({
+        where: { businessId, userId, deletedAt: null },
+      }),
+      this.prisma.payment.count({ where: { businessId, userId } }),
+      this.prisma.expense.count({ where: { businessId, userId } }),
+      this.prisma.userSession.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          deviceName: true,
+          deviceId: true,
+          deviceType: true,
+          ipAddress: true,
+          status: true,
+          expiresAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+      this.getEmployeeProfileActivity(businessId, employee),
+    ]);
 
     return {
       employee,
@@ -770,7 +782,65 @@ export class EmployeeService {
     const limit = query.limit ?? 20;
     const sortBy = query.sortBy === 'totalAmount' ? 'totalAmount' : 'saleDate';
     const sortOrder = query.sortOrder ?? 'desc';
-    const where = this.buildEmployeeSalesWhere(businessId, employee.userId, query);
+    const where = this.buildEmployeeSalesWhere(
+      businessId,
+      employee.userId,
+      query.basis === 'collections'
+        ? {
+            ...query,
+            startDate: undefined,
+            endDate: undefined,
+            paymentMethod: undefined,
+          }
+        : query,
+    );
+    if (query.basis === 'collections') {
+      const collected = collectionsBySale(
+        await saleCollections(this.prisma, where, query, query.paymentMethod),
+      );
+      const ordered = [...collected].sort(
+        (a, b) =>
+          (a[1].collectionDate.getTime() - b[1].collectionDate.getTime()) *
+          (sortOrder === 'asc' ? 1 : -1),
+      );
+      const ids = ordered
+        .slice((page - 1) * limit, page * limit)
+        .map(([id]) => id);
+      const sales = await this.prisma.sale.findMany({
+        where: { AND: [where, { id: { in: ids } }] },
+        include: this.employeeSaleInclude(),
+      });
+      const byId = new Map(sales.map((sale) => [sale.id, sale]));
+      const total = [...collected.values()].reduce(
+        (sum, row) => sum.add(row.collectedAmount),
+        new Prisma.Decimal(0),
+      );
+      return {
+        employee: this.basicEmployee(employee),
+        summary: {
+          transactions: collected.size,
+          completedSalesCount: collected.size,
+          totalSalesValue: total,
+          totalCollected: total,
+          totalBalanceDue: new Prisma.Decimal(0),
+          averageSaleValue: collected.size
+            ? total.div(collected.size)
+            : new Prisma.Decimal(0),
+        },
+        data: ids.flatMap((id) => {
+          const sale = byId.get(id);
+          return sale
+            ? [{ ...this.formatEmployeeSale(sale), ...collected.get(id) }]
+            : [];
+        }),
+        meta: {
+          page,
+          limit,
+          total: collected.size,
+          totalPages: Math.ceil(collected.size / limit),
+        },
+      };
+    }
     const completedWhere = {
       ...where,
       status: SaleStatus.COMPLETED,
@@ -818,108 +888,121 @@ export class EmployeeService {
     const endOfToday = new Date(startOfToday);
     endOfToday.setDate(endOfToday.getDate() + 1);
 
-    const [soldItems, disbursements, returnedItems, salesTodayCount, salesTodayValue] =
-      await Promise.all([
-        this.prisma.saleItem.findMany({
-          where: {
-            sale: {
-              businessId,
-              userId,
-              deletedAt: null,
-              status: SaleStatus.COMPLETED,
-            },
-            product: {
-              businessId,
-              isActive: true,
-            },
+    const [
+      soldItems,
+      disbursements,
+      returnedItems,
+      salesTodayCount,
+      salesTodayValue,
+    ] = await Promise.all([
+      this.prisma.saleItem.findMany({
+        where: {
+          sale: {
+            businessId,
+            userId,
+            deletedAt: null,
+            status: { in: [SaleStatus.COMPLETED, SaleStatus.REFUNDED] },
           },
-          include: {
-            sale: { select: { saleDate: true } },
-            product: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                barcode: true,
-                sellingPrice: true,
-                inventory: {
-                  select: {
-                    quantityOnHand: true,
-                    quantityAvailable: true,
-                  },
+          product: {
+            businessId,
+            isActive: true,
+          },
+        },
+        include: {
+          sale: { select: { saleDate: true } },
+          product: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              barcode: true,
+              sellingPrice: true,
+
+              purchasePrice: true,
+
+              baseSellingPrice: true,
+              inventory: {
+                select: {
+                  quantityOnHand: true,
+                  quantityAvailable: true,
                 },
               },
             },
           },
-          orderBy: { createdAt: 'desc' },
-        }),
-        this.prisma.goodsDisbursement.findMany({
-          where: {
-            businessId,
-            employeeId: employee.id,
-          },
-          include: {
-            items: {
-              include: {
-                product: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    barcode: true,
-                    sellingPrice: true,
-                    isActive: true,
-                  },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.goodsDisbursement.findMany({
+        where: {
+          businessId,
+          employeeId: employee.id,
+        },
+        include: {
+          items: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  barcode: true,
+                  sellingPrice: true,
+                  purchasePrice: true,
+                  baseSellingPrice: true,
+                  isActive: true,
                 },
               },
             },
           },
-          orderBy: { disbursementDate: 'desc' },
-        }),
-        this.prisma.productReturnRequest.findMany({
-          where: {
+        },
+        orderBy: { disbursementDate: 'desc' },
+      }),
+      this.prisma.productReturnRequest.findMany({
+        where: {
+          businessId,
+          originalSellerId: userId,
+          status: ProductReturnRequestStatus.APPROVED,
+          product: {
             businessId,
-            originalSellerId: userId,
-            status: ProductReturnRequestStatus.APPROVED,
-            product: {
-              businessId,
+            isActive: true,
+          },
+        },
+        include: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              barcode: true,
+              sellingPrice: true,
+              purchasePrice: true,
+              baseSellingPrice: true,
               isActive: true,
             },
           },
-          include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                barcode: true,
-                sellingPrice: true,
-                isActive: true,
-              },
-            },
-          },
-          orderBy: { reviewedAt: 'desc' },
-        }),
-        this.prisma.sale.count({
-          where: {
-            businessId,
-            userId,
-            deletedAt: null,
-            status: SaleStatus.COMPLETED,
-            saleDate: { gte: startOfToday, lt: endOfToday },
-          },
-        }),
-        this.prisma.sale.aggregate({
-          where: {
-            businessId,
-            userId,
-            deletedAt: null,
-            status: SaleStatus.COMPLETED,
-            saleDate: { gte: startOfToday, lt: endOfToday },
-          },
-          _sum: { totalAmount: true },
-        }),
-      ]);
+        },
+        orderBy: { reviewedAt: 'desc' },
+      }),
+      this.prisma.sale.count({
+        where: {
+          businessId,
+          userId,
+          deletedAt: null,
+          status: SaleStatus.COMPLETED,
+          saleDate: { gte: startOfToday, lt: endOfToday },
+        },
+      }),
+      this.prisma.sale.aggregate({
+        where: {
+          businessId,
+          userId,
+          deletedAt: null,
+          status: SaleStatus.COMPLETED,
+          saleDate: { gte: startOfToday, lt: endOfToday },
+        },
+        _sum: { totalAmount: true },
+      }),
+    ]);
 
     const suppliedByProduct = new Map<string, number>();
     const returnedByProduct = new Map<string, number>();
@@ -953,7 +1036,7 @@ export class EmployeeService {
 
           totalQuantity += item.quantity;
           totalValue = totalValue.add(
-            new Prisma.Decimal(item.product.sellingPrice).mul(item.quantity),
+            new Prisma.Decimal(item.product.purchasePrice).mul(item.quantity),
           );
           suppliedByProduct.set(
             item.productId,
@@ -980,7 +1063,7 @@ export class EmployeeService {
               sku: item.product.sku,
               barcode: item.product.barcode,
               quantity: item.quantity,
-              value: new Prisma.Decimal(item.product.sellingPrice).mul(
+              value: new Prisma.Decimal(item.product.purchasePrice).mul(
                 item.quantity,
               ),
             })),
@@ -1000,6 +1083,8 @@ export class EmployeeService {
         quantityReturned: number;
         suppliedQuantity: number;
         unitValue: Prisma.Decimal;
+        sellingPrice: Prisma.Decimal;
+        baseSellingPrice: Prisma.Decimal;
         totalSoldValue: Prisma.Decimal;
         lastActivityAt: Date;
       }
@@ -1012,7 +1097,7 @@ export class EmployeeService {
       }
 
       const existing = stockByProduct.get(item.productId);
-      const unitValue = new Prisma.Decimal(item.product.sellingPrice);
+      const unitValue = new Prisma.Decimal(item.product.purchasePrice);
       const totalSoldValue = new Prisma.Decimal(item.totalAmount);
       const lastActivityAt =
         !existing || item.sale.saleDate > existing.lastActivityAt
@@ -1027,9 +1112,13 @@ export class EmployeeService {
         quantityInHand: existing?.quantityInHand ?? 0,
         quantitySold: (existing?.quantitySold ?? 0) + item.quantity,
         quantityReturned:
-          existing?.quantityReturned ?? returnedByProduct.get(item.productId) ?? 0,
+          existing?.quantityReturned ??
+          returnedByProduct.get(item.productId) ??
+          0,
         suppliedQuantity: suppliedByProduct.get(item.productId) ?? 0,
         unitValue,
+        sellingPrice: item.product.sellingPrice,
+        baseSellingPrice: item.product.baseSellingPrice,
         totalSoldValue: (existing?.totalSoldValue ?? new Prisma.Decimal(0)).add(
           totalSoldValue,
         ),
@@ -1056,7 +1145,9 @@ export class EmployeeService {
         quantitySold: 0,
         quantityReturned: returnedByProduct.get(productId) ?? 0,
         suppliedQuantity: quantity,
-        unitValue: new Prisma.Decimal(suppliedItem.product.sellingPrice),
+        unitValue: new Prisma.Decimal(suppliedItem.product.purchasePrice),
+        sellingPrice: suppliedItem.product.sellingPrice,
+        baseSellingPrice: suppliedItem.product.baseSellingPrice,
         totalSoldValue: new Prisma.Decimal(0),
         lastActivityAt: suppliedItem.createdAt,
       });
@@ -1076,12 +1167,19 @@ export class EmployeeService {
         quantitySold: 0,
         quantityReturned: returnedByProduct.get(item.productId) ?? 0,
         suppliedQuantity: suppliedByProduct.get(item.productId) ?? 0,
-        unitValue: new Prisma.Decimal(item.product.sellingPrice),
+        unitValue: new Prisma.Decimal(item.product.purchasePrice),
+        sellingPrice: item.product.sellingPrice,
+        baseSellingPrice: item.product.baseSellingPrice,
         totalSoldValue: new Prisma.Decimal(0),
         lastActivityAt: item.reviewedAt ?? item.requestedAt,
       });
     }
 
+    const todayCollections = await saleCollections(
+      this.prisma,
+      { businessId, userId },
+      { startDate: startOfToday, endDate: new Date(endOfToday.getTime() - 1) },
+    );
     const stockItems = Array.from(stockByProduct.values())
       .map((item) => ({
         ...item,
@@ -1110,9 +1208,11 @@ export class EmployeeService {
         stockItems: stockItems.length,
         stockValue,
         totalSupplied: totalSuppliedQuantity,
-        salesToday: salesTodayCount,
-        salesTodayValue:
-          salesTodayValue._sum.totalAmount ?? new Prisma.Decimal(0),
+        salesToday: collectionsBySale(todayCollections).size,
+        salesTodayValue: todayCollections.reduce(
+          (sum, row) => sum.add(row.amount),
+          new Prisma.Decimal(0),
+        ),
       },
       stock: stockItems,
       supplies: {
@@ -1157,7 +1257,6 @@ export class EmployeeService {
         where,
         include: this.employeeSaleInclude(),
         orderBy: { saleDate: query.sortOrder ?? 'desc' },
-        take: 200,
       }),
     ]);
 
@@ -1174,6 +1273,14 @@ export class EmployeeService {
         ? `${query.startDate ? query.startDate.toISOString().slice(0, 10) : 'Beginning'} to ${query.endDate ? query.endDate.toISOString().slice(0, 10) : 'Now'}`
         : 'All dates';
     const total = aggregate._sum.totalAmount ?? new Prisma.Decimal(0);
+    const collected = formattedSales.reduce(
+      (sum, sale) => sum.add(sale.amountPaid),
+      new Prisma.Decimal(0),
+    );
+    const balance = formattedSales.reduce(
+      (sum, sale) => sum.add(sale.balanceDue),
+      new Prisma.Decimal(0),
+    );
     const lines = [
       business.name,
       business.address ?? null,
@@ -1185,8 +1292,8 @@ export class EmployeeService {
       `Period: ${period}`,
       `Sales Count: ${aggregate._count.id}`,
       `Total Sales: ${this.money(total, business.currency)}`,
-      `Total Collected: ${this.money(aggregate._sum.amountPaid ?? 0, business.currency)}`,
-      `Total Balance: ${this.money(aggregate._sum.balanceDue ?? 0, business.currency)}`,
+      `Total Collected: ${this.money(collected, business.currency)}`,
+      `Total Balance: ${this.money(balance, business.currency)}`,
       '',
       'Sales',
       ...formattedSales.map((sale) => {
@@ -1204,6 +1311,8 @@ export class EmployeeService {
           customer,
           primaryPayment,
           this.money(sale.totalAmount, business.currency),
+          `Collected: ${this.money(sale.amountPaid, business.currency)}`,
+          `Balance: ${this.money(sale.balanceDue, business.currency)}`,
         ].join(' | ');
       }),
     ]
@@ -1220,8 +1329,8 @@ export class EmployeeService {
         summary: {
           salesCount: aggregate._count.id,
           totalSalesValue: total,
-          totalCollected: aggregate._sum.amountPaid ?? new Prisma.Decimal(0),
-          totalBalanceDue: aggregate._sum.balanceDue ?? new Prisma.Decimal(0),
+          totalCollected: collected,
+          totalBalanceDue: balance,
         },
         sales: formattedSales,
       },
@@ -1465,12 +1574,19 @@ export class EmployeeService {
       throw new NotFoundException('Employee not found');
     }
 
-    if (actor && (current.id === actor.employeeId || current.userId === actor.id)) {
-      throw new ForbiddenException('You cannot update your own employee status');
+    if (
+      actor &&
+      (current.id === actor.employeeId || current.userId === actor.id)
+    ) {
+      throw new ForbiddenException(
+        'You cannot update your own employee status',
+      );
     }
 
     if (current.user.role?.name === SYSTEM_ROLES.OWNER) {
-      throw new ForbiddenException('Owner employee profile status cannot be changed');
+      throw new ForbiddenException(
+        'Owner employee profile status cannot be changed',
+      );
     }
 
     const employee = await this.prisma.$transaction(async (tx) => {
@@ -1520,7 +1636,9 @@ export class EmployeeService {
     action: string,
   ): void {
     if (actor.roleName !== SYSTEM_ROLES.OWNER) {
-      throw new ForbiddenException('Only a business owner can manage employees');
+      throw new ForbiddenException(
+        'Only a business owner can manage employees',
+      );
     }
 
     if (employee.id === actor.employeeId || employee.userId === actor.id) {
@@ -1560,7 +1678,8 @@ export class EmployeeService {
     query: EmployeeActivityQueryDto,
   ): Prisma.SaleWhereInput {
     const search = query.search?.trim();
-    const numericSearch = search && !Number.isNaN(Number(search)) ? search : null;
+    const numericSearch =
+      search && !Number.isNaN(Number(search)) ? search : null;
     const paymentSearch =
       search
         ?.trim()
@@ -1662,6 +1781,7 @@ export class EmployeeService {
 
   private employeeSaleInclude() {
     return {
+      creditSale: { select: { balance: true, amountPaid: true } },
       customer: true,
       user: {
         select: {
@@ -1698,8 +1818,10 @@ export class EmployeeService {
       discountAmount: sale.discountAmount,
       taxAmount: sale.taxAmount,
       totalAmount: sale.totalAmount,
-      amountPaid: sale.amountPaid,
-      balanceDue: sale.balanceDue,
+      amountPaid: sale.creditSale
+        ? sale.payments.filter(payment => payment.paymentMethod !== PaymentMethod.CREDIT).reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(sale.creditSale.amountPaid))
+        : sale.amountPaid,
+      balanceDue: sale.creditSale?.balance ?? sale.balanceDue,
       paymentStatus: sale.paymentStatus,
       status: sale.status,
       remarks: sale.remarks,

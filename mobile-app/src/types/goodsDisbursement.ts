@@ -11,6 +11,8 @@ export interface ApiGoodsDisbursementItem {
     sku: string;
     barcode?: string | null;
     sellingPrice?: string | number;
+    purchasePrice?: string | number;
+    baseSellingPrice?: string | number;
     isActive?: boolean;
   };
 }

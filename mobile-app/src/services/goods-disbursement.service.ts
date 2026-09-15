@@ -78,6 +78,8 @@ async function disbursementFallback(
               sku: product.sku ?? item.productId,
               barcode: product.barcode ?? null,
               sellingPrice: product.sellingPrice ?? 0,
+              purchasePrice: product.purchasePrice ?? 0,
+              baseSellingPrice: product.baseSellingPrice,
               isActive: product.isActive
             }
           : undefined

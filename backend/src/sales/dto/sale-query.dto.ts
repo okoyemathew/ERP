@@ -26,6 +26,11 @@ const SALE_SORT_FIELDS = [
 export type SaleSortField = (typeof SALE_SORT_FIELDS)[number];
 
 export class SaleQueryDto {
+  @ApiPropertyOptional({ enum: ['invoices', 'collections'] })
+  @IsOptional()
+  @IsIn(['invoices', 'collections'])
+  basis?: 'invoices' | 'collections';
+
   @ApiPropertyOptional({ description: 'Page number', default: 1 })
   @IsOptional()
   @Type(() => Number)

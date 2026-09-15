@@ -1,3 +1,4 @@
+import { queuedSaleCollection } from '@/utils/saleCollections';
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
 import { AppApiError } from "@/api/errors";
@@ -86,6 +87,7 @@ async function queuedSalesForParams(params: Record<string, string | number> = {}
   const { businessId, userId } = await getRequiredAuthContext();
   const limit = Number(params.limit ?? 50);
   return (await offlineDbService.getQueuedOfflineSales(businessId, userId))
+    .flatMap(sale => params.basis === "collections" ? (queuedSaleCollection(sale) ? [queuedSaleCollection(sale)!] : []) : [sale])
     .filter((sale) => saleMatchesParams(sale, params))
     .slice(0, Number.isFinite(limit) && limit > 0 ? limit : 50);
 }
@@ -94,7 +96,7 @@ function mergeSales(remoteSales: ApiSale[], queuedSales: ApiSale[]) {
   const salesById = new Map<string, ApiSale>();
   queuedSales.forEach((sale) => salesById.set(sale.id, sale));
   remoteSales.forEach((sale) => salesById.set(sale.id, sale));
-  return Array.from(salesById.values()).sort((left, right) => new Date(right.saleDate).getTime() - new Date(left.saleDate).getTime());
+  return Array.from(salesById.values()).sort((left, right) => new Date(right.collectionDate ?? right.saleDate).getTime() - new Date(left.collectionDate ?? left.saleDate).getTime());
 }
 
 export const salesService = {

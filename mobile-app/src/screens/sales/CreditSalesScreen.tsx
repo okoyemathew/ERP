@@ -117,6 +117,7 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
   const [editingProcessing, setEditingProcessing] = useState(false);
   const [returnItem, setReturnItem] = useState<CreditSaleProductItem | null>(null);
   const [returnQuantity, setReturnQuantity] = useState("1");
+  const [returnAvailability, setReturnAvailability] = useState<Awaited<ReturnType<typeof productsService.returnAvailability>> | null>(null);
   const [returnRemarks, setReturnRemarks] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
@@ -288,10 +289,23 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
     }
   };
 
-  const openReturnForm = (item: CreditSaleProductItem) => {
-    setReturnItem(item);
-    setReturnQuantity(item.quantity > 0 ? "1" : "0");
-    setReturnRemarks("");
+  const openReturnForm = async (item: CreditSaleProductItem) => {
+    if (returnSubmitting) return;
+    setReturnAvailability(null);
+    try {
+      const available = await productsService.returnAvailability(item.id);
+      if (available.quantityAvailable <= 0) {
+        Alert.alert("No quantity available", "All units have already been returned or are awaiting approval.");
+        return;
+      }
+      setReturnAvailability(available);
+
+      setReturnItem(item);
+      setReturnQuantity("1");
+      setReturnRemarks("");
+    } catch (error) {
+      Alert.alert("Unable to load return", error instanceof Error ? error.message : "Connect to the internet to check the remaining quantity.");
+    }
   };
 
   const closeReturnForm = () => {
@@ -304,14 +318,14 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
   const submitReturnRequest = async () => {
     if (!selectedDetail || !returnItem || returnSubmitting) return;
 
-    const quantity = Number.parseInt(returnQuantity, 10);
-    if (!Number.isFinite(quantity) || quantity < 1) {
+    const quantity = Number(returnQuantity.trim());
+    if (!/^\d+$/.test(returnQuantity.trim()) || !Number.isSafeInteger(quantity) || quantity < 1) {
       Alert.alert("Invalid quantity", "Enter a quantity of at least 1.");
       return;
     }
 
-    if (quantity > returnItem.quantity) {
-      Alert.alert("Invalid quantity", `This credit sale only has ${returnItem.quantity} unit(s) of ${returnItem.productName}.`);
+    if (!returnAvailability || quantity > returnAvailability.quantityAvailable) {
+      Alert.alert("Invalid quantity", `Only ${returnAvailability?.quantityAvailable ?? 0} unit(s) remain available to return.`);
       return;
     }
 
@@ -321,7 +335,6 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
         productId: returnItem.productId,
         saleItemId: returnItem.id,
         quantity,
-        unitCost: money(returnItem.unitPrice),
         referenceNumber: selectedDetail.sale.saleNumber,
         remarks: returnRemarks.trim() || `Customer return from credit sale ${selectedDetail.sale.saleNumber}`
       });
@@ -329,10 +342,11 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
       setReturnItem(null);
       setReturnQuantity("1");
       setReturnRemarks("");
-      Alert.alert("Return submitted", `${productName} is now waiting for owner approval.`);
+      Alert.alert("Return submitted", `${quantity} unit(s) of ${productName} are now waiting for owner approval.`);
     } catch (returnError) {
       const message = returnError instanceof Error ? returnError.message : "Unable to submit return request.";
       Alert.alert("Return failed", message);
+      try { setReturnAvailability(await productsService.returnAvailability(returnItem.id)); } catch { setReturnAvailability(null); }
     } finally {
       setReturnSubmitting(false);
     }
@@ -938,6 +952,10 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
                 <X size={15} color={colors.textMuted} />
               </Pressable>
             </View>
+            <Text style={styles.meta}>Quantity Sold: {returnAvailability?.quantitySold ?? Number(returnItem?.quantity ?? 0)}</Text>
+            <Text style={styles.meta}>Quantity Already Returned: {returnAvailability?.quantityReturned ?? 0}</Text>
+            <Text style={styles.meta}>Quantity Pending Approval: {returnAvailability?.quantityPending ?? 0}</Text>
+            <Text style={styles.meta}>Quantity Available to Return: {returnAvailability?.quantityAvailable ?? 0}</Text>
             <TextInput
               value={returnQuantity}
               onChangeText={setReturnQuantity}

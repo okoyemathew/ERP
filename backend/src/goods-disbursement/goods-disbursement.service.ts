@@ -672,6 +672,8 @@ export class GoodsDisbursementService {
               sku: true,
               barcode: true,
               sellingPrice: true,
+              purchasePrice: true,
+              baseSellingPrice: true,
               isActive: true,
             },
           },

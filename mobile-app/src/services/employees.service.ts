@@ -1,3 +1,4 @@
+import { queuedSaleCollection } from '@/utils/saleCollections';
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
 import { AppApiError } from "@/api/errors";
@@ -29,6 +30,7 @@ interface EmployeeListParams {
 }
 
 interface EmployeeSalesParams {
+  basis?: "invoices" | "collections";
   page?: number;
   limit?: number;
   search?: string;
@@ -88,20 +90,20 @@ function mergeSales(remoteSales: ApiSale[], queuedSales: ApiSale[], limit: numbe
   queuedSales.forEach((sale) => salesById.set(sale.id, sale));
   remoteSales.forEach((sale) => salesById.set(sale.id, sale));
   return Array.from(salesById.values())
-    .sort((left, right) => new Date(right.saleDate).getTime() - new Date(left.saleDate).getTime())
+    .sort((left, right) => new Date(right.collectionDate ?? right.saleDate).getTime() - new Date(left.collectionDate ?? left.saleDate).getTime())
     .slice(0, limit);
 }
 
 async function queuedEmployeeSales(params: EmployeeSalesParams = {}) {
   const { businessId, userId } = await getRequiredAuthContext();
-  return (await offlineDbService.getQueuedOfflineSales(businessId, userId)).filter((sale) => saleMatchesEmployeeParams(sale, params));
+  return (await offlineDbService.getQueuedOfflineSales(businessId, userId)).flatMap(sale => params.basis === "collections" ? (queuedSaleCollection(sale) ? [queuedSaleCollection(sale)!] : []) : [sale]).filter((sale) => saleMatchesEmployeeParams(sale, params));
 }
 
 function augmentEmployeeSalesResponse(response: EmployeeSalesResponse, queuedSales: ApiSale[], params: EmployeeSalesParams = {}): EmployeeSalesResponse {
   const page = params.page ?? response.meta.page ?? 1;
   const limit = params.limit ?? response.meta.limit ?? 20;
   const completedQueued = queuedSales.filter((sale) => sale.status === "COMPLETED");
-  const totalSalesValue = completedQueued.reduce((sum, sale) => sum + moneyValue(sale.totalAmount), 0);
+  const totalSalesValue = completedQueued.reduce((sum, sale) => sum + moneyValue(sale.collectedAmount ?? sale.totalAmount), 0);
   const totalCollected = completedQueued.reduce((sum, sale) => sum + moneyValue(sale.amountPaid), 0);
   const totalBalanceDue = completedQueued.reduce((sum, sale) => sum + moneyValue(sale.balanceDue), 0);
   const completedSalesCount = response.summary.completedSalesCount + completedQueued.length;
@@ -171,13 +173,13 @@ async function buildOfflineSelfProfile(): Promise<EmployeeProfileResponse> {
     offlineDbService.getQueuedOfflineExpensePayloads(businessId, userId)
   ]);
   const employee = currentUserEmployeeFallback(businessId);
-  const supplied = new Map<string, { productId: string; productName: string; sku?: string | null; barcode?: string | null; suppliedQuantity: number; unitValue: number; lastActivityAt: string }>();
+  const supplied = new Map<string, { productId: string; productName: string; sku?: string | null; barcode?: string | null; suppliedQuantity: number; unitValue: number; sellingPrice?: string | number; baseSellingPrice?: string | number; lastActivityAt: string }>();
   const supplyRuns = disbursements.map((run) => {
     let totalQuantity = 0;
     let totalValue = 0;
     const items = run.items.map((item) => {
       const productName = item.product?.name ?? item.productId;
-      const unitValue = moneyValue(item.product?.sellingPrice);
+      const unitValue = moneyValue(item.product?.purchasePrice);
       const value = unitValue * item.quantity;
       const current = supplied.get(item.productId);
       supplied.set(item.productId, {
@@ -187,6 +189,8 @@ async function buildOfflineSelfProfile(): Promise<EmployeeProfileResponse> {
         barcode: item.product?.barcode ?? null,
         suppliedQuantity: (current?.suppliedQuantity ?? 0) + item.quantity,
         unitValue: current?.unitValue ?? unitValue,
+        sellingPrice: item.product?.sellingPrice,
+        baseSellingPrice: item.product?.baseSellingPrice,
         lastActivityAt: run.disbursementDate
       });
       totalQuantity += item.quantity;
@@ -209,9 +213,9 @@ async function buildOfflineSelfProfile(): Promise<EmployeeProfileResponse> {
   let salesTodayValue = 0;
 
   for (const sale of completedQueued) {
-    if (new Date(sale.saleDate) >= start) {
+    if (new Date(sale.saleDate) >= start && moneyValue(sale.amountPaid) > 0) {
       salesToday += 1;
-      salesTodayValue += moneyValue(sale.totalAmount);
+      salesTodayValue += moneyValue(sale.amountPaid);
     }
     for (const saleItem of sale.items) {
       const item = stockByProduct.get(saleItem.productId);
@@ -270,9 +274,9 @@ async function augmentSelfProfile(profile: EmployeeProfileResponse): Promise<Emp
   let salesTodayValue = moneyValue(activity.stats.salesTodayValue);
 
   for (const sale of completedQueued) {
-    if (new Date(sale.saleDate) >= start) {
+    if (new Date(sale.saleDate) >= start && moneyValue(sale.amountPaid) > 0) {
       salesToday += 1;
-      salesTodayValue += moneyValue(sale.totalAmount);
+      salesTodayValue += moneyValue(sale.amountPaid);
     }
     for (const saleItem of sale.items) {
       const item = stockByProduct.get(saleItem.productId);
@@ -383,7 +387,7 @@ export const employeesService = {
       const page = params.page ?? 1;
       const data = mergeSales([], queued, limit);
       const completed = queued.filter((sale) => sale.status === "COMPLETED");
-      const totalSalesValue = completed.reduce((sum, sale) => sum + moneyValue(sale.totalAmount), 0);
+      const totalSalesValue = completed.reduce((sum, sale) => sum + moneyValue(sale.collectedAmount ?? sale.totalAmount), 0);
       const totalCollected = completed.reduce((sum, sale) => sum + moneyValue(sale.amountPaid), 0);
       const totalBalanceDue = completed.reduce((sum, sale) => sum + moneyValue(sale.balanceDue), 0);
       return {

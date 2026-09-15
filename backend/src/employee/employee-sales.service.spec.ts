@@ -109,6 +109,8 @@ function createPrismaMock() {
       aggregate: jest.fn(),
       findMany: jest.fn(),
     },
+    payment: { findMany: jest.fn().mockResolvedValue([]) },
+    creditPayment: { findMany: jest.fn().mockResolvedValue([]) },
     business: {
       findUnique: jest.fn(),
     },
@@ -197,6 +199,30 @@ describe('EmployeeService sales reporting', () => {
     expect(response.text).toContain('Employee: John Doe');
     expect(response.text).toContain('SALE-000001');
     expect(response.text).toContain('FCFA 1,000');
+  });
+
+  it('shows only a later instalment in daily sales while preserving the invoice total', async () => {
+    const invoice = sale({ amountPaid: new Prisma.Decimal(300), balanceDue: new Prisma.Decimal(700) });
+    const paidAt = new Date('2026-09-15T10:00:00Z');
+    prisma.creditPayment.findMany.mockResolvedValue([{ id: 'payment', creditSale: { saleId: invoice.id }, amount: new Prisma.Decimal(300), paymentDate: paidAt, paymentMethod: PaymentMethod.CASH }]);
+    prisma.sale.findMany.mockResolvedValue([invoice]);
+    const response = await service.getSales(businessId, employeeId, { basis: 'collections', startDate: new Date('2026-09-15T00:00:00Z') });
+    expect(Number(response.summary.totalSalesValue)).toBe(300);
+    expect(Number(response.data[0].totalAmount)).toBe(1000);
+    expect(response.data[0]).toEqual(expect.objectContaining({ collectedAmount: new Prisma.Decimal(300), collectionDate: paidAt }));
+    expect(JSON.stringify(prisma.creditPayment.findMany.mock.calls[0])).toContain(userId);
+    expect(JSON.stringify(prisma.creditPayment.findMany.mock.calls[0])).not.toContain('saleDate');
+  });
+
+  it('prints unpaid legacy credit invoices with the real balance and no record limit', async () => {
+    prisma.business.findUnique.mockResolvedValue({ name: 'Store', currency: 'XAF' });
+    prisma.sale.aggregate.mockResolvedValue({ _count: { id: 1 }, _sum: { totalAmount: new Prisma.Decimal(1000), amountPaid: new Prisma.Decimal(1000), balanceDue: new Prisma.Decimal(0) } });
+    prisma.sale.findMany.mockResolvedValue([sale({ payments: [], creditSale: { balance: new Prisma.Decimal(1000), amountPaid: new Prisma.Decimal(0) } })]);
+    const response = await service.printSalesRecord(businessId, employeeId);
+    expect(Number(response.data.summary.totalSalesValue)).toBe(1000);
+    expect(Number(response.data.summary.totalCollected)).toBe(0);
+    expect(Number(response.data.summary.totalBalanceDue)).toBe(1000);
+    expect(prisma.sale.findMany.mock.calls[0][0]).not.toHaveProperty('take');
   });
 
   it('rejects cross-business employee sales access as not found', async () => {
