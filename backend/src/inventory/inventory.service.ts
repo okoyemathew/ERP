@@ -1385,24 +1385,27 @@ export class InventoryService {
       }),
     ]);
 
-    const auditLogs = await this.prisma.auditLog.findMany({
-      where: {
-        businessId,
-        entity: 'InventoryTransaction',
-        entityId: { in: data.map((transaction) => transaction.id) },
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            username: true,
-            role: { select: { name: true } },
+    const transactionIds = data.map((transaction) => transaction.id);
+    const auditLogs = transactionIds.length
+      ? await this.prisma.auditLog.findMany({
+          where: {
+            businessId,
+            entity: 'InventoryTransaction',
+            entityId: { in: transactionIds },
           },
-        },
-      },
-    });
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                username: true,
+                role: { select: { name: true } },
+              },
+            },
+          },
+        })
+      : [];
     const auditByEntityId = new Map(
       auditLogs.map((log) => [log.entityId, log.user]),
     );
