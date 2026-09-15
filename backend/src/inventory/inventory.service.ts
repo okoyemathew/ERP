@@ -1310,6 +1310,7 @@ export class InventoryService {
     pricing:
       | {
           purchasePrice?: number;
+          sellingPrice?: number;
           baseSellingPrice?: number;
         }
       | undefined,
@@ -1329,8 +1330,10 @@ export class InventoryService {
     }
 
     if (
-      pricing.baseSellingPrice !== undefined &&
-      new Prisma.Decimal(pricing.baseSellingPrice).gt(product.sellingPrice)
+      (pricing.sellingPrice !== undefined || pricing.baseSellingPrice !== undefined) &&
+      new Prisma.Decimal(pricing.sellingPrice ?? product.sellingPrice).lt(
+        pricing.baseSellingPrice ?? product.baseSellingPrice,
+      )
     ) {
       throw new BadRequestException(
         'Selling price cannot be lower than base selling price',
@@ -1434,6 +1437,7 @@ export class InventoryService {
       user?: AuthenticatedUser;
       productPricing?: {
         purchasePrice?: number;
+        sellingPrice?: number;
         baseSellingPrice?: number;
       };
     } = {},
@@ -1477,6 +1481,7 @@ export class InventoryService {
         transactionType === InventoryTransactionType.STOCK_IN &&
         options.productPricing &&
         (options.productPricing.purchasePrice !== undefined ||
+          options.productPricing.sellingPrice !== undefined ||
           options.productPricing.baseSellingPrice !== undefined)
       ) {
         await tx.product.update({
@@ -1484,6 +1489,9 @@ export class InventoryService {
           data: {
             ...(options.productPricing.purchasePrice !== undefined
               ? { purchasePrice: options.productPricing.purchasePrice }
+              : {}),
+            ...(options.productPricing.sellingPrice !== undefined
+              ? { sellingPrice: options.productPricing.sellingPrice }
               : {}),
             ...(options.productPricing.baseSellingPrice !== undefined
               ? { baseSellingPrice: options.productPricing.baseSellingPrice }
@@ -1633,6 +1641,7 @@ export class InventoryService {
         user,
         productPricing: {
           purchasePrice,
+          sellingPrice: dto.sellingPrice,
           baseSellingPrice: dto.baseSellingPrice,
         },
       },

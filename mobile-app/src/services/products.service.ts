@@ -175,7 +175,7 @@ export const productsService = {
     }
   },
 
-  async stockIn(productId: string, quantity: number, unitCost?: number, baseSellingPrice?: number): Promise<void> {
+  async stockIn(productId: string, quantity: number, unitCost?: number, baseSellingPrice?: number, sellingPrice?: number): Promise<void> {
     const businessId = await getRequiredBusinessId();
     const payload = {
       productId,
@@ -183,6 +183,7 @@ export const productsService = {
       transactionType: "STOCK_IN",
       unitCost,
       purchasePrice: unitCost,
+      sellingPrice,
       baseSellingPrice,
       remarks: "Actual new stock"
     };
@@ -200,6 +201,7 @@ export const productsService = {
               averageCost: unitCost ?? current.inventory.averageCost
           },
           purchasePrice: unitCost ?? current.purchasePrice,
+          sellingPrice: sellingPrice ?? current.sellingPrice,
           baseSellingPrice: baseSellingPrice ?? current.baseSellingPrice
         };
         await offlineDbService.cacheProduct(businessId, nextProduct);

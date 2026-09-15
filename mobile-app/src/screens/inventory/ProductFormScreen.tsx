@@ -144,14 +144,18 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         Alert.alert("Invalid base price", "Enter a valid base selling price.");
         return;
       }
-      if (isOwner && baseSellingPrice !== undefined && sellingPrice !== undefined && sellingPrice < baseSellingPrice) {
-        Alert.alert("Invalid base price", "Selling price cannot be lower than base selling price.");
+      if (sellingPrice === undefined || Number.isNaN(sellingPrice) || sellingPrice < 0) {
+        Alert.alert("Invalid selling price", "Enter a valid selling price.");
+        return;
+      }
+      if (isOwner && baseSellingPrice !== undefined && sellingPrice < baseSellingPrice) {
+        Alert.alert("Invalid selling price", "Selling price cannot be lower than base selling price.");
         return;
       }
 
       setSaving(true);
       try {
-        await productsService.stockIn(productId!, actualNewStock, purchasePrice, isOwner ? baseSellingPrice : undefined);
+        await productsService.stockIn(productId!, actualNewStock, purchasePrice, isOwner ? baseSellingPrice : undefined, sellingPrice);
         Alert.alert("Stock added", `${form.name} stock is now ${existingStock + actualNewStock}.`);
         navigation.goBack();
       } catch (saveError) {
@@ -259,6 +263,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         <Card style={styles.form}>
           <Input label="New Purchase Price" value={form.purchasePrice} onChangeText={(value) => setField("purchasePrice", value)} keyboardType="decimal-pad" />
           <Input label="New Quantity / Actual New Stock" value={form.actualNewStock} onChangeText={setActualNewStock} keyboardType="number-pad" />
+          <Input label="New Selling Price" value={form.sellingPrice} onChangeText={(value) => setField("sellingPrice", value)} keyboardType="decimal-pad" />
           {isOwner ? <Input label="Base Selling Price" value={form.baseSellingPrice} onChangeText={(value) => setField("baseSellingPrice", value)} keyboardType="decimal-pad" /> : null}
           <Info label="Stock Being Added" value={String(safeNewStock)} />
           <Info label="New Total Stock" value={String(existingStock + safeNewStock)} />
