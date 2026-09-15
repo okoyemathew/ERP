@@ -317,13 +317,55 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
 
   const printSalesRecord = async () => {
     if (!profile) return;
+    const printForPeriod = async (period: "daily" | "weekly" | "monthly") => {
+      try {
+        const now = new Date();
+        const startDate = new Date(now);
+        const endDate = new Date(now);
+        endDate.setHours(23, 59, 59, 999);
+
+        if (period === "daily") {
+          startDate.setHours(0, 0, 0, 0);
+        } else if (period === "weekly") {
+          startDate.setDate(endDate.getDate() - 6);
+          startDate.setHours(0, 0, 0, 0);
+        } else {
+          startDate.setDate(1);
+          startDate.setHours(0, 0, 0, 0);
+        }
+
+        const params = {
+          search: salesQuery.trim() || undefined,
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
+          sortBy: "saleDate",
+          sortOrder: "desc"
+        } as const;
+        const response = isSelfProfile ? await employeesService.printMySales(params) : await employeesService.printSales(profile.employee.id, params);
+        await printingService.printText(response.text);
+      } catch (printError) {
+        const message = printError instanceof Error ? printError.message : "Unable to print sales record.";
+        Alert.alert("Unable to print", message);
+      }
+    };
+
+    if (!isSelfProfile) {
+      Alert.alert("Print Sales Record", "Choose the employee sales period to print.", [
+        { text: "Daily", onPress: () => void printForPeriod("daily") },
+        { text: "Weekly", onPress: () => void printForPeriod("weekly") },
+        { text: "Monthly", onPress: () => void printForPeriod("monthly") },
+        { text: "Cancel", style: "cancel" }
+      ]);
+      return;
+    }
+
     try {
       const params = {
         search: salesQuery.trim() || undefined,
         sortBy: "saleDate",
         sortOrder: "desc"
       } as const;
-      const response = isSelfProfile ? await employeesService.printMySales(params) : await employeesService.printSales(profile.employee.id, params);
+      const response = await employeesService.printMySales(params);
       await printingService.printText(response.text);
     } catch (printError) {
       const message = printError instanceof Error ? printError.message : "Unable to print sales record.";

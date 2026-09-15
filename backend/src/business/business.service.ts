@@ -211,10 +211,14 @@ export class BusinessService {
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date(todayStart);
     todayEnd.setHours(23, 59, 59, 999);
+    const ownerSaleWhere: Prisma.SaleWhereInput = {
+      businessId: id,
+      userId: user.id,
+    };
 
     const collections = await saleCollections(
       this.prisma,
-      { businessId: id },
+      ownerSaleWhere,
       { startDate: todayStart, endDate: todayEnd },
     );
     const collectedBySale = collectionsBySale(collections);
@@ -233,6 +237,7 @@ export class BusinessService {
       this.prisma.sale.aggregate({
         where: {
           businessId: id,
+          userId: user.id,
           status: 'COMPLETED',
           saleDate: { gte: todayStart, lte: todayEnd },
         },
@@ -245,7 +250,7 @@ export class BusinessService {
         },
       }),
       this.prisma.sale.aggregate({
-        where: { businessId: id, status: 'COMPLETED' },
+        where: { businessId: id, userId: user.id, status: 'COMPLETED' },
         _count: true,
         _sum: { totalAmount: true },
       }),
@@ -253,7 +258,7 @@ export class BusinessService {
         where: {
           businessId: id,
           paymentMethod: { not: 'CREDIT' },
-          sale: { status: 'COMPLETED', deletedAt: null },
+          sale: { userId: user.id, status: 'COMPLETED', deletedAt: null },
           paymentDate: { gte: todayStart, lte: todayEnd },
         },
         _sum: { amount: true },
@@ -262,7 +267,12 @@ export class BusinessService {
         where: {
           paymentDate: { gte: todayStart, lte: todayEnd },
           creditSale: {
-            sale: { businessId: id, status: 'COMPLETED', deletedAt: null },
+            sale: {
+              businessId: id,
+              userId: user.id,
+              status: 'COMPLETED',
+              deletedAt: null,
+            },
           },
         },
         _sum: { amount: true },
@@ -281,7 +291,7 @@ export class BusinessService {
       }),
       this.prisma.creditSale.aggregate({
         where: {
-          sale: { businessId: id },
+          sale: { businessId: id, userId: user.id },
           balance: { gt: 0 },
           status: { not: 'PAID' },
         },
@@ -293,6 +303,7 @@ export class BusinessService {
           JOIN "Sale" s ON s.id = si."saleId"
           JOIN "Product" p ON p.id = si."productId"
           WHERE s."businessId" = ${id}::uuid
+            AND s."userId" = ${user.id}::uuid
             AND s.status = 'COMPLETED'::"SaleStatus"
             AND s."deletedAt" IS NULL
             AND s."saleDate" >= ${todayStart}
@@ -301,6 +312,7 @@ export class BusinessService {
       this.prisma.sale.findMany({
         where: {
           businessId: id,
+          userId: user.id,
           status: 'COMPLETED',
           deletedAt: null,
           id: { in: [...collectedBySale.keys()] },
@@ -321,7 +333,11 @@ export class BusinessService {
         take: 20,
       }),
       this.prisma.sale.findMany({
-        where: { businessId: id, id: { in: [...collectedBySale.keys()] } },
+        where: {
+          businessId: id,
+          userId: user.id,
+          id: { in: [...collectedBySale.keys()] },
+        },
         select: { id: true, userId: true },
       }),
     ]);
@@ -362,6 +378,9 @@ export class BusinessService {
       }
     >();
     for (const sale of employeeCollectionSales) {
+      if (sale.userId === user.id) {
+        continue;
+      }
       const current = employeeTotals.get(sale.userId);
       employeeTotals.set(sale.userId, {
         userId: sale.userId,
@@ -483,7 +502,7 @@ export class BusinessService {
 
     const collections = await saleCollections(
       this.prisma,
-      { businessId: id },
+      { businessId: id, userId: user.id },
       { startDate, endDate },
     );
     const dailySales = new Map<string, Set<string>>();
@@ -546,7 +565,7 @@ export class BusinessService {
     );
 
     const creditSalesBalance = await this.prisma.creditSale.aggregate({
-      where: { sale: { businessId: id } },
+      where: { sale: { businessId: id, userId: user.id } },
       _sum: { balance: true },
     });
 
