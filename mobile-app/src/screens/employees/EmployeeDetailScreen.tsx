@@ -349,28 +349,12 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       }
     };
 
-    if (!isSelfProfile) {
-      Alert.alert("Print Sales Record", "Choose the employee sales period to print.", [
-        { text: "Daily", onPress: () => void printForPeriod("daily") },
-        { text: "Weekly", onPress: () => void printForPeriod("weekly") },
-        { text: "Monthly", onPress: () => void printForPeriod("monthly") },
-        { text: "Cancel", style: "cancel" }
-      ]);
-      return;
-    }
-
-    try {
-      const params = {
-        search: salesQuery.trim() || undefined,
-        sortBy: "saleDate",
-        sortOrder: "desc"
-      } as const;
-      const response = await employeesService.printMySales(params);
-      await printingService.printText(response.text);
-    } catch (printError) {
-      const message = printError instanceof Error ? printError.message : "Unable to print sales record.";
-      Alert.alert("Unable to print", message);
-    }
+    Alert.alert("Print Sales Record", "Choose the sales period to print.", [
+      { text: "Daily", onPress: () => void printForPeriod("daily") },
+      { text: "Weekly", onPress: () => void printForPeriod("weekly") },
+      { text: "Monthly", onPress: () => void printForPeriod("monthly") },
+      { text: "Cancel", style: "cancel" }
+    ]);
   };
 
   const printReceipt = async () => {

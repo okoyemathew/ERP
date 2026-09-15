@@ -24,13 +24,6 @@ export interface DashboardSummary {
     itemCount: number;
     totalAmount: number;
   }>;
-  employeeSales: Array<{
-    userId: string;
-    name: string;
-    username?: string | null;
-    salesCount: number;
-    totalSales: number;
-  }>;
 }
 
 export interface DashboardStatistics {

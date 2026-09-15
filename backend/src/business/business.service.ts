@@ -232,7 +232,6 @@ export class BusinessService {
       creditBalance,
       todayCostRows,
       recentSales,
-      employeeCollectionSales,
     ] = await Promise.all([
       this.prisma.sale.aggregate({
         where: {
@@ -332,14 +331,6 @@ export class BusinessService {
         orderBy: { saleDate: 'desc' },
         take: 20,
       }),
-      this.prisma.sale.findMany({
-        where: {
-          businessId: id,
-          userId: user.id,
-          id: { in: [...collectedBySale.keys()] },
-        },
-        select: { id: true, userId: true },
-      }),
     ]);
 
     const [
@@ -369,39 +360,6 @@ export class BusinessService {
       this.prisma.user.count({ where: { businessId: id, status: 'ACTIVE' } }),
     ]);
 
-    const employeeTotals = new Map<
-      string,
-      {
-        userId: string;
-        _count: { _all: number };
-        _sum: { totalAmount: Prisma.Decimal };
-      }
-    >();
-    for (const sale of employeeCollectionSales) {
-      if (sale.userId === user.id) {
-        continue;
-      }
-      const current = employeeTotals.get(sale.userId);
-      employeeTotals.set(sale.userId, {
-        userId: sale.userId,
-        _count: { _all: (current?._count._all ?? 0) + 1 },
-        _sum: {
-          totalAmount: (current?._sum.totalAmount ?? new Prisma.Decimal(0)).add(
-            collectedBySale.get(sale.id)!.collectedAmount,
-          ),
-        },
-      });
-    }
-    const employeeSales = [...employeeTotals.values()]
-      .sort((a, b) => b._sum.totalAmount.comparedTo(a._sum.totalAmount))
-      .slice(0, 5);
-    const employeeUsers = employeeSales.length
-      ? await this.prisma.user.findMany({
-          where: { id: { in: employeeSales.map((row) => row.userId) } },
-          select: { id: true, firstName: true, lastName: true, username: true },
-        })
-      : [];
-    const employeeById = new Map(employeeUsers.map((row) => [row.id, row]));
     const todayNetSales = new Prisma.Decimal(salesToday._sum.totalAmount ?? 0);
     const todayCostOfGoodsSold = new Prisma.Decimal(
       todayCostRows[0]?.costOfGoodsSold ?? 0,
@@ -458,18 +416,6 @@ export class BusinessService {
           username: sale.user.username,
         },
       })),
-      employeeSales: employeeSales.map((row) => {
-        const employee = employeeById.get(row.userId);
-        return {
-          userId: row.userId,
-          name: employee
-            ? `${employee.firstName} ${employee.lastName}`.trim()
-            : 'Unknown',
-          username: employee?.username ?? null,
-          salesCount: row._count._all,
-          totalSales: Number(row._sum.totalAmount ?? 0),
-        };
-      }),
     };
   }
 
