@@ -10,6 +10,7 @@ import { offlineSyncService } from "@/services/offline-sync.service";
 import { printingService } from "@/services/printing.service";
 import { productsService } from "@/services/products.service";
 import { salesService } from "@/services/sales.service";
+import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
 import type { ApiSale, CreatePaymentPayload, PosPaymentMethod } from "@/types/sales";
 import { mapReceiptToDocument, toApiPaymentMethod } from "@/types/sales";
@@ -72,6 +73,7 @@ function todaySaleRange() {
 
 export function SalesRecordsScreen() {
   const insets = useSafeAreaInsets();
+  const user = useAuthStore((state) => state.user);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<SaleFilter>("All");
   const [sales, setSales] = useState<ApiSale[]>([]);
@@ -96,6 +98,7 @@ export function SalesRecordsScreen() {
     setError(false);
     try {
       const params: Record<string, string | number> = { limit: 50 };
+      if (user?.id) params.userId = user.id;
       const search = query.trim();
       if (search) params.search = search;
       if (filter === "Today") {
@@ -111,6 +114,7 @@ export function SalesRecordsScreen() {
 
         const saleIds = Array.from(new Set(
           returnsResponse.data
+            .filter((request) => !user?.id || request.originalSellerId === user.id || request.requestedById === user.id)
             .map((request) => request.saleId ?? request.sale?.id)
             .filter((saleId): saleId is string => Boolean(saleId))
         ));
@@ -140,7 +144,7 @@ export function SalesRecordsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [filter, query]);
+  }, [filter, query, user?.id]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
