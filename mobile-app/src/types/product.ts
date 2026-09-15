@@ -140,6 +140,37 @@ export interface ProductListResponse {
   meta: { page: number; limit: number; total: number; totalPages: number };
 }
 
+export interface StockInHistoryProduct {
+  id: string;
+  name: string;
+  sku: string;
+  barcode?: string | null;
+}
+
+export interface StockInHistoryRecord {
+  id: string;
+  businessId: string;
+  inventoryId: string;
+  productId: string;
+  transactionType: "STOCK_IN";
+  quantity: number;
+  quantityBefore: number;
+  quantityAfter: number;
+  unitCost?: string | number | null;
+  referenceNumber?: string | null;
+  remarks?: string | null;
+  transactionDate: string;
+  createdAt: string;
+  updatedAt: string;
+  product: StockInHistoryProduct;
+  addedBy?: ProductAddedBy | null;
+}
+
+export interface StockInHistoryResponse {
+  data: StockInHistoryRecord[];
+  meta: { page: number; limit: number; total: number; totalPages: number };
+}
+
 export type ProductReturnRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
 
 export interface ProductReturnRequest {

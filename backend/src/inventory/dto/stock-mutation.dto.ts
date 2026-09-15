@@ -49,6 +49,22 @@ export class StockMutationDto {
   unitCost?: number;
 
   @ApiPropertyOptional({
+    description: 'Purchase price for this stock receipt',
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  purchasePrice?: number;
+
+  @ApiPropertyOptional({
+    description: 'Owner-controlled base selling price to keep on the product',
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  baseSellingPrice?: number;
+
+  @ApiPropertyOptional({
     description: 'Device identifier for offline/mobile submissions',
   })
   @IsOptional()

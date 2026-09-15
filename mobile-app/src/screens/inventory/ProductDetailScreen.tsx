@@ -137,6 +137,7 @@ export function ProductDetailScreen({ route, navigation }: { route: any; navigat
         {canManage || canRequestReturn ? (
           <View style={styles.actions}>
             {canRequestReturn ? <Button label="Request Return" variant="ghost" onPress={() => setReturnVisible(true)} /> : null}
+            {canManage ? <Button label="Add New Product" variant="ghost" onPress={() => navigation.navigate("ProductForm", { productId: product.id, stockMode: true })} /> : null}
             {canManage ? <Button label="Edit Product" onPress={() => navigation.navigate("ProductForm", { productId: product.id })} /> : null}
             {canManage && isOwner ? <Button label="Delete Product" variant="danger" onPress={deleteProduct} /> : null}
           </View>

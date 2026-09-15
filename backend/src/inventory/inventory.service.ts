@@ -1305,6 +1305,119 @@ export class InventoryService {
     return 'IN_STOCK';
   }
 
+  private validateStockInProductPricing(
+    product: { sellingPrice: Prisma.Decimal; baseSellingPrice: Prisma.Decimal },
+    pricing:
+      | {
+          purchasePrice?: number;
+          baseSellingPrice?: number;
+        }
+      | undefined,
+    user?: AuthenticatedUser,
+  ) {
+    if (!pricing) {
+      return;
+    }
+
+    if (
+      pricing.baseSellingPrice !== undefined &&
+      normalizeSystemRoleName(user?.roleName) !== SYSTEM_ROLES.OWNER
+    ) {
+      throw new ForbiddenException(
+        'Only the owner can manage base selling price',
+      );
+    }
+
+    if (
+      pricing.baseSellingPrice !== undefined &&
+      new Prisma.Decimal(pricing.baseSellingPrice).gt(product.sellingPrice)
+    ) {
+      throw new BadRequestException(
+        'Selling price cannot be lower than base selling price',
+      );
+    }
+  }
+
+  async getStockInHistory(
+    businessId: string,
+    query: InventoryHistoryQueryDto = {},
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 50;
+    const search = query.search?.trim();
+
+    const where: Prisma.InventoryTransactionWhereInput = {
+      businessId,
+      transactionType: InventoryTransactionType.STOCK_IN,
+      deletedAt: null,
+      ...(search
+        ? {
+            OR: [
+              { product: { name: { contains: search, mode: 'insensitive' } } },
+              { product: { sku: { contains: search, mode: 'insensitive' } } },
+              { referenceNumber: { contains: search, mode: 'insensitive' } },
+              { remarks: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, data] = await Promise.all([
+      this.prisma.inventoryTransaction.count({ where }),
+      this.prisma.inventoryTransaction.findMany({
+        where,
+        include: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              barcode: true,
+            },
+          },
+        },
+        orderBy: { transactionDate: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    const auditLogs = await this.prisma.auditLog.findMany({
+      where: {
+        businessId,
+        entity: 'InventoryTransaction',
+        entityId: { in: data.map((transaction) => transaction.id) },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+            role: { select: { name: true } },
+          },
+        },
+      },
+    });
+    const auditByEntityId = new Map(
+      auditLogs.map((log) => [log.entityId, log.user]),
+    );
+
+    return {
+      data: data.map((transaction) => ({
+        ...transaction,
+        addedBy: auditByEntityId.get(transaction.id) ?? null,
+      })),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
   private async applyInventoryMovement(
     businessId: string,
     productId: string,
@@ -1319,9 +1432,14 @@ export class InventoryService {
       adjustmentType?: AdjustmentType | null;
       approvedBy?: string | null;
       user?: AuthenticatedUser;
+      productPricing?: {
+        purchasePrice?: number;
+        baseSellingPrice?: number;
+      };
     } = {},
   ) {
     const inventory = await this.assertInventoryContext(businessId, productId);
+    this.validateStockInProductPricing(inventory.product, options.productPricing, options.user);
     const settings = await this.prisma.businessSettings.findUnique({
       where: { businessId },
       select: { allowNegativeStock: true },
@@ -1353,6 +1471,25 @@ export class InventoryService {
         throw new NotFoundException(
           'Inventory record not found for this product',
         );
+      }
+
+      if (
+        transactionType === InventoryTransactionType.STOCK_IN &&
+        options.productPricing &&
+        (options.productPricing.purchasePrice !== undefined ||
+          options.productPricing.baseSellingPrice !== undefined)
+      ) {
+        await tx.product.update({
+          where: { id: productId },
+          data: {
+            ...(options.productPricing.purchasePrice !== undefined
+              ? { purchasePrice: options.productPricing.purchasePrice }
+              : {}),
+            ...(options.productPricing.baseSellingPrice !== undefined
+              ? { baseSellingPrice: options.productPricing.baseSellingPrice }
+              : {}),
+          },
+        });
       }
 
       const currentBefore = currentInventory.quantityAvailable;
@@ -1398,7 +1535,7 @@ export class InventoryService {
         },
       });
 
-      await this.inventoryTransactionService.createTransaction(
+      const transaction = await this.inventoryTransactionService.createTransaction(
         {
           businessId,
           inventoryId: updatedInventory.id,
@@ -1443,8 +1580,8 @@ export class InventoryService {
             businessId,
             userId: options.user.id,
             action: this.auditActionForMovement(transactionType),
-            entity: 'Inventory',
-            entityId: updatedInventory.id,
+            entity: 'InventoryTransaction',
+            entityId: transaction.id,
             description: `${transactionType} ${quantity} unit(s) for product ${productId}`,
             deviceId: options.deviceId ?? null,
           },
@@ -1482,6 +1619,7 @@ export class InventoryService {
     dto: StockMutationDto,
     user?: AuthenticatedUser,
   ) {
+    const purchasePrice = dto.purchasePrice ?? dto.unitCost;
     return this.applyInventoryMovement(
       businessId,
       dto.productId,
@@ -1490,9 +1628,13 @@ export class InventoryService {
       {
         referenceNumber: dto.referenceNumber,
         remarks: dto.remarks ?? 'Stock in',
-        unitCost: dto.unitCost ?? null,
+        unitCost: purchasePrice ?? null,
         deviceId: dto.deviceId ?? null,
         user,
+        productPricing: {
+          purchasePrice,
+          baseSellingPrice: dto.baseSellingPrice,
+        },
       },
     );
   }

@@ -18,4 +18,9 @@ export class InventoryHistoryQueryDto {
   @IsOptional()
   @IsString()
   transactionType?: string;
+
+  @ApiPropertyOptional({ description: 'Search product, SKU, reference, or remarks' })
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

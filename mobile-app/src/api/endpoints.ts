@@ -129,6 +129,7 @@ export const endpoints = {
   inventory: {
     list: (businessId: string) => `/businesses/${businessId}/inventory`,
     stockIn: (businessId: string) => `/businesses/${businessId}/inventory/stock-in`,
+    stockInHistory: (businessId: string) => `/businesses/${businessId}/inventory/stock-in-history`,
     returnRequests: (businessId: string) => `/businesses/${businessId}/inventory/return-requests`,
     approveReturnRequest: (businessId: string, requestId: string) => `/businesses/${businessId}/inventory/return-requests/${requestId}/approve`,
     rejectReturnRequest: (businessId: string, requestId: string) => `/businesses/${businessId}/inventory/return-requests/${requestId}/reject`

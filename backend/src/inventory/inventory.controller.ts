@@ -263,6 +263,23 @@ export class InventoryController {
     );
   }
 
+  @Get('stock-in-history')
+  @Roles(
+    SYSTEM_ROLES.OWNER,
+    SYSTEM_ROLES.ADMIN,
+    SYSTEM_ROLES.MANAGER,
+    SYSTEM_ROLES.INVENTORY_OFFICER,
+  )
+  @ApiOperation({ summary: 'View stock-in supply history' })
+  getStockInHistory(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @Query() query: InventoryHistoryQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    this.assertBusinessAccess(businessId, user);
+    return this.inventoryService.getStockInHistory(businessId, query);
+  }
+
   @Get(':productId')
   @Roles(
     SYSTEM_ROLES.OWNER,

@@ -38,7 +38,7 @@ export type AppStackParamList = {
   EmployeeForm: { employeeId?: string } | undefined;
   Inventory: undefined;
   ProductDetail: { productId: string };
-  ProductForm: { productId?: string } | undefined;
+  ProductForm: { productId?: string; stockMode?: boolean } | undefined;
   ProductOptionManager: { kind: "category" | "brand" | "unit" };
   ReturnedProducts: undefined;
   Expenses: undefined;

@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
+import { Text } from "@/i18n";
 import { Button, Card, ErrorState, Input, LoadingState } from "@/components/common";
 import { ScrollScreen, SectionTitle } from "@/screens/shared/ScreenKit";
 import { productsService } from "@/services/products.service";
 import { useAuthStore } from "@/store/authStore";
-import type { UpsertProductPayload } from "@/types/product";
+import { colors } from "@/theme";
+import type { ApiProduct, UpsertProductPayload } from "@/types/product";
+import { formatCurrency } from "@/utils/format";
 
 type FormState = Omit<UpsertProductPayload, "purchasePrice" | "sellingPrice" | "baseSellingPrice" | "wholesalePrice" | "minimumStock" | "maximumStock" | "initialStock"> & {
   purchasePrice: string;
@@ -40,15 +43,17 @@ const defaults: FormState = {
 
 export function ProductFormScreen({ route, navigation }: { route: any; navigation: any }) {
   const productId = route.params?.productId as string | undefined;
+  const stockMode = Boolean(route.params?.stockMode && productId);
   const user = useAuthStore((state) => state.user);
   const isOwner = user?.role === "owner" || user?.roleName === "Owner";
   const [form, setForm] = useState<FormState>(defaults);
+  const [product, setProduct] = useState<ApiProduct | null>(null);
   const [initialStockEdited, setInitialStockEdited] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
 
-  const title = productId ? "Edit Product" : "Create Product";
+  const title = stockMode ? "Add New Product" : productId ? "Edit Product" : "Create Product";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,6 +61,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
     try {
       if (productId) {
         const product = await productsService.detail(productId);
+        setProduct(product);
         setForm({
           ...defaults,
           categoryId: product.categoryId,
@@ -123,6 +129,39 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
     const maximumStock = parseOptionalNumber(form.maximumStock);
     const actualNewStock = parseOptionalNumber(form.actualNewStock);
     const initialStock = parseOptionalNumber(form.initialStock);
+    const existingStock = product?.inventory?.quantityAvailable ?? 0;
+
+    if (stockMode) {
+      if (purchasePrice === undefined || Number.isNaN(purchasePrice) || purchasePrice < 0) {
+        Alert.alert("Invalid purchase price", "Enter a valid purchase price for this stock.");
+        return;
+      }
+      if (actualNewStock === undefined || !Number.isInteger(actualNewStock) || actualNewStock <= 0) {
+        Alert.alert("Invalid stock", "New stock must be a whole number greater than zero.");
+        return;
+      }
+      if (isOwner && (baseSellingPrice === undefined || Number.isNaN(baseSellingPrice) || baseSellingPrice < 0)) {
+        Alert.alert("Invalid base price", "Enter a valid base selling price.");
+        return;
+      }
+      if (isOwner && baseSellingPrice !== undefined && sellingPrice !== undefined && sellingPrice < baseSellingPrice) {
+        Alert.alert("Invalid base price", "Selling price cannot be lower than base selling price.");
+        return;
+      }
+
+      setSaving(true);
+      try {
+        await productsService.stockIn(productId!, actualNewStock, purchasePrice, isOwner ? baseSellingPrice : undefined);
+        Alert.alert("Stock added", `${form.name} stock is now ${existingStock + actualNewStock}.`);
+        navigation.goBack();
+      } catch (saveError) {
+        const message = saveError instanceof Error ? saveError.message : "Unable to add stock.";
+        Alert.alert("Unable to add stock", message);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     if (!form.name.trim() || !minimumStockInput) {
       Alert.alert("Missing details", "Product name and stock limit are required.");
@@ -202,6 +241,35 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
   if (loading) return <LoadingState label="Loading product form" />;
   if (error) return <ErrorState onRetry={load} />;
 
+  if (stockMode) {
+    const existingStock = product?.inventory?.quantityAvailable ?? 0;
+    const newStock = Number.parseInt(form.actualNewStock, 10);
+    const safeNewStock = Number.isFinite(newStock) && newStock > 0 ? newStock : 0;
+    return (
+      <ScrollScreen title={title} onBack={() => navigation.goBack()}>
+        <SectionTitle title="Product Information" />
+        <Card style={styles.form}>
+          <Info label="Product" value={form.name} />
+          <Info label="SKU" value={form.sku || "No SKU"} />
+          <Info label="Existing Stock" value={String(existingStock)} />
+          <Info label="New Total Stock" value={String(existingStock + safeNewStock)} />
+        </Card>
+
+        <SectionTitle title="Pricing and Stock" />
+        <Card style={styles.form}>
+          <Input label="New Purchase Price" value={form.purchasePrice} onChangeText={(value) => setField("purchasePrice", value)} keyboardType="decimal-pad" />
+          <Input label="New Quantity / Actual New Stock" value={form.actualNewStock} onChangeText={setActualNewStock} keyboardType="number-pad" />
+          {isOwner ? <Input label="Base Selling Price" value={form.baseSellingPrice} onChangeText={(value) => setField("baseSellingPrice", value)} keyboardType="decimal-pad" /> : null}
+          <Info label="Stock Being Added" value={String(safeNewStock)} />
+          <Info label="New Total Stock" value={String(existingStock + safeNewStock)} />
+          {form.purchasePrice.trim() ? <Info label="Purchase Value" value={formatCurrency(Number(form.purchasePrice || 0) * safeNewStock)} /> : null}
+        </Card>
+
+        <Button label="Confirm" loading={saving} onPress={save} />
+      </ScrollScreen>
+    );
+  }
+
   return (
     <ScrollScreen title={title} onBack={() => navigation.goBack()}>
       <SectionTitle title="Product Information" />
@@ -232,5 +300,17 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
 }
 
 const styles = StyleSheet.create({
-  form: { gap: 12 }
+  form: { gap: 12 },
+  infoRow: { gap: 3 },
+  label: { color: colors.textPlaceholder, fontSize: 11 },
+  item: { color: colors.textSecondary, fontSize: 13, fontWeight: "800" }
 });
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.item}>{value}</Text>
+    </View>
+  );
+}

@@ -15,6 +15,7 @@ import type {
   ProductReturnRequestListResponse,
   ProductReturnRequestPayload,
   ProductSupplier,
+  StockInHistoryResponse,
   ProductUnit,
   UpsertProductPayload
 } from "@/types/product";
@@ -174,13 +175,15 @@ export const productsService = {
     }
   },
 
-  async stockIn(productId: string, quantity: number, unitCost?: number): Promise<void> {
+  async stockIn(productId: string, quantity: number, unitCost?: number, baseSellingPrice?: number): Promise<void> {
     const businessId = await getRequiredBusinessId();
     const payload = {
       productId,
       quantity,
       transactionType: "STOCK_IN",
       unitCost,
+      purchasePrice: unitCost,
+      baseSellingPrice,
       remarks: "Actual new stock"
     };
     try {
@@ -191,16 +194,24 @@ export const productsService = {
         const nextProduct: ApiProduct = {
           ...current,
           inventory: {
-            ...current.inventory,
-            quantityOnHand: current.inventory.quantityOnHand + quantity,
-            quantityAvailable: current.inventory.quantityAvailable + quantity,
-            averageCost: unitCost ?? current.inventory.averageCost
-          }
+              ...current.inventory,
+              quantityOnHand: current.inventory.quantityOnHand + quantity,
+              quantityAvailable: current.inventory.quantityAvailable + quantity,
+              averageCost: unitCost ?? current.inventory.averageCost
+          },
+          purchasePrice: unitCost ?? current.purchasePrice,
+          baseSellingPrice: baseSellingPrice ?? current.baseSellingPrice
         };
         await offlineDbService.cacheProduct(businessId, nextProduct);
       }
       await queueOfflineMutation(error, { method: "POST", url: endpoints.inventory.stockIn(businessId), data: payload }, undefined);
     }
+  },
+
+  async stockInHistory(params: { search?: string; limit?: number; page?: number } = {}): Promise<StockInHistoryResponse> {
+    const businessId = await getRequiredBusinessId();
+    const { data } = await api.get<StockInHistoryResponse>(endpoints.inventory.stockInHistory(businessId), { params });
+    return data;
   },
 
   async returnRequests(params: { status?: "PENDING" | "APPROVED" | "REJECTED"; limit?: number; productId?: string } = {}): Promise<ProductReturnRequestListResponse> {
