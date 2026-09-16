@@ -86,7 +86,14 @@ export function AppNavigator() {
 
   return (
     <AppNavigationMenuProvider>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: false,
+          animation: "slide_from_right",
+          animationDuration: 240,
+          gestureEnabled: true,
+        }}
+      >
         <Stack.Screen name="Tabs" component={BottomTabNavigator} />
         {screens.map((screen) => (
           <Stack.Screen

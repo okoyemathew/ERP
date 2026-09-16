@@ -14,7 +14,15 @@ const Stack = createNativeStackNavigator<AuthStackParamList>();
 
 export function AuthStack({ initialRouteName = "Splash" }: { initialRouteName?: keyof AuthStackParamList }) {
   return (
-    <Stack.Navigator initialRouteName={initialRouteName} screenOptions={{ headerShown: false }}>
+    <Stack.Navigator
+      initialRouteName={initialRouteName}
+      screenOptions={{
+        headerShown: false,
+        animation: "slide_from_right",
+        animationDuration: 240,
+        gestureEnabled: true,
+      }}
+    >
       <Stack.Screen name="Splash" component={SplashScreen} />
       <Stack.Screen name="Advert" component={AdvertScreen} />
       <Stack.Screen name="Language" component={LanguageScreen} />
