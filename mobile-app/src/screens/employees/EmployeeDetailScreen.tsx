@@ -54,6 +54,43 @@ function relativeTime(value?: string | null) {
   return `${days}d ago`;
 }
 
+function dayRangeFromSearch(value: string) {
+  const query = value.trim();
+  if (!query) return null;
+
+  const isoMatch = query.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  const localMatch = query.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  const year = isoMatch
+    ? Number(isoMatch[1])
+    : localMatch
+      ? Number(localMatch[3].length === 2 ? `20${localMatch[3]}` : localMatch[3])
+      : null;
+  const month = isoMatch ? Number(isoMatch[2]) : localMatch ? Number(localMatch[2]) : null;
+  const day = isoMatch ? Number(isoMatch[3]) : localMatch ? Number(localMatch[1]) : null;
+
+  if (!year || !month || !day) return null;
+
+  const parsed = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  const start = new Date(parsed);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(parsed);
+  end.setHours(23, 59, 59, 999);
+
+  return {
+    startDate: start.toISOString(),
+    endDate: end.toISOString()
+  };
+}
+
 function employeeName(employee: ApiEmployee) {
   return `${employee.firstName} ${employee.lastName}`.trim() || employee.user.username;
 }
@@ -135,11 +172,15 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     setSalesError(false);
     try {
       if (!employeeId && !isSelfProfile) throw new Error("Employee profile is not available");
+      const trimmedSalesQuery = salesQuery.trim();
+      const dateRange = dayRangeFromSearch(trimmedSalesQuery);
       const params = {
         page,
-        basis: "collections",
+        basis: dateRange ? "invoices" : "collections",
         limit: 10,
-        search: salesQuery.trim() || undefined,
+        search: dateRange ? undefined : trimmedSalesQuery || undefined,
+        startDate: dateRange?.startDate,
+        endDate: dateRange?.endDate,
         sortBy: "saleDate",
         sortOrder: "desc"
       } as const;
@@ -595,7 +636,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               <Text style={styles.label}>Completed</Text>
             </View>
           </View>
-          <SearchBar value={salesQuery} onChangeText={setSalesQuery} placeholder="Search employee sales" />
+          <SearchBar value={salesQuery} onChangeText={setSalesQuery} placeholder="Search sales or date e.g. 15/09/2026" />
           {salesLoading ? (
             <LoadingState label="Loading sales" />
           ) : salesError ? (
