@@ -148,6 +148,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [salesError, setSalesError] = useState(false);
   const [loadingMoreSales, setLoadingMoreSales] = useState(false);
   const [selectedSale, setSelectedSale] = useState<ApiSale | null>(null);
+  const [printPeriodVisible, setPrintPeriodVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const supplyProductsRequestId = useRef(0);
@@ -356,46 +357,43 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     }
   };
 
-  const printSalesRecord = async () => {
+  const printSalesRecordForPeriod = useCallback(async (period: "daily" | "weekly" | "monthly") => {
     if (!profile) return;
-    const printForPeriod = async (period: "daily" | "weekly" | "monthly") => {
-      try {
-        const now = new Date();
-        const startDate = new Date(now);
-        const endDate = new Date(now);
-        endDate.setHours(23, 59, 59, 999);
+    setPrintPeriodVisible(false);
+    try {
+      const now = new Date();
+      const startDate = new Date(now);
+      const endDate = new Date(now);
+      endDate.setHours(23, 59, 59, 999);
 
-        if (period === "daily") {
-          startDate.setHours(0, 0, 0, 0);
-        } else if (period === "weekly") {
-          startDate.setDate(endDate.getDate() - 6);
-          startDate.setHours(0, 0, 0, 0);
-        } else {
-          startDate.setDate(1);
-          startDate.setHours(0, 0, 0, 0);
-        }
-
-        const params = {
-          search: salesQuery.trim() || undefined,
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString(),
-          sortBy: "saleDate",
-          sortOrder: "desc"
-        } as const;
-        const response = isSelfProfile ? await employeesService.printMySales(params) : await employeesService.printSales(profile.employee.id, params);
-        await printingService.printText(response.text);
-      } catch (printError) {
-        const message = printError instanceof Error ? printError.message : "Unable to print sales record.";
-        Alert.alert("Unable to print", message);
+      if (period === "daily") {
+        startDate.setHours(0, 0, 0, 0);
+      } else if (period === "weekly") {
+        startDate.setDate(endDate.getDate() - 6);
+        startDate.setHours(0, 0, 0, 0);
+      } else {
+        startDate.setDate(1);
+        startDate.setHours(0, 0, 0, 0);
       }
-    };
 
-    Alert.alert("Print Sales Record", "Choose the sales period to print.", [
-      { text: "Daily", onPress: () => void printForPeriod("daily") },
-      { text: "Weekly", onPress: () => void printForPeriod("weekly") },
-      { text: "Monthly", onPress: () => void printForPeriod("monthly") },
-      { text: "Cancel", style: "cancel" }
-    ]);
+      const params = {
+        search: salesQuery.trim() || undefined,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        sortBy: "saleDate",
+        sortOrder: "desc"
+      } as const;
+      const response = isSelfProfile ? await employeesService.printMySales(params) : await employeesService.printSales(profile.employee.id, params);
+      await printingService.printText(response.text);
+    } catch (printError) {
+      const message = printError instanceof Error ? printError.message : "Unable to print sales record.";
+      Alert.alert("Unable to print", message);
+    }
+  }, [isSelfProfile, profile, salesQuery]);
+
+  const printSalesRecord = () => {
+    if (!profile) return;
+    setPrintPeriodVisible(true);
   };
 
   const printReceipt = async () => {
@@ -782,6 +780,38 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
         </AppBottomSheet>
       ) : null}
 
+      <Modal
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        visible={printPeriodVisible}
+        onRequestClose={() => setPrintPeriodVisible(false)}
+      >
+        <View style={styles.printModal}>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            accessibilityRole="button"
+            accessibilityLabel="Close print sales record options"
+            onPress={() => setPrintPeriodVisible(false)}
+          />
+          <View style={styles.printDialog}>
+            <Text style={styles.printTitle}>Print Sales Record</Text>
+            <Text style={styles.printMessage}>Choose the sales period to print.</Text>
+            <View style={styles.printActions}>
+              <Pressable style={styles.printAction} onPress={() => void printSalesRecordForPeriod("daily")} accessibilityRole="button" accessibilityLabel="Print daily sales record">
+                <Text style={styles.printActionText}>Daily</Text>
+              </Pressable>
+              <Pressable style={styles.printAction} onPress={() => void printSalesRecordForPeriod("weekly")} accessibilityRole="button" accessibilityLabel="Print weekly sales record">
+                <Text style={styles.printActionText}>Weekly</Text>
+              </Pressable>
+              <Pressable style={styles.printAction} onPress={() => void printSalesRecordForPeriod("monthly")} accessibilityRole="button" accessibilityLabel="Print monthly sales record">
+                <Text style={styles.printActionText}>Monthly</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {!isSelfProfile && supplySheetVisible ? (
         <Modal transparent animationType="slide" statusBarTranslucent visible onRequestClose={() => { Keyboard.dismiss(); setSupplySheetVisible(false); }}>
           <View style={styles.supplyModal}>
@@ -964,6 +994,13 @@ function InfoLine({ label, value, valueColor }: { label: string; value: string; 
 }
 
 const styles = StyleSheet.create({
+  printModal: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, backgroundColor: "rgba(15, 23, 42, 0.55)" },
+  printDialog: { width: "100%", borderRadius: 12, backgroundColor: colors.surface, padding: 22, gap: 12, elevation: 8 },
+  printTitle: { color: colors.foreground, fontSize: 20, fontWeight: "900" },
+  printMessage: { color: colors.textSecondary, fontSize: 15, lineHeight: 22 },
+  printActions: { flexDirection: "row", justifyContent: "space-between", gap: 8, marginTop: 14 },
+  printAction: { minHeight: 44, minWidth: 80, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 10 },
+  printActionText: { color: colors.primary, fontSize: 13, fontWeight: "900", textTransform: "uppercase", letterSpacing: 0.8 },
   supplyModal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },
   supplyModalSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingTop: 12, overflow: "hidden" },
   supplyHandle: { alignSelf: "center", width: 32, height: 4, borderRadius: 999, backgroundColor: colors.borderLight },
