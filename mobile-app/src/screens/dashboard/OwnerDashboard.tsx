@@ -34,6 +34,7 @@ import { colors, spacing } from "@/theme";
 import type { DashboardStatistics, DashboardSummary } from "@/types/report";
 import { dashboardEvents } from "@/utils/dashboardEvents";
 import { formatCurrency } from "@/utils/format";
+import { dashboardGreeting } from "@/utils/greeting";
 import { useAppNavigationMenu } from "@/navigation/AppNavigationMenu";
 
 const quickActions = [
@@ -134,6 +135,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
     [statistics],
   );
   const recentSales = summary?.recentSales ?? [];
+  const greeting = dashboardGreeting();
   const bottomPadding =
     spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
@@ -167,7 +169,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
               <ChevronRight size={18} color={colors.textTertiary} />
             </Pressable>
             <View>
-              <Text style={styles.greeting}>Good morning</Text>
+              <Text style={styles.greeting}>{greeting}</Text>
               <Text style={styles.name}>{user?.firstName ?? "Owner"}</Text>
             </View>
           </View>
@@ -196,7 +198,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
               <ChevronRight size={18} color={colors.textTertiary} />
             </Pressable>
             <View>
-              <Text style={styles.greeting}>Good morning</Text>
+              <Text style={styles.greeting}>{greeting}</Text>
               <Text style={styles.name}>{user?.firstName ?? "Owner"}</Text>
             </View>
           </View>
@@ -224,7 +226,7 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
             <ChevronRight size={18} color={colors.textTertiary} />
           </Pressable>
           <View>
-            <Text style={styles.greeting}>Good morning</Text>
+            <Text style={styles.greeting}>{greeting}</Text>
             <Text style={styles.name}>
               {[user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
                 "Owner"}

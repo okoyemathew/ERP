@@ -36,6 +36,7 @@ import { colors, spacing } from "@/theme";
 import type { ApiSale } from "@/types/sales";
 import { dashboardEvents } from "@/utils/dashboardEvents";
 import { formatCurrency } from "@/utils/format";
+import { dashboardGreeting } from "@/utils/greeting";
 import { useAppNavigationMenu } from "@/navigation/AppNavigationMenu";
 
 const quickActions = [
@@ -209,6 +210,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
       new Set(weeklySales.map((sale) => sale.customerId).filter(Boolean)).size,
     [weeklySales],
   );
+  const greeting = dashboardGreeting();
   const bottomPadding =
     spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
@@ -241,7 +243,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
               <ChevronRight size={18} color={colors.textTertiary} />
             </Pressable>
             <View>
-              <Text style={styles.greeting}>Good morning</Text>
+              <Text style={styles.greeting}>{greeting}</Text>
               <Text style={styles.name}>{user?.firstName ?? "Employee"}</Text>
             </View>
           </View>
@@ -270,7 +272,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
               <ChevronRight size={18} color={colors.textTertiary} />
             </Pressable>
             <View>
-              <Text style={styles.greeting}>Good morning</Text>
+              <Text style={styles.greeting}>{greeting}</Text>
               <Text style={styles.name}>{user?.firstName ?? "Employee"}</Text>
             </View>
           </View>
@@ -298,7 +300,7 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
             <ChevronRight size={18} color={colors.textTertiary} />
           </Pressable>
           <View>
-            <Text style={styles.greeting}>Good morning</Text>
+            <Text style={styles.greeting}>{greeting}</Text>
             <Text style={styles.name}>
               {[user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
                 "Employee"}
