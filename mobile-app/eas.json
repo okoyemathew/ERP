@@ -1,4 +1,7 @@
 {
+  "cli": {
+    "appVersionSource": "remote"
+  },
   "build": {
     "preview": {
       "distribution": "internal",
@@ -11,6 +14,10 @@
       }
     },
     "production": {
+      "android": {
+        "autoIncrement": true,
+        "buildType": "app-bundle"
+      },
       "env": {
         "EAS_BUILD_DISABLE_MAVEN_CACHE": "1",
         "EXPO_PUBLIC_API_BASE_URL": "https://smart-pos-backend-rhvz.onrender.com/api"
