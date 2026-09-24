@@ -113,7 +113,8 @@ export class BusinessDashboardService {
       return date;
     });
 
-    const formatDate = (date: Date) => date.toISOString().slice(0, 10);
+    const formatDate = (date: Date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
     const expensesMap = new Map(
       expenses.map((item) => [formatDate(new Date(item.createdAt)), item]),

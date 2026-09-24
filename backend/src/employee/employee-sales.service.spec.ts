@@ -205,7 +205,7 @@ describe('EmployeeService sales reporting', () => {
     const invoice = sale({ amountPaid: new Prisma.Decimal(300), balanceDue: new Prisma.Decimal(700) });
     const paidAt = new Date('2026-09-15T10:00:00Z');
     prisma.creditPayment.findMany.mockResolvedValue([{ id: 'payment', creditSale: { saleId: invoice.id }, amount: new Prisma.Decimal(300), paymentDate: paidAt, paymentMethod: PaymentMethod.CASH }]);
-    prisma.sale.findMany.mockResolvedValue([invoice]);
+    prisma.sale.findMany.mockResolvedValueOnce([]).mockResolvedValue([invoice]);
     const response = await service.getSales(businessId, employeeId, { basis: 'collections', startDate: new Date('2026-09-15T00:00:00Z') });
     expect(Number(response.summary.totalSalesValue)).toBe(300);
     expect(Number(response.data[0].totalAmount)).toBe(1000);
@@ -231,5 +231,27 @@ describe('EmployeeService sales reporting', () => {
     await expect(
       service.getSales('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', employeeId, {}),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('includes unpaid credit invoices in the owner employee-profile sales list', async () => {
+    const invoice = sale({
+      amountPaid: new Prisma.Decimal(0), balanceDue: new Prisma.Decimal(1000),
+      paymentStatus: 'UNPAID', payments: [],
+      creditSale: { balance: new Prisma.Decimal(1000), amountPaid: new Prisma.Decimal(0) },
+    });
+    prisma.sale.count.mockResolvedValue(1);
+    prisma.sale.aggregate.mockResolvedValue({
+      _sum: { totalAmount: invoice.totalAmount, amountPaid: invoice.amountPaid, balanceDue: invoice.balanceDue },
+      _avg: { totalAmount: invoice.totalAmount },
+    });
+    prisma.sale.findMany.mockResolvedValue([invoice]);
+    const result = await service.getSales(businessId, employeeId, { basis: 'invoices' });
+    expect(result.data).toHaveLength(1);
+    expect(Number(result.data[0].amountPaid)).toBe(0);
+    expect(Number(result.data[0].balanceDue)).toBe(1000);
+    expect(prisma.sale.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ businessId, userId }),
+    }));
+    expect(prisma.payment.findMany).not.toHaveBeenCalled();
   });
 });

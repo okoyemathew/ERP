@@ -177,7 +177,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       const dateRange = dayRangeFromSearch(trimmedSalesQuery);
       const params = {
         page,
-        basis: dateRange ? "invoices" : "collections",
+        basis: !isSelfProfile || dateRange ? "invoices" : "collections",
         limit: 10,
         search: dateRange ? undefined : trimmedSalesQuery || undefined,
         startDate: dateRange?.startDate,

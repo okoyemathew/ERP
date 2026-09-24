@@ -122,9 +122,11 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
+  const loadRequest = useRef(0);
 
   const load = useCallback(
     async (showSpinner = !hasLoadedRef.current) => {
+      const request = ++loadRequest.current;
       if (!businessId || !user?.id) {
         setLoading(false);
         return;
@@ -166,18 +168,22 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
             }),
           ]);
 
+        if (request !== loadRequest.current) return;
         setTodaySales(nextTodaySales.data ?? []);
         setWeeklySales(nextWeeklySales.data ?? []);
         setRecentSales(nextRecentSales.data ?? []);
       } catch (loadError) {
+        if (request !== loadRequest.current) return;
         setError(
           loadError instanceof Error
             ? loadError.message
             : "Unable to load dashboard.",
         );
       } finally {
-        hasLoadedRef.current = true;
-        setLoading(false);
+        if (request === loadRequest.current) {
+          hasLoadedRef.current = true;
+          setLoading(false);
+        }
       }
     },
     [businessId, user?.id],
@@ -186,6 +192,8 @@ export function EmployeeDashboard({ navigation }: { navigation: any }) {
   useFocusEffect(
     useCallback(() => {
       void load();
+      const timer = setInterval(() => void load(false), 30000);
+      return () => clearInterval(timer);
     }, [load]),
   );
 

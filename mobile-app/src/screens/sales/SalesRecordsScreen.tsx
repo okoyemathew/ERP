@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { Text } from "@/i18n";
@@ -92,8 +92,10 @@ export function SalesRecordsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(false);
+  const loadRequest = useRef(0);
 
   const loadSales = useCallback(async (showSpinner = true) => {
+    const request = ++loadRequest.current;
     if (showSpinner) setLoading(true);
     setError(false);
     try {
@@ -131,18 +133,24 @@ export function SalesRecordsScreen() {
           .filter((sale) => saleMatchesSearch(sale, search))
           .sort((left, right) => new Date(right.saleDate).getTime() - new Date(left.saleDate).getTime())
           .slice(0, 50);
+        if (request !== loadRequest.current) return;
         setSales(refundedSales);
         return;
       }
 
       if (filter !== "All" && filter !== "Today") params.status = filter.toUpperCase();
       const response = await salesService.list(params);
+      if (request !== loadRequest.current) return;
       setSales(response.data);
+      setSelectedSale((current) => current ? response.data.find((sale) => sale.id === current.id) ?? null : null);
     } catch {
+      if (request !== loadRequest.current) return;
       setError(true);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (request === loadRequest.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [filter, query, user?.id]);
 
@@ -156,6 +164,8 @@ export function SalesRecordsScreen() {
   useFocusEffect(
     useCallback(() => {
       void loadSales(false);
+      const timer = setInterval(() => void loadSales(false), 30000);
+      return () => clearInterval(timer);
     }, [loadSales])
   );
 

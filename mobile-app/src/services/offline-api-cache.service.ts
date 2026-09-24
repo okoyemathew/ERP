@@ -1,6 +1,7 @@
 import * as SQLite from "expo-sqlite";
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let revision = 0;
 
 async function getDb() {
   if (!dbPromise) {
@@ -44,8 +45,24 @@ export function apiCacheKey(method?: string, url?: string, params?: unknown) {
 }
 
 export const offlineApiCacheService = {
-  async set(cacheKey: string, payload: unknown) {
+  getRevision: () => revision,
+  async invalidateSaleReports(businessId: string) {
+    revision += 1;
     const db = await getDb();
+    await db.runAsync(
+      `DELETE FROM api_response_cache
+       WHERE instr(cacheKey, ?) > 0 AND (
+         cacheKey LIKE 'GET /sales%' OR cacheKey LIKE 'GET /reports%'
+         OR cacheKey LIKE 'GET /employees%' OR cacheKey LIKE 'GET /credit-sales%'
+         OR cacheKey LIKE 'GET /businesses/%/dashboard/%'
+       )`,
+      `"businessId":${JSON.stringify(businessId)}`
+    );
+  },
+
+  async set(cacheKey: string, payload: unknown, requestRevision = revision) {
+    const db = await getDb();
+    if (requestRevision !== revision) return;
     await db.runAsync(
       "INSERT OR REPLACE INTO api_response_cache (cacheKey, payload, updatedAt) VALUES (?, ?, ?)",
       cacheKey,

@@ -6,7 +6,7 @@ import { normalizeApiError } from "./errors";
 import { apiCacheKey, offlineApiCacheService } from "@/services/offline-api-cache.service";
 import type { RefreshTokenResponse } from "@/types/auth";
 
-type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
+type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean; _cacheRevision?: number };
 
 let unauthorizedHandler: (() => void) | undefined;
 let refreshPromise: Promise<string | null> | null = null;
@@ -79,6 +79,7 @@ async function refreshAccessToken() {
 }
 
 api.interceptors.request.use(async (config) => {
+  (config as RetriableConfig)._cacheRevision = offlineApiCacheService.getRevision();
   assertApiConfigured();
   const token = await getAccessToken();
   if (token) {
@@ -91,7 +92,7 @@ api.interceptors.response.use(
   async (response) => {
     if (response.config.method?.toUpperCase() === "GET") {
       const cacheKey = await scopedApiCacheKey(response.config.method, response.config.url, response.config.params);
-      void offlineApiCacheService.set(cacheKey, response.data).catch(() => undefined);
+      void offlineApiCacheService.set(cacheKey, response.data, (response.config as RetriableConfig)._cacheRevision).catch(() => undefined);
     }
     return response;
   },

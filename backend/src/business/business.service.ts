@@ -225,8 +225,6 @@ export class BusinessService {
     const [
       salesToday,
       totalSales,
-      paymentsToday,
-      creditPaymentsToday,
       expensesToday,
       totalExpenses,
       creditBalance,
@@ -252,29 +250,6 @@ export class BusinessService {
         where: { businessId: id, userId: user.id, status: 'COMPLETED' },
         _count: true,
         _sum: { totalAmount: true },
-      }),
-      this.prisma.payment.aggregate({
-        where: {
-          businessId: id,
-          paymentMethod: { not: 'CREDIT' },
-          sale: { userId: user.id, status: 'COMPLETED', deletedAt: null },
-          paymentDate: { gte: todayStart, lte: todayEnd },
-        },
-        _sum: { amount: true },
-      }),
-      this.prisma.creditPayment.aggregate({
-        where: {
-          paymentDate: { gte: todayStart, lte: todayEnd },
-          creditSale: {
-            sale: {
-              businessId: id,
-              userId: user.id,
-              status: 'COMPLETED',
-              deletedAt: null,
-            },
-          },
-        },
-        _sum: { amount: true },
       }),
       this.prisma.expense.aggregate({
         where: {
@@ -380,9 +355,7 @@ export class BusinessService {
         ),
       ),
       totalPaymentsToday: Number(
-        new Prisma.Decimal(paymentsToday._sum.amount ?? 0).add(
-          creditPaymentsToday._sum.amount ?? 0,
-        ),
+        collections.reduce((sum, row) => sum.add(row.amount), new Prisma.Decimal(0)),
       ),
       totalExpensesToday: Number(expensesToday._sum.amount ?? 0),
       todayProfit: Number(todayProfit),
@@ -444,7 +417,8 @@ export class BusinessService {
     const paymentsByDate = new Map<string, number>();
     const expensesByDate = new Map<string, number>();
 
-    const formatDate = (date: Date) => date.toISOString().slice(0, 10);
+    const formatDate = (date: Date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
     const collections = await saleCollections(
       this.prisma,

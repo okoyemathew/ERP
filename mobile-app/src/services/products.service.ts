@@ -4,6 +4,8 @@ import { AppApiError } from "@/api/errors";
 import { getRequiredBusinessId } from "@/api/session";
 import { offlineDbService } from "@/services/offline-db.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
+import { dashboardEvents } from "@/utils/dashboardEvents";
+import { offlineApiCacheService } from "@/services/offline-api-cache.service";
 import type {
   ApiProduct,
   ProductBrand,
@@ -251,7 +253,11 @@ export const productsService = {
   async approveReturnRequest(requestId: string, note?: string): Promise<ProductReturnRequest> {
     const businessId = await getRequiredBusinessId();
     const { data } = await api.patch<ProductReturnRequest>(endpoints.inventory.approveReturnRequest(businessId, requestId), { note });
-    await offlineDbService.cacheProductReturnRequest(businessId, data);
+    await Promise.allSettled([
+      offlineDbService.cacheProductReturnRequest(businessId, data),
+      offlineApiCacheService.invalidateSaleReports(businessId)
+    ]);
+    dashboardEvents.notifySaleChanged();
     return data;
   },
 
