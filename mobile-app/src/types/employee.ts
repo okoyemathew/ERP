@@ -119,6 +119,8 @@ export interface EmployeeProfileResponse {
 }
 
 export interface EmployeeSalesSummary {
+  totalCreditSales?: string | number | null;
+  totalProfit?: string | number | null;
   transactions: number;
   completedSalesCount: number;
   totalSalesValue: string | number;

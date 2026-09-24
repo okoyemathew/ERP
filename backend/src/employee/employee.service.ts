@@ -821,6 +821,9 @@ export class EmployeeService {
           transactions: collected.size,
           completedSalesCount: collected.size,
           totalSalesValue: total,
+          // Invoice profitability is not a collection-period metric.
+          totalCreditSales: null,
+          totalProfit: null,
           totalCollected: total,
           totalBalanceDue: new Prisma.Decimal(0),
           averageSaleValue: collected.size
@@ -863,9 +866,12 @@ export class EmployeeService {
       }),
     ]);
 
+    const financialTotals = await this.employeeSalesFinancialTotals(completedWhere);
+
     return {
       employee: this.basicEmployee(employee),
       summary: {
+        ...financialTotals,
         transactions: total,
         completedSalesCount,
         totalSalesValue: aggregate._sum.totalAmount ?? new Prisma.Decimal(0),
@@ -876,6 +882,57 @@ export class EmployeeService {
       data: items.map((sale) => this.formatEmployeeSale(sale)),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  private async employeeSalesFinancialTotals(where: Prisma.SaleWhereInput) {
+    // Deliberately unpaginated: summary cards cover every matching completed sale.
+    const invoices = await this.prisma.sale.findMany({
+      where,
+      select: {
+        creditSale: { select: { id: true, deletedAt: true, amountPaid: true } },
+        payments: { select: { paymentMethod: true, amount: true } },
+        items: {
+          select: {
+            quantity: true,
+            totalAmount: true,
+            taxAmount: true,
+            product: { select: { purchasePrice: true } },
+            productReturnRequests: {
+              where: { status: ProductReturnRequestStatus.APPROVED },
+              select: { quantity: true },
+            },
+          },
+        },
+      },
+    });
+    let totalCreditSales = new Prisma.Decimal(0);
+    let totalProfit = new Prisma.Decimal(0);
+    for (const invoice of invoices) {
+      let netTotal = new Prisma.Decimal(0);
+      let profit = new Prisma.Decimal(0);
+      for (const item of invoice.items) {
+        const returned = Math.min(item.quantity, item.productReturnRequests.reduce((sum, request) => sum + request.quantity, 0));
+        const returnRatio = item.quantity > 0 ? new Prisma.Decimal(returned).div(item.quantity) : new Prisma.Decimal(0);
+        const itemTotal = new Prisma.Decimal(item.totalAmount);
+        const itemTax = new Prisma.Decimal(item.taxAmount);
+        const netAmount = itemTotal.sub(itemTotal.mul(returnRatio).toDecimalPlaces(2));
+        const netTax = itemTax.sub(itemTax.mul(returnRatio).toDecimalPlaces(2));
+        const cost = new Prisma.Decimal(item.product.purchasePrice).mul(Math.max(0, item.quantity - returned));
+        netTotal = netTotal.add(netAmount);
+        profit = profit.add(netAmount.sub(netTax).sub(cost));
+      }
+      const isCredit = invoice.creditSale
+        ? !invoice.creditSale.deletedAt
+        : invoice.payments.some((payment) => payment.paymentMethod === PaymentMethod.CREDIT);
+      if (isCredit) {
+        const paid = invoice.payments
+          .filter((payment) => payment.paymentMethod !== PaymentMethod.CREDIT)
+          .reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(invoice.creditSale?.amountPaid ?? 0));
+        totalCreditSales = totalCreditSales.add(Prisma.Decimal.max(0, netTotal.sub(paid)));
+      }
+      totalProfit = totalProfit.add(profit);
+    }
+    return { totalCreditSales, totalProfit: totalProfit.toDecimalPlaces(2) };
   }
 
   private async getEmployeeProfileActivity(

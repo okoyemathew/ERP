@@ -152,6 +152,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const supplyProductsRequestId = useRef(0);
+  const salesRequestId = useRef(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,6 +169,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   }, [employeeId, isSelfProfile]);
 
   const loadSales = useCallback(async (page = 1, showSpinner = true) => {
+    const requestId = ++salesRequestId.current;
     if (showSpinner) setSalesLoading(true);
     if (page > 1) setLoadingMoreSales(true);
     setSalesError(false);
@@ -186,16 +188,20 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
         sortOrder: "desc"
       } as const;
       const response = isSelfProfile ? await employeesService.mySales(params) : await employeesService.sales(employeeId, params);
+      if (requestId !== salesRequestId.current) return;
       setSales((current) =>
         page > 1 && current
           ? { ...response, data: [...current.data, ...response.data] }
           : response
       );
     } catch {
+      if (requestId !== salesRequestId.current) return;
       setSalesError(true);
     } finally {
-      setSalesLoading(false);
-      setLoadingMoreSales(false);
+      if (requestId === salesRequestId.current) {
+        setSalesLoading(false);
+        setLoadingMoreSales(false);
+      }
     }
   }, [employeeId, isSelfProfile, salesQuery]);
 
@@ -205,12 +211,12 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     }, [load])
   );
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     const timer = setTimeout(() => {
       void loadSales(1, !sales);
     }, 350);
     return () => clearTimeout(timer);
-  }, [loadSales]);
+  }, [loadSales]));
 
   useEffect(() => dashboardEvents.subscribe(() => {
     void load();
@@ -634,6 +640,27 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               <Text style={styles.label}>Completed</Text>
             </View>
           </View>
+          {!isSelfProfile ? (
+            <>
+              <View style={styles.salesStats}>
+                <View style={styles.salesStat}>
+                  <Text style={[styles.value, { color: colors.purple }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                    {sales?.summary.totalCreditSales == null || salesError ? "—" : formatCurrency(Number(sales.summary.totalCreditSales))}
+                  </Text>
+                  <Text style={styles.label}>Total Credit Sales</Text>
+                  <Text style={styles.sectionMeta}>Outstanding balance</Text>
+                </View>
+                <View style={styles.salesStat}>
+                  <Text style={[styles.value, { color: Number(sales?.summary.totalProfit ?? 0) < 0 ? colors.error : colors.success }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                    {sales?.summary.totalProfit == null || salesError ? "—" : formatCurrency(Number(sales.summary.totalProfit))}
+                  </Text>
+                  <Text style={styles.label}>Total Profit</Text>
+                  <Text style={styles.sectionMeta}>Gross profit</Text>
+                </View>
+              </View>
+              <Text style={styles.sectionMeta}>After approved returns. Profit excludes sales tax and uses current purchase costs, before operating expenses.</Text>
+            </>
+          ) : null}
           <SearchBar value={salesQuery} onChangeText={setSalesQuery} placeholder="Search sales or date e.g. 15/09/2026" />
           {salesLoading ? (
             <LoadingState label="Loading sales" />

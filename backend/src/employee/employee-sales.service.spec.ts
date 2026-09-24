@@ -74,7 +74,9 @@ function sale(overrides: Partial<Record<string, unknown>> = {}) {
         discountAmount: new Prisma.Decimal(0),
         taxAmount: new Prisma.Decimal(0),
         totalAmount: new Prisma.Decimal(1000),
+        productReturnRequests: [],
         product: {
+          purchasePrice: new Prisma.Decimal(300),
           id: '88888888-8888-8888-8888-888888888888',
           name: 'Coca Cola',
           sku: 'SKU-COCA',
@@ -231,6 +233,48 @@ describe('EmployeeService sales reporting', () => {
     await expect(
       service.getSales('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', employeeId, {}),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('totals unpaid credit and gross profit across all matching invoices, after returns and repayments', async () => {
+    const credit = sale({
+      payments: [{ paymentMethod: PaymentMethod.CASH, amount: new Prisma.Decimal(100) }],
+      creditSale: { id: 'credit', deletedAt: null, amountPaid: new Prisma.Decimal(200) },
+      items: [{ quantity: 2, totalAmount: new Prisma.Decimal(1100), taxAmount: new Prisma.Decimal(100),
+        product: { purchasePrice: new Prisma.Decimal(300) }, productReturnRequests: [{ quantity: 1 }] }],
+    });
+    const loss = sale({
+      items: [{ quantity: 1, totalAmount: new Prisma.Decimal(100), taxAmount: new Prisma.Decimal(0),
+        product: { purchasePrice: new Prisma.Decimal(150) }, productReturnRequests: [] }],
+    });
+    prisma.sale.count.mockResolvedValue(2);
+    prisma.sale.aggregate.mockResolvedValue({ _sum: {}, _avg: {} });
+    // Only one row is shown on the requested page, but both invoices count.
+    prisma.sale.findMany.mockResolvedValueOnce([sale()]).mockResolvedValueOnce([credit, loss]);
+    const startDate = new Date('2026-09-01T00:00:00Z');
+    const response = await service.getSales(businessId, employeeId, { basis: 'invoices', page: 2, limit: 1, startDate });
+    expect(Number(response.summary.totalCreditSales)).toBe(250); // 550 net invoice - 100 deposit - 200 repaid
+    expect(Number(response.summary.totalProfit)).toBe(150); // (550 - 50 tax - 300 cost) + (100 - 150)
+    const totalsQuery = prisma.sale.findMany.mock.calls[1][0];
+    expect(totalsQuery).not.toHaveProperty('skip');
+    expect(totalsQuery).not.toHaveProperty('take');
+    expect(totalsQuery.where).toEqual(expect.objectContaining({ businessId, userId, deletedAt: null, status: 'COMPLETED', saleDate: { gte: startDate } }));
+    expect(totalsQuery.select.items.select.productReturnRequests.where).toEqual({ status: 'APPROVED' });
+  });
+
+  it.each([
+    { paid: 0, returned: 0, expectedCredit: 1000, expectedProfit: 400 },
+    { paid: 1000, returned: 0, expectedCredit: 0, expectedProfit: 400 },
+    { paid: 1000, returned: 2, expectedCredit: 0, expectedProfit: 0 },
+  ])('handles credit balance with paid=$paid and returned=$returned', async ({ paid, returned, expectedCredit, expectedProfit }) => {
+    const original = sale();
+    const invoice = sale({ payments: [], creditSale: { id: 'credit', deletedAt: null, amountPaid: new Prisma.Decimal(paid) },
+      items: [{ ...original.items[0], productReturnRequests: returned ? [{ quantity: returned }] : [] }] });
+    prisma.sale.count.mockResolvedValue(1);
+    prisma.sale.aggregate.mockResolvedValue({ _sum: {}, _avg: {} });
+    prisma.sale.findMany.mockResolvedValue([invoice]);
+    const response = await service.getSales(businessId, employeeId, { basis: 'invoices' });
+    expect(Number(response.summary.totalCreditSales)).toBe(expectedCredit);
+    expect(Number(response.summary.totalProfit)).toBe(expectedProfit);
   });
 
   it('includes unpaid credit invoices in the owner employee-profile sales list', async () => {
