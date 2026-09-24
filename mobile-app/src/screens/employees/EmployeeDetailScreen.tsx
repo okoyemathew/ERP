@@ -215,7 +215,11 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     const timer = setTimeout(() => {
       void loadSales(1, !sales);
     }, 350);
-    return () => clearTimeout(timer);
+    const refreshTimer = setInterval(() => void loadSales(1, false), 30000);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(refreshTimer);
+    };
   }, [loadSales]));
 
   useEffect(() => dashboardEvents.subscribe(() => {
@@ -609,6 +613,27 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
 
     return (
       <View style={styles.tabContent}>
+        {!isSelfProfile ? (
+          <Card style={styles.salesCard}>
+            <View style={styles.salesStats}>
+              <View style={styles.salesStat}>
+                <Text style={[styles.value, { color: colors.purple }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                  {sales?.summary.totalCreditSales == null || salesError ? "—" : formatCurrency(Number(sales.summary.totalCreditSales))}
+                </Text>
+                <Text style={styles.label}>Total Credit Sales</Text>
+                <Text style={styles.sectionMeta}>Outstanding balance</Text>
+              </View>
+              <View style={styles.salesStat}>
+                <Text style={[styles.value, { color: Number(sales?.summary.todayProfit ?? 0) < 0 ? colors.error : colors.success }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                  {sales?.summary.todayProfit == null || salesError ? "—" : formatCurrency(Number(sales.summary.todayProfit))}
+                </Text>
+                <Text style={styles.label}>Today's Profit</Text>
+                <Text style={styles.sectionMeta}>Today's completed sales</Text>
+              </View>
+            </View>
+            <Text style={styles.sectionMeta}>After approved returns. Profit excludes sales tax and uses current purchase costs, before operating expenses.</Text>
+          </Card>
+        ) : null}
         <View style={styles.salesHero}>
           <View style={styles.salesIcon}><DollarSign size={22} color={colors.successDark} /></View>
           <Text style={styles.salesHeroLabel}>Sales Today</Text>
@@ -640,27 +665,6 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               <Text style={styles.label}>Completed</Text>
             </View>
           </View>
-          {!isSelfProfile ? (
-            <>
-              <View style={styles.salesStats}>
-                <View style={styles.salesStat}>
-                  <Text style={[styles.value, { color: colors.purple }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
-                    {sales?.summary.totalCreditSales == null || salesError ? "—" : formatCurrency(Number(sales.summary.totalCreditSales))}
-                  </Text>
-                  <Text style={styles.label}>Total Credit Sales</Text>
-                  <Text style={styles.sectionMeta}>Outstanding balance</Text>
-                </View>
-                <View style={styles.salesStat}>
-                  <Text style={[styles.value, { color: Number(sales?.summary.totalProfit ?? 0) < 0 ? colors.error : colors.success }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
-                    {sales?.summary.totalProfit == null || salesError ? "—" : formatCurrency(Number(sales.summary.totalProfit))}
-                  </Text>
-                  <Text style={styles.label}>Total Profit</Text>
-                  <Text style={styles.sectionMeta}>Gross profit</Text>
-                </View>
-              </View>
-              <Text style={styles.sectionMeta}>After approved returns. Profit excludes sales tax and uses current purchase costs, before operating expenses.</Text>
-            </>
-          ) : null}
           <SearchBar value={salesQuery} onChangeText={setSalesQuery} placeholder="Search sales or date e.g. 15/09/2026" />
           {salesLoading ? (
             <LoadingState label="Loading sales" />

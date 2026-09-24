@@ -824,6 +824,7 @@ export class EmployeeService {
           // Invoice profitability is not a collection-period metric.
           totalCreditSales: null,
           totalProfit: null,
+          todayProfit: null,
           totalCollected: total,
           totalBalanceDue: new Prisma.Decimal(0),
           averageSaleValue: collected.size
@@ -867,11 +868,25 @@ export class EmployeeService {
     ]);
 
     const financialTotals = await this.employeeSalesFinancialTotals(completedWhere);
+    // Match the day boundaries used by this profile's Sales Today metric.
+    // Today's profit is independent of list pagination and historical searches.
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+    const todayTotals = await this.employeeSalesFinancialTotals({
+      businessId,
+      userId: employee.userId,
+      deletedAt: null,
+      status: SaleStatus.COMPLETED,
+      saleDate: { gte: todayStart, lt: tomorrowStart },
+    });
 
     return {
       employee: this.basicEmployee(employee),
       summary: {
         ...financialTotals,
+        todayProfit: todayTotals.totalProfit,
         transactions: total,
         completedSalesCount,
         totalSalesValue: aggregate._sum.totalAmount ?? new Prisma.Decimal(0),

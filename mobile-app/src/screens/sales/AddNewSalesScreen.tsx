@@ -125,11 +125,12 @@ const alphaColor = (hex: string, opacity: number) => {
 };
 
 const stockStatus = (stock: number) => {
+  const label = `${Math.max(0, stock)} left`;
   if (stock <= 3)
-    return { label: "Critical", color: colors.error, bg: colors.errorBg };
+    return { label, color: colors.error, bg: colors.errorBg };
   if (stock <= 10)
-    return { label: "Low", color: colors.warning, bg: colors.warningBg };
-  return { label: "In Stock", color: colors.successDark, bg: colors.successBg };
+    return { label, color: colors.warning, bg: colors.warningBg };
+  return { label, color: colors.successDark, bg: colors.successBg };
 };
 
 const normalizeCustomerPhone = (phone?: string | null) =>

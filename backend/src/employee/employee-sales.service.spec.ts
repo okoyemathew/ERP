@@ -235,6 +235,33 @@ describe('EmployeeService sales reporting', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('calculates today profit independently of historical searches and excludes other days', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 8, 24, 12));
+    try {
+      const yesterday = sale({ saleDate: new Date(2026, 8, 23, 23, 59, 59), payments: [],
+        creditSale: { id: 'credit', deletedAt: null, amountPaid: new Prisma.Decimal(0) } });
+      const midnight = sale({ saleDate: new Date(2026, 8, 24) });
+      const returned = sale({ saleDate: new Date(2026, 8, 24, 23, 59, 59),
+        items: [{ ...sale().items[0], productReturnRequests: [{ quantity: 1 }] }] });
+      const tomorrow = sale({ saleDate: new Date(2026, 8, 25) });
+      const invoices = [yesterday, midnight, returned, tomorrow];
+      prisma.sale.count.mockResolvedValue(4);
+      prisma.sale.aggregate.mockResolvedValue({ _sum: {}, _avg: {} });
+      prisma.sale.findMany.mockImplementation(async (args) => {
+        if (!args.select) return [sale()];
+        const range = args.where.saleDate;
+        return range?.lt ? invoices.filter((invoice) => invoice.saleDate >= range.gte && invoice.saleDate < range.lt) : invoices;
+      });
+      const response = await service.getSales(businessId, employeeId, {
+        basis: 'invoices', page: 2, limit: 1, search: 'old invoice', startDate: new Date(2026, 7, 1),
+      });
+      expect(Number(response.summary.todayProfit)).toBe(600);
+      expect(Number(response.summary.totalCreditSales)).toBe(1000);
+      expect(prisma.sale.findMany.mock.calls[2][0].where).toEqual({ businessId, userId, deletedAt: null, status: 'COMPLETED',
+        saleDate: { gte: new Date(2026, 8, 24), lt: new Date(2026, 8, 25) } });
+    } finally { jest.useRealTimers(); }
+  });
+
   it('totals unpaid credit and gross profit across all matching invoices, after returns and repayments', async () => {
     const credit = sale({
       payments: [{ paymentMethod: PaymentMethod.CASH, amount: new Prisma.Decimal(100) }],
@@ -249,7 +276,7 @@ describe('EmployeeService sales reporting', () => {
     prisma.sale.count.mockResolvedValue(2);
     prisma.sale.aggregate.mockResolvedValue({ _sum: {}, _avg: {} });
     // Only one row is shown on the requested page, but both invoices count.
-    prisma.sale.findMany.mockResolvedValueOnce([sale()]).mockResolvedValueOnce([credit, loss]);
+    prisma.sale.findMany.mockResolvedValueOnce([sale()]).mockResolvedValueOnce([credit, loss]).mockResolvedValue([]);
     const startDate = new Date('2026-09-01T00:00:00Z');
     const response = await service.getSales(businessId, employeeId, { basis: 'invoices', page: 2, limit: 1, startDate });
     expect(Number(response.summary.totalCreditSales)).toBe(250); // 550 net invoice - 100 deposit - 200 repaid
