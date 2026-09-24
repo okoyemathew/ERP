@@ -188,12 +188,12 @@ describe('EmployeeService sales reporting', () => {
 
     const response = await service.printSalesRecord(businessId, employeeId, {});
 
-    expect(prisma.sale.aggregate).toHaveBeenCalledWith(
+    expect(prisma.sale.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           businessId,
           userId,
-          status: SaleStatus.COMPLETED,
+          status: { in: [SaleStatus.COMPLETED, SaleStatus.REFUNDED] },
         }),
       }),
     );
@@ -216,6 +216,30 @@ describe('EmployeeService sales reporting', () => {
     expect(JSON.stringify(prisma.creditPayment.findMany.mock.calls[0])).not.toContain('saleDate');
   });
 
+  it('prints payments on earlier employee invoices even when there are no new sales in the selected day', async () => {
+    const yesterday = new Date('2026-09-24T10:00:00Z');
+    const today = new Date('2026-09-25T10:00:00Z');
+    prisma.business.findUnique.mockResolvedValue({ name: 'Store', currency: 'XAF' });
+    prisma.sale.findMany.mockResolvedValue([sale({ saleDate: yesterday, payments: [],
+      items: [{ ...sale().items[0], quantity: 10, totalAmount: new Prisma.Decimal(50000), product: { purchasePrice: new Prisma.Decimal(4000) }, productReturnRequests: [] }],
+      creditSale: { amountPaid: new Prisma.Decimal(20000), payments: [{ id: 'repayment', amount: new Prisma.Decimal(20000), paymentMethod: PaymentMethod.CASH, paymentDate: today }] },
+    })]);
+    const response = await service.printSalesRecord(businessId, employeeId, {
+      startDate: new Date('2026-09-25T00:00:00Z'), endDate: new Date('2026-09-25T23:59:59.999Z'),
+    });
+    expect(Number(response.data.summary.totalSalesValue)).toBe(0);
+    expect(Number(response.data.summary.totalCollected)).toBe(20000);
+    expect(Number(response.data.summary.openingCredit)).toBe(50000);
+    expect(Number(response.data.summary.closingCredit)).toBe(30000);
+    expect(Number(response.data.summary.reconciliationDifference)).toBe(0);
+    expect(response.text).toContain('Payments on older invoices: FCFA 20,000');
+    expect(response.text).toContain('Closing credit: FCFA 30,000');
+    const where = prisma.sale.findMany.mock.calls[0][0].where;
+    expect(where).toEqual(expect.objectContaining({ businessId, userId }));
+    expect(where.saleDate).not.toHaveProperty('gte');
+    expect(prisma.sale.findMany.mock.calls[0][0]).not.toHaveProperty('take');
+  });
+
   it('prints unpaid legacy credit invoices with the real balance and no record limit', async () => {
     prisma.business.findUnique.mockResolvedValue({ name: 'Store', currency: 'XAF' });
     prisma.sale.aggregate.mockResolvedValue({ _count: { id: 1 }, _sum: { totalAmount: new Prisma.Decimal(1000), amountPaid: new Prisma.Decimal(1000), balanceDue: new Prisma.Decimal(0) } });
@@ -233,6 +257,35 @@ describe('EmployeeService sales reporting', () => {
     await expect(
       service.getSales('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', employeeId, {}),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it.each([500, 900])('reconciles employee invoice, summary and payment history after %s in credit repayments', async (repaid) => {
+    const paymentDate = new Date('2026-09-25T10:00:00Z');
+    const deposit = { ...sale().payments[0], amount: new Prisma.Decimal(100) };
+    const creditPayments = [
+      { id: 'repayment-1', amount: new Prisma.Decimal(200), paymentMethod: PaymentMethod.CASH, paymentDate, userId: otherUserId },
+      { id: 'repayment-2', amount: new Prisma.Decimal(repaid - 200), paymentMethod: PaymentMethod.CARD, paymentDate, userId: otherUserId },
+    ];
+    const invoice = sale({ amountPaid: new Prisma.Decimal(100), balanceDue: new Prisma.Decimal(900), paymentStatus: 'PARTIAL',
+      payments: [deposit, { ...deposit, id: 'credit-placeholder', paymentMethod: PaymentMethod.CREDIT, amount: new Prisma.Decimal(900) }],
+      creditSale: { id: 'credit', deletedAt: null, amountPaid: new Prisma.Decimal(repaid), balance: new Prisma.Decimal(900 - repaid), payments: creditPayments },
+    });
+    prisma.sale.count.mockResolvedValue(1);
+    prisma.sale.aggregate.mockResolvedValue({ _sum: { amountPaid: new Prisma.Decimal(100) }, _avg: {} });
+    prisma.sale.findMany.mockResolvedValue([invoice]);
+    const response = await service.getSales(businessId, employeeId, { basis: 'invoices' });
+    const row = response.data[0];
+    expect(Number(row.amountPaid)).toBe(100 + repaid);
+    expect(Number(row.balanceDue)).toBe(900 - repaid);
+    expect(row.paymentStatus).toBe(repaid === 900 ? 'PAID' : 'PARTIAL');
+    expect(row.payments).toHaveLength(3);
+    expect(row.payments.some(payment => payment.paymentMethod === PaymentMethod.CREDIT)).toBe(false);
+    expect(row.payments.reduce((sum, payment) => sum + Number(payment.amount), 0)).toBe(100 + repaid);
+    expect(Number(response.summary.totalCollected)).toBe(100 + repaid);
+    expect(Number(response.summary.totalCreditSales)).toBe(900 - repaid);
+    expect(Number(response.summary.totalCollected) + Number(response.summary.totalBalanceDue)).toBe(Number(response.summary.totalSalesValue));
+    expect(row.userId).toBe(userId); // Repayment collected by someone else still belongs to the original seller's invoice.
+    expect(prisma.sale.findMany.mock.calls[0][0].include.creditSale.select.payments).toBeDefined();
   });
 
   it('calculates today profit independently of historical searches and excludes other days', async () => {

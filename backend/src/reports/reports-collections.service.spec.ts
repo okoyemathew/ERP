@@ -52,13 +52,15 @@ describe('daily sales collection report', () => {
       { id: 'owner' } as never,
     );
     expect(Number(report.summary.totalSales)).toBe(45000);
+    expect(Number(report.summary.totalCollected)).toBe(50000);
+    expect(Number(report.summary.returnAdjustments)).toBe(5000);
     expect(Number(report.data[0].totalSales)).toBe(45000);
     expect(
       Number(
         report.paymentBreakdown.find((row) => row.paymentMethod === 'CASH')
           ?.totalAmount,
       ),
-    ).toBe(45000);
+    ).toBe(50000);
   });
 
   it('reports payments in their business day and retains full credit invoices for export', async () => {

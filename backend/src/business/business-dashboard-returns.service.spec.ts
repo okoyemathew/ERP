@@ -49,7 +49,7 @@ describe('dashboard approved returns', () => {
       prisma as never,
     ).getSummary('business');
     expect(summary.totalRevenueToday).toBe(45000);
-    expect(summary.totalPaymentsToday).toBe(45000);
+    expect(summary.totalPaymentsToday).toBe(50000);
     expect(summary.totalSalesToday).toBe(1);
 
     // Exercise the service actually wired to /businesses/:id/dashboard/*.
@@ -109,7 +109,7 @@ describe('dashboard approved returns', () => {
       id: 'owner',
     } as never);
     expect(routedSummary.totalRevenueToday).toBe(45000);
-    expect(routedSummary.totalPaymentsToday).toBe(45000);
+    expect(routedSummary.totalPaymentsToday).toBe(50000);
     expect(routedSummary.recentSales[0].totalAmount).toBe(45000);
     const statistics = await service.getDashboardStatistics('business', {
       id: 'owner',
@@ -119,6 +119,6 @@ describe('dashboard approved returns', () => {
     ).toBe(45000);
     expect(
       statistics.paymentsLast7Days.reduce((sum, row) => sum + row.amount, 0),
-    ).toBe(45000);
+    ).toBe(50000);
   });
 });

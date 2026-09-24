@@ -1,4 +1,5 @@
 import { saleCollections, collectionsBySale } from '../sales/sale-collections';
+import { employeePeriodAccounting } from './employee-period-accounting';
 import {
   BadRequestException,
   ForbiddenException,
@@ -850,14 +851,9 @@ export class EmployeeService {
       status: SaleStatus.COMPLETED,
     } satisfies Prisma.SaleWhereInput;
 
-    const [total, completedSalesCount, aggregate, items] = await Promise.all([
+    const [total, completedSalesCount, items] = await Promise.all([
       this.prisma.sale.count({ where }),
       this.prisma.sale.count({ where: completedWhere }),
-      this.prisma.sale.aggregate({
-        where: completedWhere,
-        _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
-        _avg: { totalAmount: true },
-      }),
       this.prisma.sale.findMany({
         where,
         include: this.employeeSaleInclude(),
@@ -889,10 +885,10 @@ export class EmployeeService {
         todayProfit: todayTotals.totalProfit,
         transactions: total,
         completedSalesCount,
-        totalSalesValue: aggregate._sum.totalAmount ?? new Prisma.Decimal(0),
-        totalCollected: aggregate._sum.amountPaid ?? new Prisma.Decimal(0),
-        totalBalanceDue: aggregate._sum.balanceDue ?? new Prisma.Decimal(0),
-        averageSaleValue: aggregate._avg.totalAmount ?? new Prisma.Decimal(0),
+        totalSalesValue: financialTotals.totalSalesValue,
+        totalCollected: financialTotals.totalCollected,
+        totalBalanceDue: financialTotals.totalBalanceDue,
+        averageSaleValue: completedSalesCount ? financialTotals.totalSalesValue.div(completedSalesCount) : new Prisma.Decimal(0),
       },
       data: items.map((sale) => this.formatEmployeeSale(sale)),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
@@ -921,6 +917,9 @@ export class EmployeeService {
       },
     });
     let totalCreditSales = new Prisma.Decimal(0);
+    let totalSalesValue = new Prisma.Decimal(0);
+    let totalCollected = new Prisma.Decimal(0);
+    let totalBalanceDue = new Prisma.Decimal(0);
     let totalProfit = new Prisma.Decimal(0);
     for (const invoice of invoices) {
       let netTotal = new Prisma.Decimal(0);
@@ -939,15 +938,18 @@ export class EmployeeService {
       const isCredit = invoice.creditSale
         ? !invoice.creditSale.deletedAt
         : invoice.payments.some((payment) => payment.paymentMethod === PaymentMethod.CREDIT);
-      if (isCredit) {
-        const paid = invoice.payments
+      const paid = invoice.payments
           .filter((payment) => payment.paymentMethod !== PaymentMethod.CREDIT)
           .reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(invoice.creditSale?.amountPaid ?? 0));
-        totalCreditSales = totalCreditSales.add(Prisma.Decimal.max(0, netTotal.sub(paid)));
-      }
+      const collected = Prisma.Decimal.min(netTotal, Prisma.Decimal.max(0, paid));
+      totalSalesValue = totalSalesValue.add(netTotal);
+      const balance = Prisma.Decimal.max(0, netTotal.sub(collected));
+      totalCollected = totalCollected.add(collected);
+      totalBalanceDue = totalBalanceDue.add(balance);
+      if (isCredit) totalCreditSales = totalCreditSales.add(balance);
       totalProfit = totalProfit.add(profit);
     }
-    return { totalCreditSales, totalProfit: totalProfit.toDecimalPlaces(2) };
+    return { totalSalesValue, totalCreditSales, totalCollected, totalBalanceDue, totalProfit: totalProfit.toDecimalPlaces(2) };
   }
 
   private async getEmployeeProfileActivity(
@@ -1288,108 +1290,79 @@ export class EmployeeService {
     query: EmployeeActivityQueryDto = {},
   ) {
     const employee = await this.getEmployeeContext(businessId, id);
-    const where = this.buildEmployeeSalesWhere(businessId, employee.userId, {
-      ...query,
-      status: SaleStatus.COMPLETED,
-      limit: 200,
-    });
-
-    const [business, aggregate, sales] = await Promise.all([
+    const endDate = query.endDate ?? new Date();
+    if (query.startDate && query.startDate > endDate) {
+      throw new BadRequestException('Start date must not be after end date');
+    }
+    // Opening balances need older invoices; never restrict this query to the
+    // report start date or current-page IDs. Refunded invoices retain history.
+    const [business, invoices] = await Promise.all([
       this.prisma.business.findUnique({
         where: { id: businessId },
-        select: {
-          name: true,
-          address: true,
-          phone: true,
-          currency: true,
-        },
-      }),
-      this.prisma.sale.aggregate({
-        where,
-        _count: { id: true },
-        _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
+        select: { name: true, address: true, phone: true, currency: true },
       }),
       this.prisma.sale.findMany({
-        where,
-        include: this.employeeSaleInclude(),
-        orderBy: { saleDate: query.sortOrder ?? 'desc' },
+        where: { businessId, userId: employee.userId, deletedAt: null,
+          status: { in: [SaleStatus.COMPLETED, SaleStatus.REFUNDED] },
+          saleDate: { lte: endDate } },
+        include: {
+          payments: true,
+          creditSale: { include: { payments: true } },
+          items: { include: {
+            product: { select: { purchasePrice: true } },
+            productReturnRequests: {
+              where: { status: ProductReturnRequestStatus.APPROVED },
+              select: { id: true, quantity: true, reviewedAt: true },
+            },
+          } },
+        },
+        orderBy: { saleDate: 'asc' },
       }),
     ]);
-
-    if (!business) {
-      throw new NotFoundException('Business not found');
-    }
-
-    const formattedSales = sales.map((sale) => this.formatEmployeeSale(sale));
-    const employeeName =
-      `${employee.firstName} ${employee.lastName}`.trim() ||
-      employee.user.username;
-    const period =
-      query.startDate || query.endDate
-        ? `${query.startDate ? query.startDate.toISOString().slice(0, 10) : 'Beginning'} to ${query.endDate ? query.endDate.toISOString().slice(0, 10) : 'Now'}`
-        : 'All dates';
-    const total = aggregate._sum.totalAmount ?? new Prisma.Decimal(0);
-    const collected = formattedSales.reduce(
-      (sum, sale) => sum.add(sale.amountPaid),
-      new Prisma.Decimal(0),
-    );
-    const balance = formattedSales.reduce(
-      (sum, sale) => sum.add(sale.balanceDue),
-      new Prisma.Decimal(0),
-    );
+    if (!business) throw new NotFoundException('Business not found');
+    const report = employeePeriodAccounting(invoices, { startDate: query.startDate, endDate });
+    const summary = report.summary;
+    const employeeName = `${employee.firstName} ${employee.lastName}`.trim() || employee.user.username;
+    const period = `${query.startDate?.toISOString() ?? 'Beginning'} to ${endDate.toISOString()}`;
+    const money = (value: Prisma.Decimal) => this.money(value, business.currency);
     const lines = [
-      business.name,
-      business.address ?? null,
-      business.phone ? `Phone: ${business.phone}` : null,
-      '',
-      'Employee Sales Record',
-      `Employee: ${employeeName}`,
-      `Employee Code: ${employee.employeeCode}`,
-      `Period: ${period}`,
-      `Sales Count: ${aggregate._count.id}`,
-      `Total Sales: ${this.money(total, business.currency)}`,
-      `Total Collected: ${this.money(collected, business.currency)}`,
-      `Total Balance: ${this.money(balance, business.currency)}`,
-      '',
-      'Sales',
-      ...formattedSales.map((sale) => {
-        const primaryPayment = sale.payments[0]?.paymentMethod ?? 'UNPAID';
-        const customer =
-          sale.customer?.companyName ||
-          [sale.customer?.firstName, sale.customer?.lastName]
-            .filter(Boolean)
-            .join(' ') ||
-          'Walk-in Customer';
-
-        return [
-          sale.saleNumber,
-          new Date(sale.saleDate).toISOString().slice(0, 10),
-          customer,
-          primaryPayment,
-          this.money(sale.totalAmount, business.currency),
-          `Collected: ${this.money(sale.amountPaid, business.currency)}`,
-          `Balance: ${this.money(sale.balanceDue, business.currency)}`,
-        ].join(' | ');
-      }),
-    ]
-      .filter((line): line is string => line !== null)
-      .join('\n');
-
+      business.name, business.address ?? '', business.phone ? `Phone: ${business.phone}` : '',
+      '', 'Employee Sales Record',
+      `Employee: ${employeeName}`, `Employee Code: ${employee.employeeCode}`, `Period: ${period}`,
+      '', 'SALES - by sale date',
+      `Sales Count: ${summary.salesCount}`,
+      `Sales before returns: ${money(summary.grossSales)}`,
+      `Returns approved in period: ${money(summary.salesReturns)}`,
+      `Net Sales: ${money(summary.totalSalesValue)}`,
+      `Gross Profit: ${money(summary.totalProfit)}`,
+      'Profit excludes tax and operating expenses; uses current product costs.',
+      '', 'COLLECTIONS - by payment date',
+      `Payments on invoices issued in period: ${money(summary.newSaleCollections)}`,
+      `Payments on older invoices: ${money(summary.olderInvoiceCollections)}`,
+      `Total Collected: ${money(summary.totalCollected)}`,
+      ...Object.values(PaymentMethod).filter(method => method !== PaymentMethod.CREDIT).map(method =>
+        `${method}: ${money(report.collections.filter(payment => payment.paymentMethod === method).reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(0)))}`),
+      '', 'CREDIT RECONCILIATION',
+      `Opening credit: ${money(summary.openingCredit)}`,
+      `+ New credit issued: ${money(summary.newCreditIssued)}`,
+      `- Credit repayments: ${money(summary.creditRepayments)}`,
+      `- Credit reductions from returns: ${money(summary.creditReturnReductions)}`,
+      `= Closing credit: ${money(summary.closingCredit)}`,
+      `Reconciliation difference: ${money(summary.reconciliationDifference)}`,
+      `Customer credit created by paid-product returns: ${money(summary.customerCreditFromReturns)}`,
+      'Return credits are not proof of cash refunds. Refund payments require separate records.',
+      ...(summary.undatedRepayments.gt(0) ? [`WARNING: ${money(summary.undatedRepayments)} of legacy repayments have no dated payment records and cannot be assigned to a period.`] : []),
+      '', 'INVOICES ISSUED IN PERIOD (balances at period end)',
+      ...report.sales.map(sale => `${sale.saleNumber} | ${sale.saleDate.toISOString()} | Net: ${money(sale.totalAmount)} | Collected by period end: ${money(sale.amountPaid)} | Due: ${money(sale.balanceDue)}`),
+      '', 'PAYMENTS RECEIVED IN PERIOD',
+      ...report.collections.map(payment => `${payment.paymentDate.toISOString()} | ${payment.saleNumber} | Invoice date: ${payment.invoiceDate.toISOString()} | ${payment.paymentMethod} | ${money(payment.amount)}`),
+      '', 'RETURNS APPROVED IN PERIOD',
+      ...report.returns.map(row => `${row.date.toISOString()} | ${row.saleNumber} | Return: ${money(row.amount)} | Credit reduction: ${money(row.creditReduction)} | Customer credit: ${money(row.customerCredit)}`),
+    ];
     return {
       format: 'employee-sales-record-v1',
-      text: lines,
-      data: {
-        business,
-        employee: this.basicEmployee(employee),
-        period,
-        summary: {
-          salesCount: aggregate._count.id,
-          totalSalesValue: total,
-          totalCollected: collected,
-          totalBalanceDue: balance,
-        },
-        sales: formattedSales,
-      },
+      text: lines.join('\n'),
+      data: { business, employee: this.basicEmployee(employee), period, ...report },
     };
   }
 
@@ -1837,7 +1810,7 @@ export class EmployeeService {
 
   private employeeSaleInclude() {
     return {
-      creditSale: { select: { balance: true, amountPaid: true } },
+      creditSale: { select: { balance: true, amountPaid: true, payments: { orderBy: { paymentDate: 'asc' } } } },
       customer: true,
       user: {
         select: {
@@ -1851,6 +1824,7 @@ export class EmployeeService {
       items: {
         orderBy: { createdAt: 'asc' },
         include: {
+          productReturnRequests: { where: { status: ProductReturnRequestStatus.APPROVED }, select: { quantity: true } },
           product: {
             select: { id: true, name: true, sku: true, barcode: true },
           },
@@ -1865,6 +1839,20 @@ export class EmployeeService {
       include: ReturnType<EmployeeService['employeeSaleInclude']>;
     }>,
   ) {
+    const hasReturns = sale.items.some(item => item.productReturnRequests.length > 0);
+    const totalAmount = hasReturns ? sale.items.reduce((sum, item) => {
+      const returned = Math.min(item.quantity, item.productReturnRequests.reduce((qty, request) => qty + request.quantity, 0));
+      const returnValue = item.quantity > 0 ? new Prisma.Decimal(item.totalAmount).mul(returned).div(item.quantity).toDecimalPlaces(2) : new Prisma.Decimal(0);
+      return sum.add(new Prisma.Decimal(item.totalAmount).sub(returnValue));
+    }, new Prisma.Decimal(0)) : sale.totalAmount;
+    const amountPaid = Prisma.Decimal.min(totalAmount,
+      sale.payments.filter(payment => payment.paymentMethod !== PaymentMethod.CREDIT)
+        .reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(sale.creditSale?.amountPaid ?? 0)));
+    const balanceDue = Prisma.Decimal.max(0, new Prisma.Decimal(totalAmount).sub(amountPaid));
+    const payments = [
+      ...sale.payments.filter(payment => payment.paymentMethod !== PaymentMethod.CREDIT),
+      ...(sale.creditSale?.payments ?? []).map(payment => ({ ...payment, id: `credit:${payment.id}` })),
+    ].sort((a, b) => a.paymentDate.getTime() - b.paymentDate.getTime());
     return {
       id: sale.id,
       saleNumber: sale.saleNumber,
@@ -1873,12 +1861,10 @@ export class EmployeeService {
       subtotal: sale.subtotal,
       discountAmount: sale.discountAmount,
       taxAmount: sale.taxAmount,
-      totalAmount: sale.totalAmount,
-      amountPaid: sale.creditSale
-        ? sale.payments.filter(payment => payment.paymentMethod !== PaymentMethod.CREDIT).reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(sale.creditSale.amountPaid))
-        : sale.amountPaid,
-      balanceDue: sale.creditSale?.balance ?? sale.balanceDue,
-      paymentStatus: sale.paymentStatus,
+      totalAmount,
+      amountPaid,
+      balanceDue,
+      paymentStatus: amountPaid.lte(0) ? 'UNPAID' : balanceDue.eq(0) ? 'PAID' : 'PARTIAL',
       status: sale.status,
       remarks: sale.remarks,
       saleDate: sale.saleDate,
@@ -1887,7 +1873,7 @@ export class EmployeeService {
       customer: sale.customer,
       user: sale.user,
       items: sale.items,
-      payments: sale.payments,
+      payments,
       receipt: sale.receipt,
     };
   }

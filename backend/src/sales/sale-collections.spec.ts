@@ -2,6 +2,14 @@ import { PaymentMethod, Prisma } from '@prisma/client';
 import { collectionsBySale, saleCollections } from './sale-collections';
 
 describe('sale collections', () => {
+  it('keeps actual dated receipts intact after a return, including fully refunded invoices', async () => {
+    const receipt = { id: 'cash', saleId: 'sale', amount: new Prisma.Decimal(50000), paymentDate: new Date('2026-09-24T12:00:00Z'), paymentMethod: PaymentMethod.CASH };
+    const prisma = { payment: { findMany: jest.fn().mockResolvedValue([receipt]) }, creditPayment: { findMany: jest.fn().mockResolvedValue([]) }, sale: { findMany: jest.fn() } };
+    const rows = await saleCollections(prisma as never, { businessId: 'business' }, {}, undefined, 'received');
+    expect(rows).toEqual([receipt]);
+    expect(prisma.sale.findMany).not.toHaveBeenCalled();
+    expect(prisma.payment.findMany.mock.calls[0][0].where.sale.AND).toContainEqual({ deletedAt: null, status: { in: ['COMPLETED', 'REFUNDED'] } });
+  });
   const day = new Date('2026-09-15T00:00:00Z');
   const end = new Date('2026-09-15T23:59:59.999Z');
   const scope = { businessId: 'business', userId: 'seller' };

@@ -4,6 +4,7 @@ import { endpoints } from "./endpoints";
 import { clearAuthStorage, getAccessToken, getAuthSession, getRefreshToken, saveAccessToken, saveRefreshToken } from "./tokenStorage";
 import { normalizeApiError } from "./errors";
 import { apiCacheKey, offlineApiCacheService } from "@/services/offline-api-cache.service";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 import type { RefreshTokenResponse } from "@/types/auth";
 
 type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean; _cacheRevision?: number };
@@ -41,6 +42,8 @@ function isPublicAuthEndpoint(url?: string) {
     return publicAuthEndpoints.has(url);
   }
 }
+
+const isAccountingPrint = (url?: string) => /\/employees\/[^/]+\/sales\/print(?:\?|$)/.test(url ?? "");
 
 async function scopedApiCacheKey(method?: string, url?: string, params?: unknown) {
   const session = await getAuthSession();
@@ -90,7 +93,14 @@ api.interceptors.request.use(async (config) => {
 
 api.interceptors.response.use(
   async (response) => {
-    if (response.config.method?.toUpperCase() === "GET") {
+    if (response.config.method?.toUpperCase() === "POST" && /\/(?:credit-sales\/[^/]+\/(?:payments|pos-payments)|customers\/[^/]+\/credit-payments)$/.test(response.config.url ?? "")) {
+      const session = await getAuthSession();
+      if (session?.user.businessId) {
+        await offlineApiCacheService.invalidateSaleReports(session.user.businessId).catch(() => undefined);
+      }
+      dashboardEvents.notifySaleChanged();
+    }
+    if (response.config.method?.toUpperCase() === "GET" && !isAccountingPrint(response.config.url)) {
       const cacheKey = await scopedApiCacheKey(response.config.method, response.config.url, response.config.params);
       void offlineApiCacheService.set(cacheKey, response.data, (response.config as RetriableConfig)._cacheRevision).catch(() => undefined);
     }
@@ -115,7 +125,7 @@ api.interceptors.response.use(
     }
 
     const apiError = normalizeApiError(error);
-    if (original?.method?.toUpperCase() === "GET" && (apiError.code === "NETWORK" || apiError.code === "TIMEOUT")) {
+    if (original?.method?.toUpperCase() === "GET" && !isAccountingPrint(original.url) && (apiError.code === "NETWORK" || apiError.code === "TIMEOUT")) {
       const cacheKey = await scopedApiCacheKey(original.method, original.url, original.params);
       const cached = await offlineApiCacheService.get(cacheKey);
       if (cached !== null) {

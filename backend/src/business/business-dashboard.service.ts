@@ -71,10 +71,14 @@ export class BusinessDashboardService {
       (sum, row) => sum + Number(row.amount),
       0,
     );
+    const receipts = await saleCollections(this.prisma, { businessId }, {
+      startDate: new Date(new Date().setHours(0, 0, 0, 0)),
+      endDate: new Date(new Date().setHours(23, 59, 59, 999)),
+    }, undefined, 'received');
     return {
       totalSalesToday: collectionsBySale(collections).size,
       totalRevenueToday: collectedTotal,
-      totalPaymentsToday: collectedTotal,
+      totalPaymentsToday: receipts.reduce((sum, row) => sum + Number(row.amount), 0),
       totalExpensesToday: Number(expensesToday._sum.amount ?? 0),
       outstandingCreditBalance: Number(creditBalance._sum?.balance ?? 0),
       activeCustomersCount: customerCount,
@@ -137,9 +141,11 @@ export class BusinessDashboardService {
       };
     });
 
+    const receipts = await saleCollections(this.prisma, { businessId },
+      { startDate, endDate: new Date(new Date().setHours(23, 59, 59, 999)) }, undefined, 'received');
     const paymentsLast7Days = dailyRange.map((date) => {
       const key = formatDate(date);
-      const rows = collections.filter(
+      const rows = receipts.filter(
         (row) => formatDate(row.paymentDate) === key,
       );
       return {

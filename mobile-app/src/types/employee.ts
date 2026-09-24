@@ -149,11 +149,24 @@ export interface EmployeeSalesPrintResponse {
     period: string;
     summary: {
       salesCount: number;
+      grossSales: string | number;
+      salesReturns: string | number;
+      totalProfit: string | number;
       totalSalesValue: string | number;
       totalCollected: string | number;
       totalBalanceDue: string | number;
+      newSaleCollections: string | number;
+      olderInvoiceCollections: string | number;
+      openingCredit: string | number;
+      newCreditIssued: string | number;
+      creditRepayments: string | number;
+      creditReturnReductions: string | number;
+      closingCredit: string | number;
+      customerCreditFromReturns: string | number;
+      undatedRepayments: string | number;
+      reconciliationDifference: string | number;
     };
-    sales: import("./sales").ApiSale[];
+    sales: Array<Pick<import("./sales").ApiSale, "id" | "saleNumber" | "saleDate" | "totalAmount" | "amountPaid" | "balanceDue">>;
   };
 }
 

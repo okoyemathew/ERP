@@ -222,6 +222,8 @@ export class BusinessService {
       { startDate: todayStart, endDate: todayEnd },
     );
     const collectedBySale = collectionsBySale(collections);
+    const receipts = await saleCollections(this.prisma, ownerSaleWhere,
+      { startDate: todayStart, endDate: todayEnd }, undefined, 'received');
     const [
       salesToday,
       totalSales,
@@ -355,7 +357,7 @@ export class BusinessService {
         ),
       ),
       totalPaymentsToday: Number(
-        collections.reduce((sum, row) => sum.add(row.amount), new Prisma.Decimal(0)),
+        receipts.reduce((sum, row) => sum.add(row.amount), new Prisma.Decimal(0)),
       ),
       totalExpensesToday: Number(expensesToday._sum.amount ?? 0),
       todayProfit: Number(todayProfit),
@@ -437,7 +439,9 @@ export class BusinessService {
       salesByDate.set(key, existing);
     });
 
-    collections.forEach((payment) => {
+    const receipts = await saleCollections(this.prisma, { businessId: id, userId: user.id },
+      { startDate, endDate }, undefined, 'received');
+    receipts.forEach((payment) => {
       const key = formatDate(payment.paymentDate);
       paymentsByDate.set(
         key,

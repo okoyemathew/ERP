@@ -7,9 +7,10 @@ export async function saleCollections(
   saleWhere: Prisma.SaleWhereInput,
   range: { startDate?: Date; endDate?: Date } = {},
   paymentMethod?: PaymentMethod,
+  basis: 'net' | 'received' = 'net',
 ) {
-  const sale = {
-    AND: [saleWhere, { deletedAt: null, status: 'COMPLETED' as const }],
+  const sale: Prisma.SaleWhereInput = {
+    AND: [saleWhere, { deletedAt: null, status: basis === 'received' ? { in: ['COMPLETED', 'REFUNDED'] } : 'COMPLETED' }],
   };
   const paymentDate = {
     ...(range.startDate ? { gte: range.startDate } : {}),
@@ -51,7 +52,8 @@ export async function saleCollections(
       saleId: creditSale.saleId,
     })),
   ];
-  if (!rows.length) return rows;
+  // Actual receipts do not disappear or move dates when goods are returned.
+  if (!rows.length || basis === 'received') return rows;
 
   const returnedSales = await prisma.sale.findMany({
     where: {

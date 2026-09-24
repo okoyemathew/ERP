@@ -189,6 +189,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       } as const;
       const response = isSelfProfile ? await employeesService.mySales(params) : await employeesService.sales(employeeId, params);
       if (requestId !== salesRequestId.current) return;
+      setSelectedSale((current) => current ? response.data.find((sale) => sale.id === current.id) ?? current : null);
       setSales((current) =>
         page > 1 && current
           ? { ...response, data: [...current.data, ...response.data] }
@@ -387,7 +388,6 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       }
 
       const params = {
-        search: salesQuery.trim() || undefined,
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
         sortBy: "saleDate",
@@ -399,7 +399,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       const message = printError instanceof Error ? printError.message : "Unable to print sales record.";
       Alert.alert("Unable to print", message);
     }
-  }, [isSelfProfile, profile, salesQuery]);
+  }, [isSelfProfile, profile]);
 
   const printSalesRecord = () => {
     if (!profile) return;
@@ -659,6 +659,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
             <View style={styles.salesStat}>
               <Text style={styles.value}>{formatCurrency(Number(sales?.summary.totalSalesValue ?? 0))}</Text>
               <Text style={styles.label}>Total Sales</Text>
+              <Text style={styles.sectionMeta}>Collected: {formatCurrency(Number(sales?.summary.totalCollected ?? 0))}</Text>
             </View>
             <View style={styles.salesStat}>
               <Text style={styles.value}>{sales?.summary.completedSalesCount ?? 0}</Text>
@@ -681,6 +682,8 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                   </View>
                   <View style={styles.saleRight}>
                     <Text style={styles.item}>{formatCurrency(Number(sale.collectedAmount ?? sale.totalAmount))}</Text>
+                    <Text style={styles.label}>Paid: {formatCurrency(Number(sale.amountPaid))}</Text>
+                    <Text style={styles.label}>Due: {formatCurrency(Number(sale.balanceDue))}</Text>
                     <Badge label={sale.status} variant={statusVariant(sale.status)} />
                   </View>
                 </Pressable>
@@ -782,6 +785,8 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               <InfoLine label="Discount" value={formatCurrency(Number(selectedSale.discountAmount))} />
               <InfoLine label="Tax" value={formatCurrency(Number(selectedSale.taxAmount))} />
               <InfoLine label="Total" value={formatCurrency(Number(selectedSale.totalAmount))} />
+              <InfoLine label="Collected" value={formatCurrency(Number(selectedSale.amountPaid))} />
+              <InfoLine label="Balance Due" value={formatCurrency(Number(selectedSale.balanceDue))} />
             </Card>
             <Card style={styles.infoCard}>
               <Text style={styles.sectionTitle}>Products</Text>

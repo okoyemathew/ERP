@@ -189,16 +189,23 @@ export class ReportsService {
       new Prisma.Decimal(0),
     );
     const count = collectionsBySale(collections).size;
+    const receipts = await saleCollections(this.prisma, {
+      ...this.buildSaleWhere(businessId, { ...scopedQuery, startDate: undefined, endDate: undefined, paymentMethod: undefined }),
+      status: { in: [SaleStatus.COMPLETED, SaleStatus.REFUNDED] },
+    }, scopedQuery, scopedQuery.paymentMethod, 'received');
+    const actualCollected = receipts.reduce((sum, row) => sum.add(row.amount), new Prisma.Decimal(0));
     const summary = {
       totalSales: this.money(total),
-      amountPaid: this.money(total),
+      amountPaid: this.money(actualCollected),
+      totalCollected: this.money(actualCollected),
+      returnAdjustments: this.money(actualCollected.sub(total)),
       transactionCount: count,
       averageTransactionValue: this.money(count ? total.div(count) : 0),
     };
     const paymentBreakdown = PAYMENT_METHODS.filter(
       (method) => method !== PaymentMethod.CREDIT,
     ).map((paymentMethod) => {
-      const rows = collections.filter(
+      const rows = receipts.filter(
         (row) => row.paymentMethod === paymentMethod,
       );
       return {
