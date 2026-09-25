@@ -14,6 +14,7 @@ const ownerOnly = new Set([
   "ProductOptionManager",
   "EmployeeForm",
   "BusinessProfile",
+  "CountryCurrencySettings",
   "ReceiptSettings",
   "TaxSettings",
   "PrinterSettings",

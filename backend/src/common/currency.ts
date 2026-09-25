@@ -1,23 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 
-export const DEFAULT_BUSINESS_CURRENCY = 'XAF' as const;
+export const DEFAULT_BUSINESS_CURRENCY = 'USD' as const;
 
-export const SUPPORTED_CURRENCIES = [
-  'XAF',
-  'USD',
-  'GBP',
-  'EUR',
-  'XOF',
-  'NGN',
-  'GHS',
-  'GMD',
-  'GNF',
-  'LRD',
-  'SLE',
-  'MRU',
-] as const;
-
-export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];
+// ISO 4217 codes are three uppercase letters. The mobile app only submits a
+// currency mapped from one of the 195 supported countries.
+export const SUPPORTED_CURRENCIES = [] as const;
+export type SupportedCurrency = string;
 
 export function normalizeCurrency(value?: string | null) {
   return value?.trim().toUpperCase();
@@ -26,9 +14,7 @@ export function normalizeCurrency(value?: string | null) {
 export function isSupportedCurrency(
   value?: string | null,
 ): value is SupportedCurrency {
-  return SUPPORTED_CURRENCIES.includes(
-    normalizeCurrency(value) as SupportedCurrency,
-  );
+  return /^[A-Z]{3}$/.test(normalizeCurrency(value) ?? '');
 }
 
 export function assertSupportedCurrency(
@@ -41,7 +27,7 @@ export function assertSupportedCurrency(
 
   if (!isSupportedCurrency(normalized)) {
     throw new BadRequestException(
-      `Unsupported currency. Allowed currencies: ${SUPPORTED_CURRENCIES.join(', ')}`,
+      'Unsupported currency. Use a valid three-letter ISO 4217 currency code.',
     );
   }
 
@@ -56,39 +42,20 @@ export function formatMoney(
   const normalized = isSupportedCurrency(currency)
     ? currency
     : DEFAULT_BUSINESS_CURRENCY;
-  const symbols: Record<SupportedCurrency, string> = {
+  const legacyZeroDecimalSymbols: Record<string, string> = {
     XAF: 'FCFA',
-    USD: '$',
-    GBP: '\u00a3',
-    EUR: '\u20ac',
     XOF: 'CFA',
-    NGN: '\u20a6',
-    GHS: 'GH\u20b5',
-    GMD: 'D',
     GNF: 'FG',
-    LRD: '$',
-    SLE: 'Le',
-    MRU: 'UM',
   };
-
-  if (
-    normalized === 'XAF' ||
-    normalized === 'XOF' ||
-    normalized === 'GNF'
-  ) {
-    return `${symbols[normalized]} ${amount.toLocaleString('en-US', {
+  if (legacyZeroDecimalSymbols[normalized]) {
+    return `${legacyZeroDecimalSymbols[normalized]} ${amount.toLocaleString('en-US', {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     })}`;
   }
-
-  const separator =
-    normalized === 'GMD' || normalized === 'SLE' || normalized === 'MRU'
-      ? ' '
-      : '';
-
-  return `${symbols[normalized]}${separator}${amount.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: normalized }).format(amount);
+  } catch {
+    return `${normalized} ${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
 }

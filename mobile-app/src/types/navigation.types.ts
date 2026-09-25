@@ -51,6 +51,7 @@ export type AppStackParamList = {
   CashRegister: undefined;
   Settings: undefined;
   BusinessProfile: undefined;
+  CountryCurrencySettings: undefined;
   ReceiptSettings: undefined;
   TaxSettings: undefined;
   LanguageSettings: undefined;

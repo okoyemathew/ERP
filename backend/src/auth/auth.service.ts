@@ -33,7 +33,7 @@ import type { AuthenticatedUser } from './types/authenticated-user.type';
 import { JwtPayload } from './types/jwt-payload.type';
 import { hashPassword, verifyPassword } from './utils/password.util';
 import { PasswordResetDeliveryService } from './services/password-reset-delivery.service';
-import { DEFAULT_BUSINESS_CURRENCY } from '../common/currency';
+import { assertSupportedCurrency, DEFAULT_BUSINESS_CURRENCY } from '../common/currency';
 
 type TokenPair = {
   accessToken: string;
@@ -332,6 +332,8 @@ export class AuthService {
     const ownerEmail = dto.ownerEmail.trim().toLowerCase();
     const ownerPhone = dto.ownerPhone?.trim() || undefined;
     const businessName = dto.businessName.trim();
+    const currency =
+      assertSupportedCurrency(dto.currency) ?? DEFAULT_BUSINESS_CURRENCY;
 
     const existingUser = await this.prisma.user.findFirst({
       where: {
@@ -379,11 +381,12 @@ export class AuthService {
           email: ownerEmail,
           phone: ownerPhone,
           address: dto.businessAddress?.trim() || undefined,
-          currency: DEFAULT_BUSINESS_CURRENCY,
+          country: dto.businessCountry.trim(),
+          currency,
           status: BusinessStatus.ACTIVE,
           settings: {
             create: {
-              currency: DEFAULT_BUSINESS_CURRENCY,
+              currency,
               timezone: 'UTC',
               language: 'en',
               allowCreditSales: true,
@@ -420,6 +423,7 @@ export class AuthService {
           phone: ownerPhone,
           email: ownerEmail,
           address: dto.businessAddress?.trim() || undefined,
+          country: dto.businessCountry.trim(),
           status: BranchStatus.ACTIVE,
         },
       });

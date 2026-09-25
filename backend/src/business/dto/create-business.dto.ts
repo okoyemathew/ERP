@@ -1,14 +1,13 @@
 import {
   IsEnum,
-  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUrl,
+  Matches,
   MaxLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { SUPPORTED_CURRENCIES } from '../../common/currency';
 import { BusinessStatus } from '../enums/business-status.enum';
 
 export class CreateBusinessDto {
@@ -62,7 +61,7 @@ export class CreateBusinessDto {
   @Transform(({ value }) =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
-  @IsIn(SUPPORTED_CURRENCIES)
+  @Matches(/^[A-Z]{3}$/)
   currency?: string;
 
   @IsOptional()

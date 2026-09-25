@@ -1,14 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Alert, Text, TextInput, type AlertButton } from "react-native";
 import * as SecureStore from "expo-secure-store";
-import { termTranslations, translations, type SupportedLocale, supportedLocales } from "./translations";
+import { termTranslations, translations, type SupportedLocale } from "./translations";
 
 const LANGUAGE_KEY = "nexpos.locale";
 
 type I18nContextValue = {
-  locale: SupportedLocale;
+  locale: string;
   isLoading: boolean;
-  setLocale: (locale: SupportedLocale) => Promise<void>;
+  setLocale: (locale: string) => Promise<void>;
   t: (value: string) => string;
 };
 
@@ -16,32 +16,33 @@ const I18nContext = createContext<I18nContextValue | undefined>(undefined);
 
 type CreateElement = (type: unknown, props?: unknown, ...children: unknown[]) => React.ReactElement | null;
 
-let activeLocale: SupportedLocale = "en";
+let activeLocale = "en";
 let textPatchInstalled = false;
 const reactRuntime = React as unknown as { createElement: CreateElement };
 const originalCreateElement = reactRuntime.createElement.bind(React);
 const originalAlert = Alert.alert.bind(Alert);
 
-function isSupportedLocale(value: string | null | undefined): value is SupportedLocale {
-  return Boolean(value && supportedLocales.includes(value as SupportedLocale));
+function isLocaleCode(value: string | null | undefined): value is string {
+  return Boolean(value && /^[a-z]{2,3}(?:-[A-Z]{2})?$/.test(value));
 }
 
 function normalizeText(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-export function translate(value: string, locale: SupportedLocale = activeLocale) {
+export function translate(value: string, locale: string = activeLocale) {
   if (locale === "en") return value;
 
   const normalized = normalizeText(value);
   if (!normalized) return value;
 
-  const exact = translations[locale][normalized];
+  const exact = translations[locale as SupportedLocale]?.[normalized];
   if (exact) return exact;
 
   const humanizedEnum = /^[A-Z0-9_]+$/.test(normalized) ? normalized.replace(/_/g, " ").toLowerCase() : null;
   if (humanizedEnum) {
-    const enumExact = translations[locale][humanizedEnum] ?? translations[locale][toTitleCase(humanizedEnum)];
+    const translationMap = translations[locale as SupportedLocale] ?? {};
+    const enumExact = translationMap[humanizedEnum] ?? translationMap[toTitleCase(humanizedEnum)];
     if (enumExact) return enumExact;
     const enumTerms = translateTerms(humanizedEnum, locale);
     if (enumTerms !== humanizedEnum) return toTitleCase(enumTerms);
@@ -54,8 +55,8 @@ function toTitleCase(value: string) {
   return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function translateTerms(value: string, locale: SupportedLocale) {
-  const termMap = termTranslations[locale];
+function translateTerms(value: string, locale: string) {
+  const termMap = termTranslations[locale as SupportedLocale] ?? {};
   let changed = false;
 
   const translated = value.replace(/[A-Za-z][A-Za-z'-]*/g, (word) => {
@@ -120,21 +121,21 @@ export function installI18nTextPatch() {
 }
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<SupportedLocale>("en");
+  const [locale, setLocaleState] = useState("en");
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     installI18nTextPatch();
     void SecureStore.getItemAsync(LANGUAGE_KEY)
       .then((storedLocale) => {
-        const nextLocale = isSupportedLocale(storedLocale) ? storedLocale : "en";
+        const nextLocale = isLocaleCode(storedLocale) ? storedLocale : "en";
         activeLocale = nextLocale;
         setLocaleState(nextLocale);
       })
       .finally(() => setIsLoading(false));
   }, []);
 
-  const setLocale = useCallback(async (nextLocale: SupportedLocale) => {
+  const setLocale = useCallback(async (nextLocale: string) => {
     activeLocale = nextLocale;
     await SecureStore.setItemAsync(LANGUAGE_KEY, nextLocale);
     setLocaleState(nextLocale);

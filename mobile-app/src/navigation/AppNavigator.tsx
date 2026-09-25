@@ -25,6 +25,7 @@ import { NotificationsScreen } from "@/screens/settings/NotificationsScreen";
 import { ProfileScreen } from "@/screens/settings/ProfileScreen";
 import { SettingsScreen } from "@/screens/settings/SettingsScreen";
 import { BusinessProfileScreen } from "@/screens/settings/BusinessProfileScreen";
+import { CountryCurrencySettingsScreen } from "@/screens/settings/CountryCurrencySettingsScreen";
 import { AboutBusinessScreen } from "@/screens/settings/AboutBusinessScreen";
 import { HelpSupportScreen } from "@/screens/settings/HelpSupportScreen";
 import { NotificationSettingsScreen } from "@/screens/settings/NotificationSettingsScreen";
@@ -67,6 +68,7 @@ const appScreens: Array<{
   { name: "CashRegister", component: CashRegisterScreen },
   { name: "Settings", component: SettingsScreen },
   { name: "BusinessProfile", component: BusinessProfileScreen },
+  { name: "CountryCurrencySettings", component: CountryCurrencySettingsScreen },
   { name: "ReceiptSettings", component: ReceiptSettingsScreen },
   { name: "TaxSettings", component: TaxSettingsScreen },
   { name: "LanguageSettings", component: LanguageSettingsScreen },

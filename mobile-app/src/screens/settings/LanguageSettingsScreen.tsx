@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Check } from "lucide-react-native";
-import { Button, Card } from "@/components/common";
-import { languageOptions, Text, useTranslation, type SupportedLocale } from "@/i18n";
+import { Button, Card, SearchBar } from "@/components/common";
+import { languageOptions, Text, useTranslation } from "@/i18n";
 import { businessService } from "@/services/business.service";
 import { ScrollScreen } from "@/screens/shared/ScreenKit";
 import { useAuthStore } from "@/store/authStore";
@@ -13,14 +13,20 @@ export function LanguageSettingsScreen({ navigation }: { navigation: any }) {
   const businessId = useAuthStore((state) => state.business?.id ?? state.user?.businessId);
   const canManageSettings = useAuthStore((state) => state.can("settings.manage"));
   const refreshProfile = useAuthStore((state) => state.refreshProfile);
-  const [selected, setSelected] = useState<SupportedLocale>(locale);
+  const [selected, setSelected] = useState(locale);
+  const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setSelected(locale);
   }, [locale]);
 
-  const selectLanguage = async (nextLocale: SupportedLocale) => {
+  const filteredLanguages = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return query ? languageOptions.filter((language) => `${language.name} ${language.country}`.toLocaleLowerCase().includes(query)) : languageOptions;
+  }, [search]);
+
+  const selectLanguage = async (nextLocale: string) => {
     setSelected(nextLocale);
     await setLocale(nextLocale);
   };
@@ -48,16 +54,17 @@ export function LanguageSettingsScreen({ navigation }: { navigation: any }) {
   return (
     <ScrollScreen title="Language" onBack={() => navigation.goBack()}>
       <Text style={styles.subtitle}>Select your preferred language to continue</Text>
+      <SearchBar value={search} onChangeText={setSearch} placeholder="Search languages or countries" />
       <View style={styles.grid}>
-        {languageOptions.map((language) => {
+        {filteredLanguages.map((language) => {
           const active = selected === language.locale;
           return (
-            <Pressable key={language.locale} onPress={() => void selectLanguage(language.locale)} accessibilityRole="button" accessibilityLabel={`Select ${language.name}`}>
+            <Pressable key={`${language.locale}-${language.country}`} onPress={() => void selectLanguage(language.locale)} accessibilityRole="button" accessibilityLabel={`Select ${language.name}`}>
               <Card style={[styles.card, active && styles.selected]}>
-                <Text style={styles.code}>{language.code}</Text>
+                <Text style={styles.code}>{language.locale.toUpperCase()}</Text>
                 <View style={styles.body}>
                   <Text style={[styles.name, active && styles.selectedText]}>{language.name}</Text>
-                  <Text style={styles.select}>Select</Text>
+                  <Text style={styles.select}>{language.country}</Text>
                 </View>
                 {active ? (
                   <View style={styles.check}>

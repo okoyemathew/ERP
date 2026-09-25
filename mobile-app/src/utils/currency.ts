@@ -1,36 +1,25 @@
-export const DEFAULT_BUSINESS_CURRENCY = "XAF";
+import { countryOptions } from "./countries";
 
-export const SUPPORTED_CURRENCIES = [
-  { country: "Cameroon", code: "XAF", name: "Central African CFA Franc", symbol: "FCFA", fractionDigits: 0 },
-  { country: "United States", code: "USD", name: "US Dollar", symbol: "$", fractionDigits: 2 },
-  { country: "United Kingdom", code: "GBP", name: "British Pound", symbol: "\u00a3", fractionDigits: 2 },
-  { country: "Germany / Eurozone", code: "EUR", name: "Euro", symbol: "\u20ac", fractionDigits: 2 },
-  { country: "West Africa", code: "XOF", name: "West African CFA Franc", symbol: "CFA", fractionDigits: 0 },
-  { country: "Nigeria", code: "NGN", name: "Nigerian Naira", symbol: "\u20a6", fractionDigits: 2 },
-  { country: "Ghana", code: "GHS", name: "Ghanaian Cedi", symbol: "GH\u20b5", fractionDigits: 2 },
-  { country: "The Gambia", code: "GMD", name: "Gambian Dalasi", symbol: "D", fractionDigits: 2 },
-  { country: "Guinea", code: "GNF", name: "Guinean Franc", symbol: "FG", fractionDigits: 0 },
-  { country: "Liberia", code: "LRD", name: "Liberian Dollar", symbol: "$", fractionDigits: 2 },
-  { country: "Sierra Leone", code: "SLE", name: "Sierra Leonean Leone", symbol: "Le", fractionDigits: 2 },
-  { country: "Mauritania", code: "MRU", name: "Mauritanian Ouguiya", symbol: "UM", fractionDigits: 2 },
-] as const;
+export const DEFAULT_BUSINESS_CURRENCY = "USD";
 
-export type SupportedCurrencyCode =
-  (typeof SUPPORTED_CURRENCIES)[number]["code"];
-
-export function normalizeCurrency(value?: string | null): SupportedCurrencyCode {
+export function normalizeCurrency(value?: string | null): string {
   const normalized = value?.trim().toUpperCase();
-  return SUPPORTED_CURRENCIES.some((currency) => currency.code === normalized)
-    ? (normalized as SupportedCurrencyCode)
-    : DEFAULT_BUSINESS_CURRENCY;
+  return normalized && /^[A-Z]{3}$/.test(normalized) ? normalized : DEFAULT_BUSINESS_CURRENCY;
 }
 
 export function getCurrencyOption(value?: string | null) {
   const code = normalizeCurrency(value);
-  return (
-    SUPPORTED_CURRENCIES.find((currency) => currency.code === code) ??
-    SUPPORTED_CURRENCIES[0]
-  );
+  const country = countryOptions.find((option) => option.currency === code);
+  let symbol = code;
+  let fractionDigits = 2;
+  try {
+    const parts = new Intl.NumberFormat("en", { style: "currency", currency: code }).formatToParts(0);
+    symbol = parts.find((part) => part.type === "currency")?.value ?? code;
+    fractionDigits = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits ?? 2;
+  } catch {
+    // Keep the ISO code visible if a platform does not recognise a legacy currency.
+  }
+  return { code, name: country ? `${country.name} ${code}` : code, symbol, fractionDigits };
 }
 
 export function formatMoney(
@@ -39,21 +28,18 @@ export function formatMoney(
 ) {
   const amount = Number(value ?? 0);
   const currency = getCurrencyOption(currencyCode);
-  const formatted = amount.toLocaleString("en-US", {
-    minimumFractionDigits: currency.fractionDigits,
-    maximumFractionDigits: currency.fractionDigits,
-  });
-
-  if (
-    currency.code === "XAF" ||
-    currency.code === "XOF" ||
-    currency.code === "GNF" ||
-    currency.code === "SLE" ||
-    currency.code === "MRU" ||
-    currency.code === "GMD"
-  ) {
-    return `${currency.symbol} ${formatted}`;
+  const legacyZeroDecimalSymbols: Record<string, string> = { XAF: "FCFA", XOF: "CFA", GNF: "FG" };
+  if (legacyZeroDecimalSymbols[currency.code]) {
+    return `${legacyZeroDecimalSymbols[currency.code]} ${amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   }
-
-  return `${currency.symbol}${formatted}`;
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.code,
+      minimumFractionDigits: currency.fractionDigits,
+      maximumFractionDigits: currency.fractionDigits,
+    }).format(Number.isFinite(amount) ? amount : 0);
+  } catch {
+    return `${currency.symbol} ${amount.toLocaleString("en-US", { minimumFractionDigits: currency.fractionDigits, maximumFractionDigits: currency.fractionDigits })}`;
+  }
 }

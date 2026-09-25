@@ -1,5 +1,5 @@
 import React from "react";
-import { Bell, Building2, Globe, HelpCircle, LogOut, Palette, ReceiptText, Shield, User } from "lucide-react-native";
+import { Bell, Building2, CircleDollarSign, Globe, HelpCircle, LogOut, Palette, ReceiptText, Shield, User } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import { SimpleRow, ListScreen } from "@/screens/shared/ScreenKit";
 import { useAuthStore } from "@/store/authStore";
@@ -25,6 +25,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
   const rows: SettingsRow[] = [
     ...(role === "owner" ? [
       { label: "Business Profile", icon: Building2, route: "BusinessProfile" },
+      { label: "Country & Currency", icon: CircleDollarSign, route: "CountryCurrencySettings" },
       { label: "Receipt Settings", icon: ReceiptText, route: "ReceiptSettings" },
       { label: "Tax Settings", icon: Shield, route: "TaxSettings" },
       { label: "Printer Settings", icon: ReceiptText, route: "PrinterSettings" }

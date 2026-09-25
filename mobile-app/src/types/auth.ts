@@ -35,6 +35,8 @@ export interface RegisterOwnerRequest {
   businessName: string;
   businessType?: string;
   businessAddress?: string;
+  businessCountry: string;
+  currency: string;
   ownerFullName: string;
   ownerPhone?: string;
   ownerEmail: string;

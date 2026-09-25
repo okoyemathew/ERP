@@ -1,21 +1,26 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Check } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Button, ScreenHeader } from "@/components/common";
-import { languageOptions, Text, useTranslation, type SupportedLocale } from "@/i18n";
+import { Button, ScreenHeader, SearchBar } from "@/components/common";
+import { languageOptions, Text, useTranslation } from "@/i18n";
 import { colors } from "@/theme";
 
 export function LanguageScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const { locale, setLocale } = useTranslation();
-  const [selected, setSelected] = useState<SupportedLocale>(locale);
+  const [selected, setSelected] = useState(locale);
+  const [search, setSearch] = useState("");
+  const filteredLanguages = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return query ? languageOptions.filter((language) => `${language.name} ${language.country}`.toLocaleLowerCase().includes(query)) : languageOptions;
+  }, [search]);
 
   useEffect(() => {
     setSelected(locale);
   }, [locale]);
 
-  const selectLanguage = (nextLocale: SupportedLocale) => {
+  const selectLanguage = (nextLocale: string) => {
     setSelected(nextLocale);
     void setLocale(nextLocale);
   };
@@ -34,11 +39,13 @@ export function LanguageScreen({ navigation }: { navigation: any }) {
         persistentScrollbar
       >
         <Text style={styles.subtitle}>Select your preferred language to continue</Text>
+        <SearchBar value={search} onChangeText={setSearch} placeholder="Search languages or countries" />
         <View style={styles.grid}>
-          {languageOptions.map((language) => (
-            <Pressable key={language.locale} style={[styles.card, selected === language.locale && styles.selected]} onPress={() => selectLanguage(language.locale)} accessibilityLabel={`Select ${language.name}`}>
-              <Text style={styles.flag}>{language.code}</Text>
+          {filteredLanguages.map((language) => (
+            <Pressable key={`${language.locale}-${language.country}`} style={[styles.card, selected === language.locale && styles.selected]} onPress={() => selectLanguage(language.locale)} accessibilityLabel={`Select ${language.name}`}>
+              <Text style={styles.flag}>{language.locale.toUpperCase()}</Text>
               <Text style={[styles.name, selected === language.locale && styles.selectedText]}>{language.name}</Text>
+              <Text style={styles.country}>{language.country}</Text>
               <Text style={styles.select}>Select</Text>
               {selected === language.locale ? (
                 <View style={styles.check}>
@@ -71,6 +78,7 @@ const styles = StyleSheet.create({
   selected: { borderColor: colors.primary, backgroundColor: "#EFF6FF" },
   flag: { fontSize: 26, marginBottom: 12 },
   name: { color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
+  country: { color: colors.textPlaceholder, fontSize: 10, marginTop: 2 },
   selectedText: { color: colors.primary },
   select: { color: colors.textPlaceholder, fontSize: 11, marginTop: 4 },
   check: {

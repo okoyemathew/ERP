@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Button, Input, ScreenHeader, StepProgressBar } from "@/components/common";
+import { Button, CountrySelectField, Input, ScreenHeader, StepProgressBar } from "@/components/common";
 import { authService } from "@/services/auth.service";
 import { colors } from "@/theme";
 
@@ -12,6 +12,8 @@ export function RegisterScreen({ navigation }: { navigation: any }) {
   const [businessName, setBusinessName] = useState("");
   const [businessType, setBusinessType] = useState("");
   const [businessAddress, setBusinessAddress] = useState("");
+  const [businessCountry, setBusinessCountry] = useState("");
+  const [currency, setCurrency] = useState("USD");
   const [ownerFullName, setOwnerFullName] = useState("");
   const [ownerPhone, setOwnerPhone] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
@@ -21,8 +23,9 @@ export function RegisterScreen({ navigation }: { navigation: any }) {
   const [error, setError] = useState<string | null>(null);
 
   const validateCurrentStep = () => {
-    if (step === 0 && !businessName.trim()) {
-      return "Enter your business name.";
+    if (step === 0) {
+      if (!businessName.trim()) return "Enter your business name.";
+      if (!businessCountry) return "Select your business country.";
     }
 
     if (step === 1) {
@@ -58,6 +61,8 @@ export function RegisterScreen({ navigation }: { navigation: any }) {
         businessName: businessName.trim(),
         businessType: businessType.trim() || undefined,
         businessAddress: businessAddress.trim() || undefined,
+        businessCountry,
+        currency,
         ownerFullName: ownerFullName.trim(),
         ownerPhone: ownerPhone.trim() || undefined,
         ownerEmail: ownerEmail.trim().toLowerCase(),
@@ -93,6 +98,7 @@ export function RegisterScreen({ navigation }: { navigation: any }) {
             <Input label="Business Name" placeholder="Becker's Store" value={businessName} onChangeText={setBusinessName} />
             <Input label="Business Type" placeholder="Retail Store" value={businessType} onChangeText={setBusinessType} />
             <Input label="Address" placeholder="123 Main St" value={businessAddress} onChangeText={setBusinessAddress} />
+            <CountrySelectField value={businessCountry} onSelect={(country) => { setBusinessCountry(country.name); setCurrency(country.currency); }} />
           </>
         ) : null}
         {step === 1 ? (

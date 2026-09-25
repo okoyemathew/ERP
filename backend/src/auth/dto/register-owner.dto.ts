@@ -26,6 +26,15 @@ export class RegisterOwnerDto {
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
+  businessCountry!: string;
+
+  @IsString()
+  @Matches(/^[A-Z]{3}$/)
+  currency!: string;
+
+  @IsString()
+  @IsNotEmpty()
   @MaxLength(120)
   ownerFullName!: string;
 
