@@ -1,5 +1,5 @@
-import React from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import React, { useMemo } from "react";
+import { PanResponder, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { ArrowUpRight } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,6 +9,15 @@ import { formatCurrency } from "@/utils/format";
 
 export function AdvertScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
+  const panResponder = useMemo(
+    () => PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 18 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dx < -56) navigation.navigate("Language");
+      },
+    }),
+    [navigation],
+  );
 
   return (
     <ScrollView
@@ -16,6 +25,7 @@ export function AdvertScreen({ navigation }: { navigation: any }) {
       contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 24), paddingBottom: Math.max(insets.bottom, 24) + 28 }]}
       showsVerticalScrollIndicator
       persistentScrollbar
+      {...panResponder.panHandlers}
     >
       <View style={styles.preview}>
         <Card style={styles.card}>

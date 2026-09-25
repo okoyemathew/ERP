@@ -1,10 +1,9 @@
-import React, { useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { PanResponder, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Package, Shield, TrendingUp, Users } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { markOnboardingCompleted } from "@/api/authFlowStorage";
 import { Button } from "@/components/common";
 import { colors } from "@/theme";
 
@@ -20,19 +19,28 @@ export function OnboardingScreen({ navigation }: { navigation: any }) {
   const [page, setPage] = useState(0);
   const slide = slides[page];
   const Icon = slide.icon;
-  const goToLogin = async () => {
-    await markOnboardingCompleted();
-    navigation.replace("Login");
-  };
-  const next = () => (page < slides.length - 1 ? setPage(page + 1) : void goToLogin());
+  const goToLanguage = () => navigation.navigate("Language");
+  const next = () => (page < slides.length - 1 ? setPage(page + 1) : goToLanguage());
+  const previous = () => setPage((current) => Math.max(0, current - 1));
+  const panResponder = useMemo(
+    () => PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 18 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dx < -56) next();
+        if (gesture.dx > 56) previous();
+      },
+    }),
+    [page, navigation],
+  );
   return (
     <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.screen}>
       <ScrollView
         contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top, 24), paddingBottom: Math.max(insets.bottom, 24) + 24 }]}
         showsVerticalScrollIndicator
         persistentScrollbar
+        {...panResponder.panHandlers}
       >
-        <Pressable onPress={() => void goToLogin()} style={styles.skip} accessibilityLabel="Skip onboarding">
+        <Pressable onPress={goToLanguage} style={styles.skip} accessibilityLabel="Skip onboarding">
           <Text style={styles.skipText}>Skip</Text>
         </Pressable>
         <View style={styles.center}>
