@@ -92,6 +92,18 @@ function dayRangeFromSearch(value: string) {
   };
 }
 
+function parsePrintDate(value: string, endOfDay: boolean) {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(year, month - 1, day);
+  if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day) return null;
+  parsed.setHours(endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0);
+  return parsed;
+}
+
 function employeeName(employee: ApiEmployee) {
   return `${employee.firstName} ${employee.lastName}`.trim() || employee.user.username;
 }
@@ -152,6 +164,9 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [loadingMoreSales, setLoadingMoreSales] = useState(false);
   const [selectedSale, setSelectedSale] = useState<ApiSale | null>(null);
   const [printPeriodVisible, setPrintPeriodVisible] = useState(false);
+  const [printYear, setPrintYear] = useState(String(new Date().getFullYear()));
+  const [printStartDate, setPrintStartDate] = useState(`${new Date().getFullYear()}-01-01`);
+  const [printEndDate, setPrintEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const supplyProductsRequestId = useRef(0);
@@ -371,9 +386,13 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     }
   };
 
-  const printSalesRecordForPeriod = useCallback(async (period: "daily" | "weekly" | "monthly") => {
+  const printSalesRecordForPeriod = useCallback(async (
+    period: "daily" | "weekly" | "monthly" | "annual" | "custom",
+    yearValue = printYear,
+    startValue = printStartDate,
+    endValue = printEndDate,
+  ) => {
     if (!profile) return;
-    setPrintPeriodVisible(false);
     try {
       const now = new Date();
       const startDate = new Date(now);
@@ -385,11 +404,34 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       } else if (period === "weekly") {
         startDate.setDate(endDate.getDate() - 6);
         startDate.setHours(0, 0, 0, 0);
-      } else {
+      } else if (period === "monthly") {
         startDate.setDate(1);
         startDate.setHours(0, 0, 0, 0);
+      } else if (period === "annual") {
+        if (!/^\d{4}$/.test(yearValue) || Number(yearValue) < 1) {
+          Alert.alert("Invalid year", "Enter a four-digit year, for example 2020.");
+          return;
+        }
+        startDate.setFullYear(Number(yearValue), 0, 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setFullYear(Number(yearValue), 11, 31);
+        endDate.setHours(23, 59, 59, 999);
+      } else {
+        const parsedStart = parsePrintDate(startValue, false);
+        const parsedEnd = parsePrintDate(endValue, true);
+        if (!parsedStart || !parsedEnd) {
+          Alert.alert("Invalid dates", "Enter both dates using YYYY-MM-DD format.");
+          return;
+        }
+        if (parsedStart > parsedEnd) {
+          Alert.alert("Invalid date range", "The start date must be on or before the end date.");
+          return;
+        }
+        startDate.setTime(parsedStart.getTime());
+        endDate.setTime(parsedEnd.getTime());
       }
 
+      setPrintPeriodVisible(false);
       const params = {
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
@@ -402,7 +444,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       const message = printError instanceof Error ? printError.message : "Unable to print sales record.";
       Alert.alert("Unable to print", message);
     }
-  }, [isSelfProfile, profile]);
+  }, [isSelfProfile, printEndDate, printStartDate, printYear, profile]);
 
   const printSalesRecord = () => {
     if (!profile) return;
@@ -866,6 +908,46 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                 <Text style={styles.printActionText}>Monthly</Text>
               </Pressable>
             </View>
+            <View style={styles.printExtraRow}>
+              <TextInput
+                value={printYear}
+                onChangeText={setPrintYear}
+                style={styles.printDateInput}
+                placeholder="Year (e.g. 2020)"
+                placeholderTextColor={colors.textPlaceholder}
+                keyboardType="number-pad"
+                maxLength={4}
+                accessibilityLabel="Annual report year"
+              />
+              <Pressable style={styles.printAction} onPress={() => void printSalesRecordForPeriod("annual")} accessibilityRole="button" accessibilityLabel="Print annual sales record">
+                <Text style={styles.printActionText}>Print year</Text>
+              </Pressable>
+            </View>
+            <View style={styles.printCustomDates}>
+              <TextInput
+                value={printStartDate}
+                onChangeText={setPrintStartDate}
+                style={[styles.printDateInput, styles.printRangeInput]}
+                placeholder="Start YYYY-MM-DD"
+                placeholderTextColor={colors.textPlaceholder}
+                keyboardType="numbers-and-punctuation"
+                maxLength={10}
+                accessibilityLabel="Custom report start date"
+              />
+              <TextInput
+                value={printEndDate}
+                onChangeText={setPrintEndDate}
+                style={[styles.printDateInput, styles.printRangeInput]}
+                placeholder="End YYYY-MM-DD"
+                placeholderTextColor={colors.textPlaceholder}
+                keyboardType="numbers-and-punctuation"
+                maxLength={10}
+                accessibilityLabel="Custom report end date"
+              />
+            </View>
+            <Pressable style={styles.printAction} onPress={() => void printSalesRecordForPeriod("custom")} accessibilityRole="button" accessibilityLabel="Print sales record for selected dates">
+              <Text style={styles.printActionText}>Print date range</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -1057,6 +1139,10 @@ const styles = StyleSheet.create({
   printTitle: { color: colors.foreground, fontSize: 20, fontWeight: "900" },
   printMessage: { color: colors.textSecondary, fontSize: 15, lineHeight: 22 },
   printActions: { flexDirection: "row", justifyContent: "space-between", gap: 8, marginTop: 14 },
+  printExtraRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
+  printCustomDates: { flexDirection: "row", gap: 8 },
+  printDateInput: { flex: 1, minHeight: 44, borderWidth: 1, borderColor: colors.borderLight, borderRadius: 10, paddingHorizontal: 10, color: colors.foreground, backgroundColor: colors.inputBg, fontSize: 13 },
+  printRangeInput: { minWidth: 0 },
   printAction: { minHeight: 44, minWidth: 80, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 10 },
   printActionText: { color: colors.primary, fontSize: 13, fontWeight: "900", textTransform: "uppercase", letterSpacing: 0.8 },
   supplyModal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },

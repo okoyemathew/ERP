@@ -5,6 +5,7 @@ import type { ApiProduct, ProductReturnRequest } from "@/types/product";
 import type { ApiMutationPayload, SyncPayload, SyncQueueItem, SyncOperationType, SyncQueueStatus } from "@/types/sync";
 import type { ApiSale, CreateSalePayload } from "@/types/sales";
 import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
+import type { ApiSupplier } from "@/types/supplier";
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
@@ -67,6 +68,12 @@ async function getDb() {
       payload TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS supplier_cache (
+      id TEXT PRIMARY KEY NOT NULL,
+      businessId TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS sync_queue (
       id TEXT PRIMARY KEY NOT NULL,
       businessId TEXT,
@@ -103,6 +110,7 @@ export const offlineDbService = {
         DELETE FROM expense_category_cache;
         DELETE FROM product_return_request_cache;
         DELETE FROM goods_disbursement_cache;
+        DELETE FROM supplier_cache;
       `);
     });
   },
@@ -132,6 +140,48 @@ export const offlineDbService = {
       businessId
     );
     return rows.map((row) => JSON.parse(row.payload) as ApiProduct);
+  },
+
+  async cacheSuppliers(businessId: string, suppliers: ApiSupplier[]) {
+    const db = await getDb();
+    const updatedAt = new Date().toISOString();
+    for (const supplier of suppliers) {
+      await db.runAsync(
+        "INSERT OR REPLACE INTO supplier_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+        supplier.id,
+        businessId,
+        JSON.stringify(supplier),
+        updatedAt
+      );
+    }
+  },
+
+  async cacheSupplier(businessId: string, supplier: ApiSupplier) {
+    await this.cacheSuppliers(businessId, [supplier]);
+  },
+
+  async getCachedSuppliers(businessId: string): Promise<ApiSupplier[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ payload: string }>(
+      "SELECT payload FROM supplier_cache WHERE businessId = ? ORDER BY updatedAt DESC",
+      businessId
+    );
+    return rows.map((row) => JSON.parse(row.payload) as ApiSupplier);
+  },
+
+  async getCachedSupplier(businessId: string, supplierId: string): Promise<ApiSupplier | null> {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ payload: string }>(
+      "SELECT payload FROM supplier_cache WHERE businessId = ? AND id = ?",
+      businessId,
+      supplierId
+    );
+    return row ? JSON.parse(row.payload) as ApiSupplier : null;
+  },
+
+  async removeCachedSupplier(businessId: string, supplierId: string) {
+    const db = await getDb();
+    await db.runAsync("DELETE FROM supplier_cache WHERE businessId = ? AND id = ?", businessId, supplierId);
   },
 
   async getCachedProduct(businessId: string, productId: string): Promise<ApiProduct | null> {

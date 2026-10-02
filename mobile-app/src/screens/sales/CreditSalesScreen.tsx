@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
+import { useFocusEffect } from "@react-navigation/native";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Check, CreditCard, Edit3, FileDown, HandCoins, Printer, RotateCcw, Search, Send, Trash2, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -165,9 +166,11 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
     return () => clearTimeout(timer);
   }, [loadCredits, query]);
 
-  useEffect(() => {
-    void loadCredits();
-  }, [loadCredits]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadCredits(query);
+    }, [loadCredits, query])
+  );
 
   useEffect(() => {
     void loadApprovalRequests();

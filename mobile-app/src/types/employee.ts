@@ -166,7 +166,7 @@ export interface EmployeeSalesPrintResponse {
       undatedRepayments: string | number;
       reconciliationDifference: string | number;
     };
-    sales: Array<Pick<import("./sales").ApiSale, "id" | "saleNumber" | "saleDate" | "totalAmount" | "amountPaid" | "balanceDue">>;
+  sales: Array<Pick<import("./sales").ApiSale, "id" | "saleNumber" | "saleDate" | "totalAmount" | "amountPaid" | "balanceDue"> & { profit: string | number }>;
   };
 }
 

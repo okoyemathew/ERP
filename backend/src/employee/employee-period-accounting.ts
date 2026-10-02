@@ -56,6 +56,7 @@ export function employeePeriodAccounting(
     totalAmount: Prisma.Decimal;
     amountPaid: Prisma.Decimal;
     balanceDue: Prisma.Decimal;
+    profit: Prisma.Decimal;
   }> = [];
   const collections: Array<{
     id: string;
@@ -181,7 +182,8 @@ export function employeePeriodAccounting(
     );
     let balance = zero(),
       received = zero(),
-      returned = zero();
+      returned = zero(),
+      periodProfit = zero();
     for (const event of events) {
       if (event.date.getTime() > end) continue;
       const before = balance;
@@ -191,6 +193,7 @@ export function employeePeriodAccounting(
         if (current) {
           grossSales = grossSales.add(event.amount);
           grossProfit = grossProfit.add(event.profit);
+          periodProfit = periodProfit.add(event.profit);
           newCreditIssued = newCreditIssued.add(event.amount);
         }
       } else if (event.kind === 'payment') {
@@ -224,6 +227,7 @@ export function employeePeriodAccounting(
         if (current) {
           salesReturns = salesReturns.add(event.amount);
           grossProfit = grossProfit.sub(event.profit);
+          periodProfit = periodProfit.sub(event.profit);
           creditReturnReductions = creditReturnReductions.add(reduction);
           const customerCredit = event.amount.sub(reduction);
           customerCreditFromReturns =
@@ -253,6 +257,7 @@ export function employeePeriodAccounting(
           Prisma.Decimal.max(0, original.sub(returned)),
         ),
         balanceDue: balance,
+        profit: periodProfit.toDecimalPlaces(2),
       });
   }
   const expectedClosing = openingCredit

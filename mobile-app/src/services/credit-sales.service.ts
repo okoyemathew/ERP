@@ -1,5 +1,8 @@
 import { api } from "@/api/client";
 import { endpoints } from "@/api/endpoints";
+import { AppApiError } from "@/api/errors";
+import { getRequiredAuthContext } from "@/api/session";
+import { offlineDbService } from "@/services/offline-db.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import type { ApiCreditSale, CreditPaymentPayload, CreditSaleActionRequest, CreditSaleEmployeeAction, CreditSaleListResponse, CustomerCreditResponse } from "@/types/creditSale";
 
@@ -48,25 +51,171 @@ function fallbackActionRequest(id: string, action: CreditSaleEmployeeAction, rea
   };
 }
 
+function queuedCreditSalesToResponse(sales: Awaited<ReturnType<typeof offlineDbService.getQueuedOfflineSales>>, search = ""): CreditSaleListResponse {
+  const normalizedSearch = search.trim().toLowerCase();
+  const data: ApiCreditSale[] = sales.flatMap((sale) => {
+    const creditAmount = sale.payments
+      .filter((payment) => payment.paymentMethod === "CREDIT")
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const balance = Math.max(0, Number(sale.balanceDue) || 0);
+    if (creditAmount <= 0) return [];
+
+    const customerName = sale.customer
+      ? sale.customer.companyName || [sale.customer.firstName, sale.customer.lastName].filter(Boolean).join(" ") || sale.customer.phone
+      : "Walk-in Customer";
+    const items = sale.items.map((item) => ({
+      id: item.id,
+      productId: item.productId,
+      productName: item.product.name,
+      sku: item.product.sku,
+      barcode: item.product.barcode,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      totalAmount: item.totalAmount,
+      originalQuantity: item.originalQuantity,
+      returnedQuantity: item.returnedQuantity,
+      originalTotalAmount: item.originalTotalAmount,
+      returnedValue: item.returnedValue,
+    }));
+    if (normalizedSearch && ![
+      sale.saleNumber,
+      customerName,
+      sale.customer?.phone,
+      ...items.flatMap((item) => [item.productName, item.sku, item.barcode]),
+    ].some((value) => String(value ?? "").toLowerCase().includes(normalizedSearch))) return [];
+
+    return [{
+      id: sale.id,
+      saleId: sale.id,
+      customerId: sale.customerId ?? "offline-walk-in",
+      totalCredit: creditAmount,
+      amountPaid: Math.max(creditAmount - balance, 0),
+      balance,
+      dueDate: null,
+      status: balance <= 0 ? "PAID" : creditAmount > balance ? "PARTIALLY_PAID" : "ACTIVE",
+      isOverdue: false,
+      createdAt: sale.saleDate,
+      updatedAt: sale.saleDate,
+      customer: {
+        id: sale.customer?.id ?? "offline-walk-in",
+        name: customerName,
+        phone: sale.customer?.phone ?? "",
+        status: "ACTIVE",
+        creditLimit: 0,
+        outstandingBalance: balance,
+      },
+      sale: {
+        id: sale.id,
+        saleNumber: sale.saleNumber,
+        saleDate: sale.saleDate,
+        subtotal: sale.subtotal,
+        discountAmount: sale.discountAmount,
+        taxAmount: sale.taxAmount,
+        totalAmount: sale.totalAmount,
+        amountPaid: sale.amountPaid,
+        balanceDue: sale.balanceDue,
+        paymentStatus: sale.paymentStatus,
+        status: sale.status,
+        salesperson: {
+          id: sale.user?.id ?? sale.userId,
+          name: [sale.user?.firstName, sale.user?.lastName].filter(Boolean).join(" ") || sale.user?.username || "Offline Sale",
+          username: sale.user?.username ?? "offline",
+        },
+        items,
+        payments: sale.payments,
+      },
+      payments: [],
+    }];
+  });
+  const totalCreditIssued = data.reduce((sum, credit) => sum + Number(credit.totalCredit), 0);
+  const totalOutstandingCredit = data.reduce((sum, credit) => sum + Number(credit.balance), 0);
+  const totalCollected = data.reduce((sum, credit) => sum + Number(credit.amountPaid), 0);
+  return {
+    summary: {
+      totalCreditSales: data.length,
+      totalCreditIssued,
+      totalOutstandingCredit,
+      totalCollected,
+      overdueAmount: 0,
+      activeCreditAccounts: data.filter((credit) => Number(credit.balance) > 0).length,
+      paidCreditAccounts: data.filter((credit) => Number(credit.balance) <= 0).length,
+      overdueAccounts: 0,
+    },
+    data,
+    meta: { page: 1, limit: data.length, total: data.length, totalPages: data.length ? 1 : 0 },
+  };
+}
+
+async function getQueuedCreditSales(search = "") {
+  const { businessId, userId } = await getRequiredAuthContext();
+  return queuedCreditSalesToResponse(await offlineDbService.getQueuedOfflineSales(businessId, userId), search);
+}
+
+function isOfflineError(error: unknown) {
+  return error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT");
+}
+
+function mergeQueuedCredits(remote: CreditSaleListResponse, queued: CreditSaleListResponse): CreditSaleListResponse {
+  const remoteSaleIds = new Set(remote.data.map((credit) => credit.saleId));
+  const newQueued = queued.data.filter((credit) => !remoteSaleIds.has(credit.saleId));
+  if (!newQueued.length) return remote;
+  const data = [...remote.data, ...newQueued];
+  return {
+    ...remote,
+    summary: {
+      totalCreditSales: remote.summary.totalCreditSales + newQueued.length,
+      totalCreditIssued: Number(remote.summary.totalCreditIssued) + newQueued.reduce((sum, credit) => sum + Number(credit.totalCredit), 0),
+      totalOutstandingCredit: Number(remote.summary.totalOutstandingCredit) + newQueued.reduce((sum, credit) => sum + Number(credit.balance), 0),
+      totalCollected: Number(remote.summary.totalCollected) + newQueued.reduce((sum, credit) => sum + Number(credit.amountPaid), 0),
+      overdueAmount: remote.summary.overdueAmount,
+      activeCreditAccounts: remote.summary.activeCreditAccounts + newQueued.filter((credit) => Number(credit.balance) > 0).length,
+      paidCreditAccounts: remote.summary.paidCreditAccounts + newQueued.filter((credit) => Number(credit.balance) <= 0).length,
+      overdueAccounts: remote.summary.overdueAccounts,
+    },
+    data,
+    meta: { ...remote.meta, total: remote.meta.total + newQueued.length },
+  };
+}
+
 export const creditSalesService = {
   async list(params: Record<string, string | number | boolean | undefined> = {}): Promise<CreditSaleListResponse> {
-    const { data } = await api.get<CreditSaleListResponse>(endpoints.creditSales.list, { params });
-    return data;
+    try {
+      const { data } = await api.get<CreditSaleListResponse>(endpoints.creditSales.list, { params });
+      return mergeQueuedCredits(data, await getQueuedCreditSales(String(params.search ?? "")));
+    } catch (error) {
+      if (!isOfflineError(error)) throw error;
+      return getQueuedCreditSales(String(params.search ?? ""));
+    }
   },
 
   async outstanding(params: Record<string, string | number | boolean | undefined> = {}): Promise<CreditSaleListResponse> {
-    const { data } = await api.get<CreditSaleListResponse>("/credit-sales/outstanding", { params });
-    return data;
+    try {
+      const { data } = await api.get<CreditSaleListResponse>("/credit-sales/outstanding", { params });
+      return mergeQueuedCredits(data, await getQueuedCreditSales(String(params.search ?? "")));
+    } catch (error) {
+      if (!isOfflineError(error)) throw error;
+      return getQueuedCreditSales(String(params.search ?? ""));
+    }
   },
 
   async posOutstanding(params: Record<string, string | number | boolean | undefined> = {}): Promise<CreditSaleListResponse> {
-    const { data } = await api.get<CreditSaleListResponse>("/credit-sales/pos/outstanding", { params });
-    return data;
+    try {
+      const { data } = await api.get<CreditSaleListResponse>("/credit-sales/pos/outstanding", { params });
+      return mergeQueuedCredits(data, await getQueuedCreditSales(String(params.search ?? "")));
+    } catch (error) {
+      if (!isOfflineError(error)) throw error;
+      return getQueuedCreditSales(String(params.search ?? ""));
+    }
   },
 
   async search(query: string, params: Record<string, string | number | boolean | undefined> = {}): Promise<CreditSaleListResponse> {
-    const { data } = await api.get<CreditSaleListResponse>("/credit-sales/search", { params: { ...params, q: query } });
-    return data;
+    try {
+      const { data } = await api.get<CreditSaleListResponse>("/credit-sales/search", { params: { ...params, q: query } });
+      return mergeQueuedCredits(data, await getQueuedCreditSales(query));
+    } catch (error) {
+      if (!isOfflineError(error)) throw error;
+      return getQueuedCreditSales(query);
+    }
   },
 
   async detail(id: string): Promise<ApiCreditSale> {

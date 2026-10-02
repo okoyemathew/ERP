@@ -69,7 +69,11 @@ async function refreshAccessToken() {
       await saveAccessToken(data.accessToken);
       await saveRefreshToken(data.refreshToken);
       return data.accessToken;
-    } catch {
+    } catch (error) {
+      const apiError = normalizeApiError(error);
+      if (apiError.code !== "UNAUTHORIZED" && apiError.code !== "FORBIDDEN") {
+        throw apiError;
+      }
       await clearAuthStorage();
       unauthorizedHandler?.();
       return null;
@@ -112,7 +116,31 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && original && !original._retry && !publicAuthEndpoint) {
       original._retry = true;
-      const refreshedToken = await refreshAccessToken();
+      let refreshedToken: string | null;
+      try {
+        refreshedToken = await refreshAccessToken();
+      } catch (refreshError) {
+        const refreshApiError = normalizeApiError(refreshError);
+        if (
+          original.method?.toUpperCase() === "GET" &&
+          !isAccountingPrint(original.url) &&
+          (refreshApiError.code === "NETWORK" || refreshApiError.code === "TIMEOUT")
+        ) {
+          const cacheKey = await scopedApiCacheKey(original.method, original.url, original.params);
+          const cached = await offlineApiCacheService.get(cacheKey);
+          if (cached !== null) {
+            return {
+              data: cached,
+              status: 200,
+              statusText: "OK",
+              headers: {},
+              config: original,
+              request: error.request
+            } satisfies AxiosResponse;
+          }
+        }
+        return Promise.reject(refreshApiError);
+      }
       if (refreshedToken) {
         original.headers.Authorization = `Bearer ${refreshedToken}`;
         return api(original);

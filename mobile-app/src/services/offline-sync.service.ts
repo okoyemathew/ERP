@@ -14,6 +14,9 @@ function createOperationId(deviceId: string) {
   return `${deviceId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+type SyncSummary = { synced: number; failed: number };
+let syncInFlight: Promise<SyncSummary> | null = null;
+
 export const offlineSyncService = {
   async isOnline() {
     const state = await NetInfo.fetch();
@@ -100,7 +103,15 @@ export const offlineSyncService = {
     return { synced, failed, interrupted: false };
   },
 
-  async syncPending() {
+  syncPending(): Promise<SyncSummary> {
+    if (syncInFlight) return syncInFlight;
+    syncInFlight = this.performSyncPending().finally(() => {
+      syncInFlight = null;
+    });
+    return syncInFlight;
+  },
+
+  async performSyncPending(): Promise<SyncSummary> {
     if (!(await this.isOnline())) return { synced: 0, failed: 0 };
     const { businessId, userId } = await getRequiredAuthContext();
     const operations = await offlineDbService.pendingOperations(businessId, userId);

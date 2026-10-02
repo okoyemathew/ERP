@@ -1353,7 +1353,7 @@ export class EmployeeService {
       'Return credits are not proof of cash refunds. Refund payments require separate records.',
       ...(summary.undatedRepayments.gt(0) ? [`WARNING: ${money(summary.undatedRepayments)} of legacy repayments have no dated payment records and cannot be assigned to a period.`] : []),
       '', 'INVOICES ISSUED IN PERIOD (balances at period end)',
-      ...report.sales.map(sale => `${sale.saleNumber} | ${sale.saleDate.toISOString()} | Net: ${money(sale.totalAmount)} | Collected by period end: ${money(sale.amountPaid)} | Due: ${money(sale.balanceDue)}`),
+      ...report.sales.map(sale => `${sale.saleNumber} | ${sale.saleDate.toISOString()} | Net: ${money(sale.totalAmount)} | Profit: ${money(sale.profit)} | Collected by period end: ${money(sale.amountPaid)} | Due: ${money(sale.balanceDue)}`),
       '', 'PAYMENTS RECEIVED IN PERIOD',
       ...report.collections.map(payment => `${payment.paymentDate.toISOString()} | ${payment.saleNumber} | Invoice date: ${payment.invoiceDate.toISOString()} | ${payment.paymentMethod} | ${money(payment.amount)}`),
       '', 'RETURNS APPROVED IN PERIOD',
