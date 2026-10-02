@@ -5,6 +5,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { RotateCcw, Truck, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
+import { StockReportExportControl, type StockReportLine } from "@/components/common/StockReportExportControl";
 import { employeesService } from "@/services/employees.service";
 import { productsService } from "@/services/products.service";
 import { useAuthStore } from "@/store/authStore";
@@ -24,6 +25,7 @@ type EmployeeSuppliedProduct = {
   quantityInHand: number;
   suppliedQuantity: number;
   unitValue: string | number;
+  sellingPrice?: string | number;
   lastActivityAt: string;
 };
 type SuppliedListItem = EmployeeSuppliedProduct | StockInHistoryRecord;
@@ -36,12 +38,15 @@ function userName(user?: ProductAddedBy | null) {
 export function SuppliedScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
+  const business = useAuthStore((state) => state.business);
+  const branch = useAuthStore((state) => state.branch);
   const normalizedRoleName = user?.roleName?.trim().toLowerCase();
   const isBusinessOwner = normalizedRoleName ? normalizedRoleName === "owner" : user?.role === "owner" && !user?.employeeId;
   const isEmployeeView = !isBusinessOwner;
   const [query, setQuery] = useState("");
   const [stockHistory, setStockHistory] = useState<StockInHistoryRecord[]>([]);
   const [employeeProducts, setEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
+  const [allEmployeeProducts, setAllEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,8 +70,10 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
           quantityInHand: product.quantityInHand,
           suppliedQuantity: product.suppliedQuantity,
           unitValue: product.unitValue,
+          sellingPrice: product.sellingPrice ?? product.baseSellingPrice,
           lastActivityAt: product.lastActivityAt,
         })) ?? [];
+        setAllEmployeeProducts(products);
         const normalizedSearch = search.trim().toLowerCase();
         setEmployeeProducts(
           normalizedSearch
@@ -125,6 +132,32 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const totalStockValue = employeeProducts.reduce((sum, product) => sum + money(product.unitValue) * product.quantityInHand, 0);
   const dataIsEmpty = isEmployeeView ? employeeProducts.length === 0 : stockHistory.length === 0;
   const headerTitle = "Supplied Products";
+
+  const loadStockForReport = async (): Promise<StockReportLine[]> => {
+    if (isEmployeeView) {
+      return allEmployeeProducts.map((product) => ({
+        name: product.productName,
+        sku: product.sku ?? product.barcode,
+        quantity: product.quantityInHand,
+        buyingPrice: money(product.unitValue),
+        sellingPrice: money(product.sellingPrice),
+      }));
+    }
+
+    const firstPage = await productsService.list({ page: 1, limit: 100, sortBy: "createdAt", sortOrder: "desc" });
+    const allProducts = [...firstPage.data];
+    for (let page = 2; page <= firstPage.meta.totalPages; page += 1) {
+      const response = await productsService.list({ page, limit: 100, sortBy: "createdAt", sortOrder: "desc" });
+      allProducts.push(...response.data);
+    }
+    return allProducts.map((product) => ({
+      name: product.name,
+      sku: product.sku,
+      quantity: product.inventory?.quantityAvailable ?? 0,
+      buyingPrice: money(product.purchasePrice),
+      sellingPrice: money(product.sellingPrice),
+    }));
+  };
 
   const refresh = () => {
     setRefreshing(true);
@@ -200,7 +233,20 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title={headerTitle} />
+      <ScreenHeader
+        title={headerTitle}
+        right={(
+          <StockReportExportControl
+            title={isEmployeeView ? "Employee Stock Report" : "Warehouse Inventory Report"}
+            businessName={business?.name ?? "Business"}
+            branchName={branch?.name}
+            subjectLabel="Employee"
+            subjectName={isEmployeeView ? [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.username : undefined}
+            loadItems={loadStockForReport}
+            accessibilityLabel={isEmployeeView ? "Download my supplied stock report" : "Download warehouse inventory report"}
+          />
+        )}
+      />
       <FlatList<SuppliedListItem>
         data={isEmployeeView ? employeeProducts : stockHistory}
         keyExtractor={(item) => ("productName" in item ? item.productId : item.id)}

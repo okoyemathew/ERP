@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Archive, DollarSign, FileDown, Package, PackagePlus, Printer, Search, Send, ShoppingBag, Trash2, Wallet } from "lucide-react-native";
 import { AppBottomSheet, Avatar, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
 import { employeesService } from "@/services/employees.service";
+import { StockReportExportControl } from "@/components/common/StockReportExportControl";
 import { goodsDisbursementService } from "@/services/goods-disbursement.service";
 import { printingService } from "@/services/printing.service";
 import { productsService } from "@/services/products.service";
@@ -109,6 +110,8 @@ function supplyRunProductTitle(run: EmployeeSupplyRun) {
 export function EmployeeDetailScreen({ route, navigation }: { route: any; navigation: any }) {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
+  const business = useAuthStore((state) => state.business);
+  const authBranch = useAuthStore((state) => state.branch);
   const canManageProducts = useAuthStore((state) => state.can("products.manage"));
   const isSelfProfile = route.name === "EmployeeSelfProfile";
   const employeeId = isSelfProfile ? user?.employeeId ?? "" : (route.params?.employeeId as string | undefined) ?? "";
@@ -510,7 +513,26 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     if (activeTab === "stock") {
       return (
         <View style={styles.tabContent}>
-          <SearchBar value={stockQuery} onChangeText={setStockQuery} placeholder="Search employee stock" />
+          <View style={styles.stockSearchRow}>
+            <View style={styles.stockSearchInput}>
+              <SearchBar value={stockQuery} onChangeText={setStockQuery} placeholder="Search employee stock" />
+            </View>
+            <StockReportExportControl
+              title="Employee Stock Report"
+              businessName={business?.name ?? "Business"}
+              branchName={employee.user.branch?.name ?? authBranch?.name}
+              subjectLabel="Employee"
+              subjectName={name}
+              loadItems={async () => stockItems.map((item) => ({
+                name: item.productName,
+                sku: item.sku ?? item.barcode,
+                quantity: item.quantityInHand,
+                buyingPrice: Number(item.unitValue) || 0,
+                sellingPrice: Number(item.sellingPrice ?? item.baseSellingPrice) || 0,
+              }))}
+              accessibilityLabel={`Download ${name}'s stock report`}
+            />
+          </View>
           <View style={styles.stockSummary}>
             <View>
               <Text style={styles.summaryLabel}>Total Stock Value</Text>
@@ -1084,6 +1106,8 @@ const styles = StyleSheet.create({
   tabText: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
   tabTextActive: { color: colors.surface },
   tabContent: { gap: 10 },
+  stockSearchRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  stockSearchInput: { flex: 1 },
   stockSummary: { borderRadius: 8, backgroundColor: colors.primary, padding: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   summaryLabel: { color: "rgba(255,255,255,0.78)", fontSize: 11, fontWeight: "700" },
   summaryValue: { color: colors.surface, fontSize: 20, fontWeight: "900", marginTop: 4 },

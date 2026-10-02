@@ -19,7 +19,8 @@ export function OnboardingScreen({ navigation }: { navigation: any }) {
   const [page, setPage] = useState(0);
   const slide = slides[page];
   const Icon = slide.icon;
-  const finishOnboarding = () => navigation.replace("Login");
+  const finishOnboarding = () => navigation.navigate("Language");
+  const skipOnboarding = () => navigation.navigate("Language");
   const next = () => (page < slides.length - 1 ? setPage(page + 1) : finishOnboarding());
   const previous = () => setPage((current) => Math.max(0, current - 1));
   const panResponder = useMemo(
@@ -40,7 +41,7 @@ export function OnboardingScreen({ navigation }: { navigation: any }) {
         persistentScrollbar
         {...panResponder.panHandlers}
       >
-        <Pressable onPress={finishOnboarding} style={styles.skip} accessibilityLabel="Skip onboarding">
+        <Pressable onPress={skipOnboarding} style={styles.skip} accessibilityLabel="Skip onboarding">
           <Text style={styles.skipText}>Skip</Text>
         </Pressable>
         <View style={styles.center}>

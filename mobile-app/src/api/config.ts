@@ -15,4 +15,8 @@ export function assertApiConfigured() {
   if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(apiConfig.baseURL)) {
     throw new Error("API base URL cannot use localhost for a physical Android phone. Use your computer LAN IP backend /api URL.");
   }
+
+  if (process.env.NODE_ENV !== "development" && !apiConfig.baseURL.toLocaleLowerCase().startsWith("https://")) {
+    throw new Error("Production API base URL must use HTTPS to protect data in transit.");
+  }
 }

@@ -125,16 +125,8 @@ export class RateLimitMiddleware implements NestMiddleware {
   }
 
   private getIpAddress(request: Request): string {
-    const forwardedFor = request.headers['x-forwarded-for'];
-
-    if (Array.isArray(forwardedFor)) {
-      return forwardedFor[0] ?? request.ip ?? 'unknown';
-    }
-
-    if (forwardedFor) {
-      return forwardedFor.split(',')[0]?.trim() ?? request.ip ?? 'unknown';
-    }
-
-    return request.ip ?? 'unknown';
+    // Express resolves request.ip using the configured trusted-proxy chain.
+    // Do not trust the raw header, which a client can supply or prepend itself.
+    return request.ip || request.socket.remoteAddress || 'unknown';
   }
 }

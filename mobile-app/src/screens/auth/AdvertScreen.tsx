@@ -52,7 +52,7 @@ export function AdvertScreen({ navigation }: { navigation: any }) {
       <View style={styles.bottom}>
         <Text style={styles.title}>Manage Your Business Smarter</Text>
         <Text style={styles.body}>Sales, inventory, reports, employees and customers in one secure cloud application.</Text>
-        <Button label="Get Started" onPress={() => navigation.navigate("Language")} />
+        <Button label="Get Started" onPress={() => navigation.navigate("Onboarding")} />
         <Button label="Learn More" variant="ghost" onPress={() => navigation.navigate("Onboarding")} style={styles.ghost} />
       </View>
     </ScrollView>

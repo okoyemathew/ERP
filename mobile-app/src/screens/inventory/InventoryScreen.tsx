@@ -5,6 +5,7 @@ import { Check, Package, Plus, Search, X } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Badge, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
+import { StockReportExportControl, type StockReportLine } from "@/components/common/StockReportExportControl";
 import { productsService } from "@/services/products.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
@@ -40,6 +41,8 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   const insets = useSafeAreaInsets();
   const canManage = useAuthStore((state) => state.can("products.manage"));
   const user = useAuthStore((state) => state.user);
+  const business = useAuthStore((state) => state.business);
+  const branch = useAuthStore((state) => state.branch);
   const canReviewReturns = canReviewProductReturns(user);
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState<ApiProduct[]>([]);
@@ -125,6 +128,22 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   };
   const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
+  const loadWarehouseStockForReport = async (): Promise<StockReportLine[]> => {
+    const firstPage = await productsService.list({ page: 1, limit: 100, sortBy: "createdAt", sortOrder: "desc" });
+    const allProducts = [...firstPage.data];
+    for (let page = 2; page <= firstPage.meta.totalPages; page += 1) {
+      const response = await productsService.list({ page, limit: 100, sortBy: "createdAt", sortOrder: "desc" });
+      allProducts.push(...response.data);
+    }
+    return allProducts.map((product) => ({
+      name: product.name,
+      sku: product.sku,
+      quantity: product.inventory?.quantityAvailable ?? 0,
+      buyingPrice: Number(product.purchasePrice) || 0,
+      sellingPrice: Number(product.sellingPrice) || 0,
+    }));
+  };
+
   const requesterName = (request: ProductReturnRequest) => {
     if (!request.requestedBy) return "Employee";
     return [request.requestedBy.firstName, request.requestedBy.lastName].filter(Boolean).join(" ") || request.requestedBy.username;
@@ -164,7 +183,18 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     <View style={styles.screen}>
       <ScreenHeader
         title="Inventory"
-        right={canManage ? <Pressable onPress={() => navigation.navigate("ProductForm")} accessibilityRole="button" accessibilityLabel="Create product"><Plus size={20} color={colors.primary} /></Pressable> : undefined}
+        right={canManage ? (
+          <View style={styles.headerActions}>
+            <StockReportExportControl
+              title="Inventory Report"
+              businessName={business?.name ?? "Business"}
+              branchName={branch?.name}
+              loadItems={loadWarehouseStockForReport}
+              accessibilityLabel="Download warehouse stock report"
+            />
+            <Pressable onPress={() => navigation.navigate("ProductForm")} style={styles.addButton} accessibilityRole="button" accessibilityLabel="Create product"><Plus size={20} color={colors.primary} /></Pressable>
+          </View>
+        ) : undefined}
       />
       <FlatList
         data={products}
@@ -292,6 +322,8 @@ const styles = StyleSheet.create({
   title: { flex: 1, color: colors.textSecondary, fontSize: 13, fontWeight: "800" },
   meta: { color: colors.textPlaceholder, fontSize: 11 },
   searching: { color: colors.textMuted, fontSize: 11, fontWeight: "700" },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 2 },
+  addButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
   progress: { height: 5, borderRadius: 99, backgroundColor: colors.borderLighter, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 99 },
   right: { alignItems: "flex-end", gap: 6 },

@@ -46,6 +46,12 @@ export function apiCacheKey(method?: string, url?: string, params?: unknown) {
 
 export const offlineApiCacheService = {
   getRevision: () => revision,
+  async clearAll() {
+    revision += 1;
+    const db = await getDb();
+    await db.runAsync("DELETE FROM api_response_cache");
+  },
+
   async invalidateSaleReports(businessId: string) {
     revision += 1;
     const db = await getDb();

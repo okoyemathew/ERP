@@ -29,9 +29,9 @@ export function LanguageScreen({ navigation }: { navigation: any }) {
     setPickerVisible(false);
   };
 
-  const continueToOnboarding = async () => {
+  const continueToLogin = async () => {
     await setLocale(selected);
-    navigation.navigate("Onboarding");
+    navigation.replace("Login");
   };
 
   return (
@@ -46,7 +46,7 @@ export function LanguageScreen({ navigation }: { navigation: any }) {
           </View>
           <ChevronDown size={20} color={colors.textMuted} />
         </Pressable>
-        <Button label="Continue" onPress={continueToOnboarding} style={styles.button} />
+        <Button label="Continue" onPress={continueToLogin} style={styles.button} />
       </View>
 
       <Modal visible={pickerVisible} animationType="slide" onRequestClose={() => setPickerVisible(false)}>

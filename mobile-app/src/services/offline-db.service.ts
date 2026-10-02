@@ -93,6 +93,20 @@ async function getDb() {
 }
 
 export const offlineDbService = {
+  async clearCachedRecords() {
+    const db = await getDb();
+    await db.withTransactionAsync(async () => {
+      await db.execAsync(`
+        DELETE FROM product_cache;
+        DELETE FROM customer_cache;
+        DELETE FROM expense_cache;
+        DELETE FROM expense_category_cache;
+        DELETE FROM product_return_request_cache;
+        DELETE FROM goods_disbursement_cache;
+      `);
+    });
+  },
+
   async cacheProducts(businessId: string, products: ApiProduct[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();

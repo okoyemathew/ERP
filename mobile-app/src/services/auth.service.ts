@@ -4,6 +4,8 @@ import { normalizeApiError } from "@/api/errors";
 import { markOnboardingCompleted } from "@/api/authFlowStorage";
 import { clearAuthStorage, getAuthSession, getRefreshToken, saveAccessToken, saveAuthSession, saveRefreshToken } from "@/api/tokenStorage";
 import { deviceService } from "@/services/device.service";
+import { offlineApiCacheService } from "@/services/offline-api-cache.service";
+import { offlineDbService } from "@/services/offline-db.service";
 import type {
   AuthProfileResponse,
   AuthSessionsResponse,
@@ -19,6 +21,14 @@ import type {
   StoredAuthSession
 } from "@/types/auth";
 import { mapBackendUserToAppUser } from "@/types/auth";
+
+async function clearLocalSensitiveData() {
+  await clearAuthStorage();
+  await Promise.all([
+    offlineDbService.clearCachedRecords().catch(() => undefined),
+    offlineApiCacheService.clearAll().catch(() => undefined),
+  ]);
+}
 
 function buildStoredSession(response: LoginResponse, profile?: AuthProfileResponse): StoredAuthSession {
   const profileUser = profile?.user ?? response.user;
@@ -105,7 +115,7 @@ export const authService = {
     const refreshToken = await getRefreshToken();
 
     if (!session || !refreshToken) {
-      await clearAuthStorage();
+      await clearLocalSensitiveData();
       return null;
     }
 
@@ -138,7 +148,7 @@ export const authService = {
         return session;
       }
 
-      await clearAuthStorage();
+      await clearLocalSensitiveData();
       return null;
     }
   },
@@ -182,7 +192,7 @@ export const authService = {
   async revokeSession(sessionId: string) {
     const { data } = await api.post<{ success: true; revokedCurrentSession: boolean }>(endpoints.auth.revokeSession(sessionId));
     if (data.revokedCurrentSession) {
-      await clearAuthStorage();
+      await clearLocalSensitiveData();
     }
     return data;
   },
@@ -193,7 +203,7 @@ export const authService = {
     } catch {
       // Local logout should still succeed if the server is unreachable.
     } finally {
-      await clearAuthStorage();
+      await clearLocalSensitiveData();
     }
   },
 
@@ -203,11 +213,11 @@ export const authService = {
     } catch {
       // Local logout should still succeed if the server is unreachable.
     } finally {
-      await clearAuthStorage();
+      await clearLocalSensitiveData();
     }
   },
 
   async clearLocalSession(): Promise<void> {
-    await clearAuthStorage();
+    await clearLocalSensitiveData();
   }
 };
