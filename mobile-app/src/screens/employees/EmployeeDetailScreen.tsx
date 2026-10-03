@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type GorhomBottomSheet from "@gorhom/bottom-sheet";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
@@ -887,14 +887,26 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
         visible={printPeriodVisible}
         onRequestClose={() => setPrintPeriodVisible(false)}
       >
-        <View style={styles.printModal}>
-          <Pressable
-            style={StyleSheet.absoluteFillObject}
-            accessibilityRole="button"
-            accessibilityLabel="Close print sales record options"
-            onPress={() => setPrintPeriodVisible(false)}
-          />
-          <View style={styles.printDialog}>
+        <KeyboardAvoidingView
+          style={styles.printKeyboardAvoiding}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
+          <View style={styles.printModal}>
+            <Pressable
+              style={StyleSheet.absoluteFillObject}
+              accessibilityRole="button"
+              accessibilityLabel="Close print sales record options"
+              onPress={() => setPrintPeriodVisible(false)}
+            />
+            <ScrollView
+              style={styles.printDialogScroll}
+              contentContainerStyle={styles.printDialogScrollContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              <View style={styles.printDialog}>
             <Text style={styles.printTitle}>Print Sales Record</Text>
             <Text style={styles.printMessage}>Choose the sales period to print.</Text>
             <View style={styles.printActions}>
@@ -948,8 +960,10 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
             <Pressable style={styles.printAction} onPress={() => void printSalesRecordForPeriod("custom")} accessibilityRole="button" accessibilityLabel="Print sales record for selected dates">
               <Text style={styles.printActionText}>Print date range</Text>
             </Pressable>
+              </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {!isSelfProfile && supplySheetVisible ? (
@@ -1134,7 +1148,10 @@ function InfoLine({ label, value, valueColor }: { label: string; value: string; 
 }
 
 const styles = StyleSheet.create({
+  printKeyboardAvoiding: { flex: 1 },
   printModal: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, backgroundColor: "rgba(15, 23, 42, 0.55)" },
+  printDialogScroll: { width: "100%", maxHeight: "100%", flexShrink: 1 },
+  printDialogScrollContent: { flexGrow: 1, justifyContent: "center" },
   printDialog: { width: "100%", borderRadius: 12, backgroundColor: colors.surface, padding: 22, gap: 12, elevation: 8 },
   printTitle: { color: colors.foreground, fontSize: 20, fontWeight: "900" },
   printMessage: { color: colors.textSecondary, fontSize: 15, lineHeight: 22 },
