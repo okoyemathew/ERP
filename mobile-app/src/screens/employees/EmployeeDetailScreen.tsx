@@ -515,6 +515,9 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       item.quantitySold
     ]))
   ), [stockItems, stockQuery, textMatches]);
+  const filteredStockValue = useMemo(() => (
+    filteredStockItems.reduce((total, item) => total + Number(item.unitValue || 0) * Number(item.quantityInHand || 0), 0)
+  ), [filteredStockItems]);
   const filteredSupplyRuns = useMemo(() => (
     supplyRuns.filter((run) => textMatches(suppliesQuery, [
       run.disbursementNumber,
@@ -578,11 +581,11 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
           <View style={styles.stockSummary}>
             <View>
               <Text style={styles.summaryLabel}>Total Stock Value</Text>
-              <Text style={styles.summaryValue}>{formatCurrency(Number(activity?.stats.stockValue ?? 0))}</Text>
+              <Text style={styles.summaryValue}>{formatCurrency(filteredStockValue)}</Text>
             </View>
             <View style={styles.summaryRight}>
               <Text style={styles.summaryLabel}>Items</Text>
-              <Text style={styles.summaryValue}>{activity?.stats.stockItems ?? 0}</Text>
+              <Text style={styles.summaryValue}>{filteredStockItems.length}</Text>
             </View>
           </View>
           {filteredStockItems.length ? filteredStockItems.map((item) => (
