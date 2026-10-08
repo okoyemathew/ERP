@@ -565,7 +565,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               branchName={employee.user.branch?.name ?? authBranch?.name}
               subjectLabel="Employee"
               subjectName={name}
-              loadItems={async () => stockItems.map((item) => ({
+              loadItems={async () => filteredStockItems.map((item) => ({
                 name: item.productName,
                 sku: item.sku ?? item.barcode,
                 quantity: item.quantityInHand,

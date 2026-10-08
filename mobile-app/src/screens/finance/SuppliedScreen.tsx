@@ -135,7 +135,8 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
 
   const loadStockForReport = async (): Promise<StockReportLine[]> => {
     if (isEmployeeView) {
-      return allEmployeeProducts.map((product) => ({
+      const normalizedSearch = query.trim().toLowerCase();
+      return allEmployeeProducts.filter((product) => !normalizedSearch || [product.productName, product.sku, product.barcode].filter(Boolean).some((value) => String(value).toLowerCase().includes(normalizedSearch))).map((product) => ({
         name: product.productName,
         sku: product.sku ?? product.barcode,
         quantity: product.quantityInHand,
@@ -144,10 +145,11 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
       }));
     }
 
-    const firstPage = await productsService.list({ page: 1, limit: 100, sortBy: "createdAt", sortOrder: "desc" });
+    const search = query.trim() || undefined;
+    const firstPage = await productsService.list({ page: 1, limit: 100, search, sortBy: "createdAt", sortOrder: "desc" });
     const allProducts = [...firstPage.data];
     for (let page = 2; page <= firstPage.meta.totalPages; page += 1) {
-      const response = await productsService.list({ page, limit: 100, sortBy: "createdAt", sortOrder: "desc" });
+      const response = await productsService.list({ page, limit: 100, search, sortBy: "createdAt", sortOrder: "desc" });
       allProducts.push(...response.data);
     }
     return allProducts.map((product) => ({
