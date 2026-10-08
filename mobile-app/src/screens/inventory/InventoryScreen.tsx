@@ -46,6 +46,7 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   const canReviewReturns = canReviewProductReturns(user);
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState<ApiProduct[]>([]);
+  const [matchedProducts, setMatchedProducts] = useState<ApiProduct[]>([]);
   const [returnRequests, setReturnRequests] = useState<ProductReturnRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,6 +56,10 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   const hasLoadedRef = useRef(false);
   const queryRef = useRef(query);
   const latestRequestRef = useRef(0);
+  const inventoryProducts = useMemo(() => {
+    const productsById = new Map(matchedProducts.map((product) => [product.id, product]));
+    return Array.from(productsById.values());
+  }, [matchedProducts]);
 
   useEffect(() => {
     queryRef.current = query;
@@ -68,6 +73,7 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     setError(false);
     try {
       const response = await productsService.list({
+        page: 1,
         limit: 100,
         search: searchValue.trim() || undefined,
         sortBy: "createdAt",
@@ -75,6 +81,20 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
       });
       if (requestId !== latestRequestRef.current) return;
       setProducts(response.data);
+      const allMatchedProducts = [...response.data];
+      for (let page = 2; page <= response.meta.totalPages; page += 1) {
+        const pageResponse = await productsService.list({
+          page,
+          limit: 100,
+          search: searchValue.trim() || undefined,
+          sortBy: "createdAt",
+          sortOrder: "desc"
+        });
+        allMatchedProducts.push(...pageResponse.data);
+      }
+      if (requestId !== latestRequestRef.current) return;
+      const matchedById = new Map(allMatchedProducts.map((product) => [product.id, product]));
+      setMatchedProducts(Array.from(matchedById.values()));
       if (canReviewReturns) {
         try {
           const returns = await productsService.returnRequests({ status: "PENDING", limit: 10 });
@@ -115,12 +135,12 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   }, [load, query]);
 
   const stats = useMemo(() => {
-    const totalValue = products.reduce((sum, product) => sum + Number(product.purchasePrice) * (product.inventory?.quantityAvailable ?? 0), 0);
-    const totalUnits = products.reduce((sum, product) => sum + (product.inventory?.quantityAvailable ?? 0), 0);
-    const lowStock = products.filter((p) => (p.inventory?.quantityAvailable ?? 0) > 0 && (p.inventory?.quantityAvailable ?? 0) <= p.minimumStock).length;
-    const outOfStock = products.filter((p) => (p.inventory?.quantityAvailable ?? 0) === 0).length;
+    const totalValue = inventoryProducts.reduce((sum, product) => sum + Number(product.purchasePrice) * (product.inventory?.quantityAvailable ?? 0), 0);
+    const totalUnits = inventoryProducts.reduce((sum, product) => sum + (product.inventory?.quantityAvailable ?? 0), 0);
+    const lowStock = inventoryProducts.filter((p) => (p.inventory?.quantityAvailable ?? 0) > 0 && (p.inventory?.quantityAvailable ?? 0) <= p.minimumStock).length;
+    const outOfStock = inventoryProducts.filter((p) => (p.inventory?.quantityAvailable ?? 0) === 0).length;
     return { totalValue, totalUnits, lowStock, outOfStock };
-  }, [products]);
+  }, [inventoryProducts]);
 
   const refresh = () => {
     setRefreshing(true);
@@ -129,13 +149,15 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   const bottomPadding = spacing.bottomNavHeight + Math.max(insets.bottom, 24) + 48;
 
   const loadWarehouseStockForReport = async (): Promise<StockReportLine[]> => {
-    const firstPage = await productsService.list({ page: 1, limit: 100, sortBy: "createdAt", sortOrder: "desc" });
+    const search = queryRef.current.trim() || undefined;
+    const firstPage = await productsService.list({ page: 1, limit: 100, search, sortBy: "createdAt", sortOrder: "desc" });
     const allProducts = [...firstPage.data];
     for (let page = 2; page <= firstPage.meta.totalPages; page += 1) {
-      const response = await productsService.list({ page, limit: 100, sortBy: "createdAt", sortOrder: "desc" });
+      const response = await productsService.list({ page, limit: 100, search, sortBy: "createdAt", sortOrder: "desc" });
       allProducts.push(...response.data);
     }
-    return allProducts.map((product) => ({
+    const uniqueProducts = new Map(allProducts.map((product) => [product.id, product]));
+    return Array.from(uniqueProducts.values()).map((product) => ({
       name: product.name,
       sku: product.sku,
       quantity: product.inventory?.quantityAvailable ?? 0,

@@ -29,6 +29,7 @@ import { Card, EmptyState, StatCard } from "@/components/common";
 import { ErrorState, LoadingState } from "@/components/common/StateViews";
 import { AreaChart } from "@/components/charts";
 import { reportsService } from "@/services/reports.service";
+import { salesService } from "@/services/sales.service";
 import { useAuth } from "@/hooks/useAuth";
 import { colors, spacing } from "@/theme";
 import type { DashboardStatistics, DashboardSummary } from "@/types/report";
@@ -100,8 +101,30 @@ export function OwnerDashboard({ navigation }: { navigation: any }) {
           reportsService.dashboardSummary(businessId),
           reportsService.dashboardStatistics(businessId),
         ]);
+        const queuedSales = await salesService.list({
+          limit: 200,
+          startDate: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
+          endDate: new Date(new Date().setHours(23, 59, 59, 999)).toISOString(),
+        });
         if (request !== loadRequest.current) return;
-        setSummary(nextSummary);
+        const queuedOnly = queuedSales.data.filter((sale) => sale.localSyncStatus && sale.localSyncStatus !== "SYNCED");
+        const queuedRevenue = queuedOnly.reduce((sum, sale) => sum + Number(sale.totalAmount || 0), 0);
+        const queuedRecentSales = queuedOnly.map((sale) => ({
+          id: sale.id,
+          saleNumber: sale.saleNumber,
+          saleDate: sale.saleDate,
+          customerName: sale.customer?.companyName || [sale.customer?.firstName, sale.customer?.lastName].filter(Boolean).join(" ") || "Walk-in Customer",
+          itemCount: sale.items.length,
+          totalAmount: Number(sale.totalAmount || 0),
+        }));
+        setSummary({
+          ...nextSummary,
+          totalSalesToday: nextSummary.totalSalesToday + queuedOnly.length,
+          totalRevenueToday: nextSummary.totalRevenueToday + queuedRevenue,
+          recentSales: [...queuedRecentSales, ...nextSummary.recentSales]
+            .sort((left, right) => new Date(right.saleDate).getTime() - new Date(left.saleDate).getTime())
+            .slice(0, 10),
+        });
         setStatistics(nextStatistics);
       } catch (loadError) {
         if (request !== loadRequest.current) return;

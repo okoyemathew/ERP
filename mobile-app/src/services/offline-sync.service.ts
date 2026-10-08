@@ -171,7 +171,7 @@ export const offlineSyncService = {
 
   startAutoSync() {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      if (state.isConnected && state.isInternetReachable !== false) {
+      if (state.isConnected && state.isInternetReachable === true) {
         void this.syncPending().catch(() => undefined);
       }
     });
