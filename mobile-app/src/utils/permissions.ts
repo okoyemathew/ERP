@@ -5,6 +5,7 @@ const ownerOnly = new Set([
   "Inventory",
   "Employees",
   "EmployeeDetail",
+  "EmployeeCreditSales",
   "PendingPayments",
   "Reports",
   "CashRegister",

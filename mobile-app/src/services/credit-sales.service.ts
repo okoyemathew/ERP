@@ -4,6 +4,7 @@ import { AppApiError } from "@/api/errors";
 import { getRequiredAuthContext } from "@/api/session";
 import { offlineDbService } from "@/services/offline-db.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 import type { ApiCreditSale, CreditPaymentPayload, CreditSaleActionRequest, CreditSaleEmployeeAction, CreditSaleListResponse, CustomerCreditResponse } from "@/types/creditSale";
 
 function fallbackCreditSale(id: string): ApiCreditSale {
@@ -155,6 +156,20 @@ function isOfflineError(error: unknown) {
   return error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT");
 }
 
+async function updateCachedCustomerBalance(customerId: string | undefined, outstandingBalance: unknown) {
+  if (!customerId) return;
+  const balance = Number(outstandingBalance);
+  if (!Number.isFinite(balance)) return;
+  const { businessId, userId } = await getRequiredAuthContext();
+  const customer = (await offlineDbService.getCachedCustomers(businessId, userId)).find((item) => item.id === customerId);
+  if (!customer) return;
+  await offlineDbService.cacheCustomer(businessId, userId, {
+    ...customer,
+    outstandingBalance: Math.max(0, balance),
+    updatedAt: new Date().toISOString()
+  });
+}
+
 function mergeQueuedCredits(remote: CreditSaleListResponse, queued: CreditSaleListResponse): CreditSaleListResponse {
   const remoteSaleIds = new Set(remote.data.map((credit) => credit.saleId));
   const newQueued = queued.data.filter((credit) => !remoteSaleIds.has(credit.saleId));
@@ -177,44 +192,116 @@ function mergeQueuedCredits(remote: CreditSaleListResponse, queued: CreditSaleLi
   };
 }
 
+async function applyQueuedCreditUpdates(response: CreditSaleListResponse): Promise<CreditSaleListResponse> {
+  const { businessId, userId } = await getRequiredAuthContext();
+  const mutations = await offlineDbService.getPendingApiMutations(businessId, userId);
+  const data = response.data.map((credit) => ({ ...credit, sale: { ...credit.sale }, payments: [...credit.payments] }));
+
+  for (const mutation of mutations) {
+    const paymentMatch = mutation.url.match(/^\/credit-sales\/([^/]+)\/(?:payments|pos-payments)$/);
+    const editMatch = mutation.url.match(/^\/credit-sales\/([^/]+)\/employee-edit$/);
+    const deleteMatch = mutation.url.match(/^\/credit-sales\/([^/]+)\/employee-delete$/);
+    if (deleteMatch && mutation.method === "DELETE") {
+      const index = data.findIndex((credit) => credit.id === deleteMatch[1]);
+      if (index >= 0) data.splice(index, 1);
+      continue;
+    }
+    if (editMatch && mutation.method === "PATCH") {
+      const credit = data.find((item) => item.id === editMatch[1]);
+      const payload = mutation.data as { dueDate?: string; remarks?: string } | undefined;
+      if (credit && payload) {
+        credit.dueDate = payload.dueDate ?? credit.dueDate;
+        credit.sale.remarks = payload.remarks ?? credit.sale.remarks;
+      }
+      continue;
+    }
+    if (!paymentMatch || mutation.method !== "POST") continue;
+    const credit = data.find((item) => item.id === paymentMatch[1]);
+    const payload = mutation.data as CreditPaymentPayload | undefined;
+    if (!credit || !payload) continue;
+    const amount = Math.max(0, Number(payload.amount) || 0);
+    const total = Number(credit.sale.totalAmount || credit.totalCredit || 0);
+    const amountPaid = Math.min(total, Number(credit.amountPaid || 0) + amount);
+    const balance = Math.max(0, total - amountPaid);
+    credit.amountPaid = amountPaid;
+    credit.balance = balance;
+    credit.sale.amountPaid = amountPaid;
+    credit.sale.balanceDue = balance;
+    credit.status = balance <= 0 ? "PAID" : amountPaid > 0 ? "PARTIALLY_PAID" : "ACTIVE";
+    credit.payments.push({
+      id: `offline-payment-${Date.now().toString(36)}-${credit.payments.length}`,
+      amount,
+      paymentMethod: payload.paymentMethod,
+      paymentDate: payload.paymentDate ?? new Date().toISOString(),
+      referenceNumber: payload.referenceNumber ?? null,
+      employee: null
+    });
+  }
+
+  const summary = data.reduce((totals, credit) => ({
+    totalCreditIssued: totals.totalCreditIssued + Number(credit.totalCredit || 0),
+    totalOutstandingCredit: totals.totalOutstandingCredit + Number(credit.balance || 0),
+    totalCollected: totals.totalCollected + Number(credit.amountPaid || 0),
+    activeCreditAccounts: totals.activeCreditAccounts + (Number(credit.balance || 0) > 0 ? 1 : 0),
+    paidCreditAccounts: totals.paidCreditAccounts + (Number(credit.balance || 0) <= 0 ? 1 : 0),
+  }), { totalCreditIssued: 0, totalOutstandingCredit: 0, totalCollected: 0, activeCreditAccounts: 0, paidCreditAccounts: 0 });
+
+  return {
+    ...response,
+    data,
+    summary: {
+      ...response.summary,
+      totalCreditSales: data.length,
+      ...summary,
+      overdueAmount: data.filter((credit) => credit.isOverdue).reduce((sum, credit) => sum + Number(credit.balance || 0), 0),
+      overdueAccounts: data.filter((credit) => credit.isOverdue).length
+    },
+    meta: { ...response.meta, total: data.length, totalPages: data.length ? Math.max(1, Math.ceil(data.length / response.meta.limit)) : 0 }
+  };
+}
+
+async function mergedCreditResponse(remote: CreditSaleListResponse, search = "") {
+  return applyQueuedCreditUpdates(mergeQueuedCredits(remote, await getQueuedCreditSales(search)));
+}
+
 export const creditSalesService = {
   async list(params: Record<string, string | number | boolean | undefined> = {}): Promise<CreditSaleListResponse> {
     try {
       const { data } = await api.get<CreditSaleListResponse>(endpoints.creditSales.list, { params });
-      return mergeQueuedCredits(data, await getQueuedCreditSales(String(params.search ?? "")));
+      return mergedCreditResponse(data, String(params.search ?? ""));
     } catch (error) {
       if (!isOfflineError(error)) throw error;
-      return getQueuedCreditSales(String(params.search ?? ""));
+      return applyQueuedCreditUpdates(await getQueuedCreditSales(String(params.search ?? "")));
     }
   },
 
   async outstanding(params: Record<string, string | number | boolean | undefined> = {}): Promise<CreditSaleListResponse> {
     try {
       const { data } = await api.get<CreditSaleListResponse>("/credit-sales/outstanding", { params });
-      return mergeQueuedCredits(data, await getQueuedCreditSales(String(params.search ?? "")));
+      return mergedCreditResponse(data, String(params.search ?? ""));
     } catch (error) {
       if (!isOfflineError(error)) throw error;
-      return getQueuedCreditSales(String(params.search ?? ""));
+      return applyQueuedCreditUpdates(await getQueuedCreditSales(String(params.search ?? "")));
     }
   },
 
   async posOutstanding(params: Record<string, string | number | boolean | undefined> = {}): Promise<CreditSaleListResponse> {
     try {
       const { data } = await api.get<CreditSaleListResponse>("/credit-sales/pos/outstanding", { params });
-      return mergeQueuedCredits(data, await getQueuedCreditSales(String(params.search ?? "")));
+      return mergedCreditResponse(data, String(params.search ?? ""));
     } catch (error) {
       if (!isOfflineError(error)) throw error;
-      return getQueuedCreditSales(String(params.search ?? ""));
+      return applyQueuedCreditUpdates(await getQueuedCreditSales(String(params.search ?? "")));
     }
   },
 
   async search(query: string, params: Record<string, string | number | boolean | undefined> = {}): Promise<CreditSaleListResponse> {
     try {
       const { data } = await api.get<CreditSaleListResponse>("/credit-sales/search", { params: { ...params, q: query } });
-      return mergeQueuedCredits(data, await getQueuedCreditSales(query));
+      return mergedCreditResponse(data, query);
     } catch (error) {
       if (!isOfflineError(error)) throw error;
-      return getQueuedCreditSales(query);
+      return applyQueuedCreditUpdates(await getQueuedCreditSales(query));
     }
   },
 
@@ -233,21 +320,35 @@ export const creditSalesService = {
     return data;
   },
 
-  async collectPayment(id: string, payload: CreditPaymentPayload): Promise<ApiCreditSale> {
+  async collectPayment(id: string, payload: CreditPaymentPayload, customerId?: string): Promise<ApiCreditSale> {
     try {
       const { data } = await api.post<ApiCreditSale>(endpoints.creditSales.payment(id), payload);
+      await updateCachedCustomerBalance(data.customer.id, data.customer.outstandingBalance);
+      dashboardEvents.notifySaleChanged();
       return data;
     } catch (error) {
-      return queueOfflineMutation(error, { method: "POST", url: endpoints.creditSales.payment(id), data: payload }, fallbackCreditSale(id));
+      const queued = await queueOfflineMutation(error, { method: "POST", url: endpoints.creditSales.payment(id), data: payload }, fallbackCreditSale(id));
+      const { businessId, userId } = await getRequiredAuthContext();
+      const customer = customerId ? (await offlineDbService.getCachedCustomers(businessId, userId)).find((item) => item.id === customerId) : undefined;
+      if (customer) await updateCachedCustomerBalance(customerId, Number(customer.outstandingBalance) - Number(payload.amount));
+      dashboardEvents.notifySaleChanged();
+      return queued;
     }
   },
 
-  async collectPosPayment(id: string, payload: CreditPaymentPayload): Promise<ApiCreditSale> {
+  async collectPosPayment(id: string, payload: CreditPaymentPayload, customerId?: string): Promise<ApiCreditSale> {
     try {
       const { data } = await api.post<ApiCreditSale>(`/credit-sales/${id}/pos-payments`, payload);
+      await updateCachedCustomerBalance(data.customer.id, data.customer.outstandingBalance);
+      dashboardEvents.notifySaleChanged();
       return data;
     } catch (error) {
-      return queueOfflineMutation(error, { method: "POST", url: `/credit-sales/${id}/pos-payments`, data: payload }, fallbackCreditSale(id));
+      const queued = await queueOfflineMutation(error, { method: "POST", url: `/credit-sales/${id}/pos-payments`, data: payload }, fallbackCreditSale(id));
+      const { businessId, userId } = await getRequiredAuthContext();
+      const customer = customerId ? (await offlineDbService.getCachedCustomers(businessId, userId)).find((item) => item.id === customerId) : undefined;
+      if (customer) await updateCachedCustomerBalance(customerId, Number(customer.outstandingBalance) - Number(payload.amount));
+      dashboardEvents.notifySaleChanged();
+      return queued;
     }
   },
 
@@ -298,18 +399,24 @@ export const creditSalesService = {
   async employeeEdit(id: string, payload: { dueDate?: string; remarks?: string }): Promise<ApiCreditSale> {
     try {
       const { data } = await api.patch<ApiCreditSale>(`/credit-sales/${id}/employee-edit`, payload);
+      dashboardEvents.notifySaleChanged();
       return data;
     } catch (error) {
-      return queueOfflineMutation(error, { method: "PATCH", url: `/credit-sales/${id}/employee-edit`, data: payload }, fallbackCreditSale(id));
+      const queued = await queueOfflineMutation(error, { method: "PATCH", url: `/credit-sales/${id}/employee-edit`, data: payload }, fallbackCreditSale(id));
+      dashboardEvents.notifySaleChanged();
+      return queued;
     }
   },
 
   async employeeDelete(id: string): Promise<{ success: boolean; id: string; saleId: string }> {
     try {
       const { data } = await api.delete<{ success: boolean; id: string; saleId: string }>(`/credit-sales/${id}/employee-delete`);
+      dashboardEvents.notifySaleChanged();
       return data;
     } catch (error) {
-      return queueOfflineMutation(error, { method: "DELETE", url: `/credit-sales/${id}/employee-delete` }, { success: true, id, saleId: id });
+      const queued = await queueOfflineMutation(error, { method: "DELETE", url: `/credit-sales/${id}/employee-delete` }, { success: true, id, saleId: id });
+      dashboardEvents.notifySaleChanged();
+      return queued;
     }
   }
 };

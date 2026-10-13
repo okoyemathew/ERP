@@ -10,6 +10,7 @@ import { colors, spacing } from "@/theme";
 import type { ApiCustomer } from "@/types/customer";
 import { customerDisplayName } from "@/types/customer";
 import { formatCurrency } from "@/utils/format";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 
 function money(value: string | number | null | undefined): number {
   return Number(value ?? 0);
@@ -63,6 +64,10 @@ export function CustomersScreen({ navigation }: { navigation: any }) {
       void loadCustomers(query);
     }, [loadCustomers, query])
   );
+
+  useEffect(() => dashboardEvents.subscribe(() => {
+    void loadCustomers(query, false);
+  }), [loadCustomers, query]);
 
   const stats = useMemo(() => {
     const totalOwed = customers.reduce((sum, customer) => sum + money(customer.outstandingBalance), 0);

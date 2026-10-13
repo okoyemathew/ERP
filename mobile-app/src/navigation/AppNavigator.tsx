@@ -7,6 +7,7 @@ import { CustomerDetailScreen } from "@/screens/customers/CustomerDetailScreen";
 import { CustomerFormScreen } from "@/screens/customers/CustomerFormScreen";
 import { EmployeesScreen } from "@/screens/employees/EmployeesScreen";
 import { EmployeeDetailScreen } from "@/screens/employees/EmployeeDetailScreen";
+import { EmployeeCreditSalesScreen } from "@/screens/employees/EmployeeCreditSalesScreen";
 import { DisbursedScreen } from "@/screens/finance/DisbursedScreen";
 import { ExpensesScreen } from "@/screens/finance/ExpensesScreen";
 import { PendingPaymentsScreen } from "@/screens/finance/PendingPaymentsScreen";
@@ -51,6 +52,7 @@ const appScreens: Array<{
   { name: "CreditSales", component: CreditSalesScreen },
   { name: "Employees", component: EmployeesScreen },
   { name: "EmployeeDetail", component: EmployeeDetailScreen },
+  { name: "EmployeeCreditSales", component: EmployeeCreditSalesScreen },
   { name: "EmployeeSelfProfile", component: EmployeeDetailScreen },
   { name: "EmployeeForm", component: EmployeeFormScreen },
   { name: "Inventory", component: InventoryScreen },

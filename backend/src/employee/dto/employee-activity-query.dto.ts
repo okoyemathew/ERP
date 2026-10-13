@@ -1,7 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod, SaleStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDate,
   IsEnum,
   IsIn,
@@ -71,6 +72,14 @@ export class EmployeeActivityQueryDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   paymentMethod?: PaymentMethod;
+
+  @ApiPropertyOptional({
+    description: 'Only include invoices that were created as credit sales',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  creditOnly?: boolean;
 
   @ApiPropertyOptional({
     description: 'Sort field',

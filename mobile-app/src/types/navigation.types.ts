@@ -1,5 +1,6 @@
 import type { NavigatorScreenParams } from "@react-navigation/native";
 import type { Role } from "./domain.types";
+import type { ApiSale } from "./sales";
 
 export type AuthStackParamList = {
   Splash: undefined;
@@ -29,11 +30,12 @@ export type BottomTabParamList = {
 export type AppStackParamList = {
   Tabs: NavigatorScreenParams<BottomTabParamList>;
   CustomerDetail: { customerId: string };
-  CreditCustomerDetails: { customerId: string };
+  CreditCustomerDetails: { customerId: string; readOnly?: boolean; employeeUserId?: string; employeeName?: string; employeeSales?: ApiSale[] };
   CustomerForm: { customerId?: string } | undefined;
   CreditSales: undefined;
   Employees: undefined;
   EmployeeDetail: { employeeId: string };
+  EmployeeCreditSales: { employeeId: string; employeeName: string; employeeUserId: string };
   EmployeeSelfProfile: undefined;
   EmployeeForm: { employeeId?: string } | undefined;
   Inventory: undefined;

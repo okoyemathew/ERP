@@ -596,6 +596,16 @@ export const offlineDbService = {
     return { id, businessId, userId, type: "API_MUTATION", payload, status: "PENDING", attempts: 0, lastError: null, createdAt: now, updatedAt: now };
   },
 
+  async getPendingApiMutations(businessId: string, userId: string): Promise<ApiMutationPayload[]> {
+    const db = await getDb();
+    const rows = await db.getAllAsync<{ payload: string }>(
+      "SELECT payload FROM sync_queue WHERE businessId = ? AND userId = ? AND type = 'API_MUTATION' AND status IN ('PENDING', 'FAILED', 'SYNCING') ORDER BY createdAt ASC",
+      businessId,
+      userId
+    );
+    return rows.map((row) => JSON.parse(row.payload) as ApiMutationPayload);
+  },
+
   async pendingOperations(businessId: string, userId: string): Promise<SyncQueueItem[]> {
     const db = await getDb();
     const now = new Date().toISOString();

@@ -101,6 +101,7 @@ type ProductTile = {
 
 type CreditInvoiceView = {
   id: string;
+  customerId?: string;
   customerName: string;
   orderNumber: string;
   total: number;
@@ -168,6 +169,7 @@ const mapCreditSaleToInvoiceView = (item: ApiCreditSale): CreditInvoiceView => {
 
   return {
     id: item.id,
+    customerId: item.customer.id,
     customerName: item.customer.name || "Customer",
     orderNumber: item.sale.saleNumber ?? item.id.slice(0, 8),
     total: invoiceTotal,
@@ -1215,6 +1217,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
           paymentDate,
           referenceNumber: `CR-${Date.now()}`,
         },
+        selectedCollectInvoice.customerId,
       );
       const updatedInvoice = mapCreditSaleToInvoiceView(updatedCreditSale);
       const receiptInvoice =

@@ -162,9 +162,13 @@ export class CreditSalesService {
         },
       });
 
-      const updatedOutstanding = new Prisma.Decimal(
-        customer.outstandingBalance,
-      ).add(creditAmount);
+      // Calculate from the invoice records. The stored value may predate a
+      // payment, while a Sale and its CreditSale describe the same credit debt.
+      const updatedOutstanding = await this.customerOutstandingBalance(
+        businessId,
+        customer.id,
+        tx,
+      );
 
       await tx.customer.update({
         where: { id: customer.id },
@@ -1635,6 +1639,7 @@ export class CreditSalesService {
           customerId,
           deletedAt: null,
           balanceDue: { gt: 0 },
+          creditSale: { is: null },
         },
         _sum: { balanceDue: true },
       }),

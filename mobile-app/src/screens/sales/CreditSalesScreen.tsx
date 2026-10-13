@@ -60,6 +60,30 @@ function invoiceTotals(creditSale: ApiCreditSale) {
   return { total, paid, balance };
 }
 
+function applyQueuedPayment(creditSale: ApiCreditSale, payment: { amount: number; paymentMethod: ApiCreditSale["payments"][number]["paymentMethod"]; paymentDate: string; referenceNumber?: string }) {
+  const totals = invoiceTotals(creditSale);
+  const paid = clampPaid(totals.total, totals.paid + payment.amount);
+  const balance = Math.max(totals.total - paid, 0);
+  return {
+    ...creditSale,
+    amountPaid: paid,
+    balance,
+    status: balance <= 0 ? "PAID" as const : "PARTIALLY_PAID" as const,
+    sale: { ...creditSale.sale, amountPaid: paid, balanceDue: balance },
+    payments: [
+      ...(creditSale.payments ?? []),
+      {
+        id: `offline-payment-${Date.now().toString(36)}`,
+        amount: payment.amount,
+        paymentMethod: payment.paymentMethod,
+        paymentDate: payment.paymentDate,
+        referenceNumber: payment.referenceNumber ?? null,
+        employee: null
+      }
+    ]
+  };
+}
+
 function activeActionRequest(creditSale: ApiCreditSale, action: CreditSaleEmployeeAction) {
   const now = Date.now();
   return creditSale.employeeActionRequests?.find((request) => {
@@ -486,16 +510,18 @@ export function CreditSalesScreen({ navigation }: { navigation: any }) {
     try {
       const submittedPaymentDate = new Date(paymentDate).toISOString();
       const collectCreditPayment = canUseFinancialCredit ? creditSalesService.collectPayment : creditSalesService.collectPosPayment;
-      const updated = await collectCreditPayment(selected.id, {
+      const payment = {
         amount: value,
         paymentMethod: toApiPaymentMethod(method),
         paymentDate: submittedPaymentDate,
         referenceNumber: reference.trim() || undefined
-      });
-      setSelected(updated);
-      setAmount(String(money(updated.balance)));
+      };
+      const updated = await collectCreditPayment(selected.id, payment, selected.customer.id);
+      const saved = updated.sale.id === selected.id ? applyQueuedPayment(selected, payment) : updated;
+      setSelected(saved);
+      setAmount(String(money(saved.balance)));
       await loadCredits(query, false);
-      setActiveReceipt({ ...buildCreditInvoiceReceipt(updated), createdAt: submittedPaymentDate });
+      setActiveReceipt({ ...buildCreditInvoiceReceipt(saved), createdAt: submittedPaymentDate });
       setReceiptVisible(true);
       paymentRef.current?.close();
     } catch (paymentError) {

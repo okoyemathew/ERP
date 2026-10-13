@@ -35,6 +35,7 @@ export interface ApiSale {
   collectedAmount?: string | number;
   collectionDate?: string;
   collectionPayments?: Array<{ amount: string | number; paymentDate: string }>;
+  creditSaleId?: string | null;
   id: string;
   localSyncStatus?: "PENDING" | "SYNCING" | "FAILED" | "SYNCED";
   saleNumber: string;

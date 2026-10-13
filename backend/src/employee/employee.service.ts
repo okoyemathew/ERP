@@ -1726,6 +1726,9 @@ export class EmployeeService {
       ...(query.paymentMethod
         ? { payments: { some: { paymentMethod: query.paymentMethod } } }
         : {}),
+      ...(query.creditOnly
+        ? { creditSale: { is: { deletedAt: null } } }
+        : {}),
       ...(query.startDate || query.endDate
         ? { saleDate: this.dateRange(query) }
         : {}),
@@ -1810,7 +1813,7 @@ export class EmployeeService {
 
   private employeeSaleInclude() {
     return {
-      creditSale: { select: { balance: true, amountPaid: true, payments: { orderBy: { paymentDate: 'asc' } } } },
+      creditSale: { select: { id: true, balance: true, amountPaid: true, payments: { orderBy: { paymentDate: 'asc' } } } },
       customer: true,
       user: {
         select: {
@@ -1855,6 +1858,7 @@ export class EmployeeService {
     ].sort((a, b) => a.paymentDate.getTime() - b.paymentDate.getTime());
     return {
       id: sale.id,
+      creditSaleId: sale.creditSale?.id ?? null,
       saleNumber: sale.saleNumber,
       customerId: sale.customerId,
       userId: sale.userId,

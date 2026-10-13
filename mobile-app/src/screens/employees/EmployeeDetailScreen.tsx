@@ -720,7 +720,17 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               <Text style={styles.sectionTitle}>Sales Records</Text>
               <Text style={styles.sectionMeta}>Completed totals from recorded sales</Text>
             </View>
-            <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printSalesRecord()} style={styles.smallButton} />
+            <View style={styles.receiptActions}>
+              {!isSelfProfile && isOwner ? (
+                <Button
+                  label="Credit Sales"
+                  variant="ghost"
+                  onPress={() => navigation.navigate("EmployeeCreditSales", { employeeId: employee.id, employeeName: name, employeeUserId: employee.userId })}
+                  style={styles.smallButton}
+                />
+              ) : null}
+              <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printSalesRecord()} style={styles.smallButton} />
+            </View>
           </View>
           <View style={styles.salesStats}>
             <View style={styles.salesStat}>

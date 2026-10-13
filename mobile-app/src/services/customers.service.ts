@@ -4,6 +4,7 @@ import { AppApiError } from "@/api/errors";
 import { getRequiredAuthContext, getRequiredBusinessId } from "@/api/session";
 import { offlineDbService } from "@/services/offline-db.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
+import { dashboardEvents } from "@/utils/dashboardEvents";
 import type {
   ApiCustomer,
   CollectCreditPaymentPayload,
@@ -220,12 +221,32 @@ export const customersService = {
   },
 
   async collectCreditPayment(id: string, payload: CollectCreditPaymentPayload) {
-    const businessId = await getRequiredBusinessId();
+    const { businessId, userId } = await getRequiredAuthContext();
     try {
       const { data } = await api.post(endpoints.customers.collectCreditPayment(businessId, id), payload);
+      const current = (await offlineDbService.getCachedCustomers(businessId, userId)).find((customer) => customer.id === id);
+      const outstandingBalance = Number((data as { customerOutstandingBalance?: string | number }).customerOutstandingBalance);
+      if (current && Number.isFinite(outstandingBalance)) {
+        await offlineDbService.cacheCustomer(businessId, userId, {
+          ...current,
+          outstandingBalance,
+          updatedAt: new Date().toISOString()
+        });
+      }
+      dashboardEvents.notifySaleChanged();
       return data;
     } catch (error) {
-      return queueOfflineMutation(error, { method: "POST", url: endpoints.customers.collectCreditPayment(businessId, id), data: payload }, { queued: true });
+      const current = (await offlineDbService.getCachedCustomers(businessId, userId)).find((customer) => customer.id === id);
+      if (current) {
+        await offlineDbService.cacheCustomer(businessId, userId, {
+          ...current,
+          outstandingBalance: Math.max(0, Number(current.outstandingBalance) - Number(payload.amount)),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      const queued = await queueOfflineMutation(error, { method: "POST", url: endpoints.customers.collectCreditPayment(businessId, id), data: payload }, { queued: true });
+      dashboardEvents.notifySaleChanged();
+      return queued;
     }
   },
 

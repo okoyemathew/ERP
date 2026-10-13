@@ -133,8 +133,22 @@ export class CustomerService {
       }),
     ]);
 
+    // Return the calculated amount instead of relying on a historical stored
+    // value. This also corrects customer cards that were saved before the
+    // duplicate-credit-balance calculation was fixed.
+    const data = await Promise.all(
+      items.map(async (customer) => {
+        const balance = await this.calculateCustomerBalance(
+          businessId,
+          customer.id,
+          viewer,
+        );
+        return { ...customer, outstandingBalance: balance.totalOutstanding };
+      }),
+    );
+
     return {
-      data: items,
+      data,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -834,6 +848,7 @@ export class CustomerService {
             customerId: id,
             deletedAt: null,
             balanceDue: { gt: 0 },
+            creditSale: { is: null },
             ...this.userActivityScope(user),
           },
           _sum: { balanceDue: true },
@@ -1085,6 +1100,7 @@ export class CustomerService {
           customerId,
           deletedAt: null,
           balanceDue: { gt: 0 },
+          creditSale: { is: null },
           ...this.userActivityScope(viewer),
         },
         _sum: { balanceDue: true },

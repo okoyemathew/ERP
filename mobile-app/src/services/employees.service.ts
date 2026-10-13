@@ -38,6 +38,7 @@ interface EmployeeSalesParams {
   endDate?: string;
   status?: "PENDING" | "COMPLETED" | "CANCELLED" | "REFUNDED";
   paymentMethod?: "CASH" | "CREDIT" | "BANK_TRANSFER" | "MOBILE_MONEY" | "CARD";
+  creditOnly?: boolean;
   sortBy?: "createdAt" | "saleDate" | "paymentDate" | "totalAmount";
   sortOrder?: "asc" | "desc";
 }

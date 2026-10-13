@@ -13,7 +13,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { borderRadius, colors, shadows, spacing } from "@/theme";
 import type { ReceiptDocument, SaleItem } from "@/types/domain.types";
 import type { ApiCreditSale, CustomerCreditResponse } from "@/types/creditSale";
-import type { PosPaymentMethod } from "@/types/sales";
+import type { ApiSale, PosPaymentMethod } from "@/types/sales";
 import { toApiPaymentMethod } from "@/types/sales";
 import { formatCurrency } from "@/utils/format";
 
@@ -50,8 +50,15 @@ function creditPaymentsPaid(creditSale: ApiCreditSale) {
 
 function invoiceTotals(creditSale: ApiCreditSale) {
   const total = money(creditSale.sale.totalAmount) || creditSale.sale.items.reduce((sum, item) => sum + lineTotal(item), 0);
-  const paid = clampPaid(total, initialPaid(creditSale) + creditPaymentsPaid(creditSale));
-  const balance = Math.max(total - paid, 0);
+  // The sale fields are updated in the same transaction as each credit payment.
+  // Prefer that persisted invoice state, while retaining the payment-list calculation
+  // for saved offline records that have not yet reached the server.
+  const paid = clampPaid(total, Math.max(
+    money(creditSale.sale.amountPaid),
+    initialPaid(creditSale) + creditPaymentsPaid(creditSale),
+    initialPaid(creditSale) + money(creditSale.amountPaid)
+  ));
+  const balance = Math.max(0, Math.min(total - paid, money(creditSale.sale.balanceDue || creditSale.balance)));
   return { total, paid, balance };
 }
 
@@ -109,9 +116,101 @@ function buildCreditInvoiceReceipt(creditSale: ApiCreditSale, customerName: stri
   };
 }
 
+function creditResponseFromEmployeeSales(customerId: string, sales: ApiSale[]): CustomerCreditResponse {
+  const firstSale = sales[0];
+  const customerName = firstSale?.customer?.companyName || [firstSale?.customer?.firstName, firstSale?.customer?.lastName].filter(Boolean).join(" ") || "Customer";
+  const customerPhone = firstSale?.customer?.phone ?? "";
+  const data: ApiCreditSale[] = sales.map((sale) => {
+    const total = money(sale.totalAmount);
+    const paid = money(sale.amountPaid);
+    const balance = Math.max(0, money(sale.balanceDue));
+    return {
+      id: sale.creditSaleId ?? sale.id,
+      saleId: sale.id,
+      customerId: sale.customerId ?? customerId,
+      totalCredit: total,
+      amountPaid: paid,
+      balance,
+      dueDate: null,
+      status: balance <= 0 ? "PAID" : paid > 0 ? "PARTIALLY_PAID" : "ACTIVE",
+      isOverdue: false,
+      createdAt: sale.saleDate,
+      updatedAt: sale.saleDate,
+      customer: {
+        id: sale.customer?.id ?? sale.customerId ?? customerId,
+        name: customerName,
+        phone: customerPhone,
+        status: "ACTIVE",
+        creditLimit: 0,
+        outstandingBalance: balance
+      },
+      sale: {
+        id: sale.id,
+        saleNumber: sale.saleNumber,
+        saleDate: sale.saleDate,
+        subtotal: sale.subtotal,
+        discountAmount: sale.discountAmount,
+        taxAmount: sale.taxAmount,
+        totalAmount: sale.totalAmount,
+        amountPaid: sale.amountPaid,
+        balanceDue: sale.balanceDue,
+        paymentStatus: sale.paymentStatus,
+        status: sale.status,
+        salesperson: {
+          id: sale.user?.id ?? sale.userId,
+          name: [sale.user?.firstName, sale.user?.lastName].filter(Boolean).join(" ") || sale.user?.username || "Employee",
+          username: sale.user?.username ?? "employee"
+        },
+        items: sale.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product.name,
+          sku: item.product.sku,
+          barcode: item.product.barcode,
+          quantity: item.quantity,
+          originalQuantity: item.originalQuantity,
+          returnedQuantity: item.returnedQuantity,
+          unitPrice: item.unitPrice,
+          totalAmount: item.totalAmount,
+          originalTotalAmount: item.originalTotalAmount,
+          returnedValue: item.returnedValue
+        })),
+        payments: sale.payments
+      },
+      payments: []
+    };
+  });
+  const totalAmount = data.reduce((sum, item) => sum + money(item.sale.totalAmount), 0);
+  const totalPaid = data.reduce((sum, item) => sum + money(item.sale.amountPaid), 0);
+  const totalOutstanding = data.reduce((sum, item) => sum + money(item.sale.balanceDue), 0);
+  return {
+    customer: { id: firstSale?.customer?.id ?? firstSale?.customerId ?? customerId, name: customerName, phone: customerPhone, status: "ACTIVE", creditLimit: 0, storedOutstandingBalance: totalOutstanding },
+    summary: {
+      creditLimit: 0,
+      outstandingBalance: totalOutstanding,
+      availableCredit: 0,
+      defaultedBalance: 0,
+      totalCreditSales: data.length,
+      totalAmount,
+      totalPaid,
+      totalOutstanding,
+      totalCreditIssued: totalAmount,
+      totalCreditPaid: totalPaid,
+      openCreditCount: data.filter((item) => money(item.balance) > 0).length,
+      nextDueDate: null
+    },
+    data,
+    meta: { page: 1, limit: data.length, total: data.length, totalPages: data.length ? 1 : 0 }
+  };
+}
+
 export function CreditCustomerDetailsScreen({ route, navigation }: { route: any; navigation: any }) {
   const insets = useSafeAreaInsets();
   const customerId = route.params?.customerId as string;
+  const readOnly = Boolean(route.params?.readOnly);
+  const employeeUserId = route.params?.employeeUserId as string | undefined;
+  const employeeName = route.params?.employeeName as string | undefined;
+  const employeeSales = route.params?.employeeSales as ApiSale[] | undefined;
   const user = useAuth((state) => state.user);
   const roleName = user?.roleName?.trim();
   const canUseFinancialCredit = Boolean(user?.permissions?.includes("credit-sales.manage") || roleName === "Owner" || roleName === "Admin" || (!roleName && user?.role === "owner"));
@@ -140,11 +239,12 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
   const modalBottomPadding = Math.max(insets.bottom, 24) + 72;
 
   const calculatedSummary = useMemo(() => {
-    const totalCreditSales = response?.summary.totalCreditSales ?? transactions.length;
+    const scopedToEmployee = readOnly && Boolean(employeeUserId);
+    const totalCreditSales = scopedToEmployee ? transactions.length : (response?.summary.totalCreditSales ?? transactions.length);
     const fallbackTotalAmount = transactions.reduce((sum, creditSale) => sum + invoiceTotals(creditSale).total, 0);
     const fallbackTotalPaid = transactions.reduce((sum, creditSale) => sum + invoiceTotals(creditSale).paid, 0);
-    const totalAmount = money(response?.summary.totalAmount) || fallbackTotalAmount;
-    const totalPaid = clampPaid(totalAmount, money(response?.summary.totalPaid) || fallbackTotalPaid);
+    const totalAmount = scopedToEmployee ? fallbackTotalAmount : (money(response?.summary.totalAmount) || fallbackTotalAmount);
+    const totalPaid = scopedToEmployee ? fallbackTotalPaid : clampPaid(totalAmount, money(response?.summary.totalPaid) || fallbackTotalPaid);
     const totalOutstanding = Math.max(totalAmount - totalPaid, 0);
     return { totalCreditSales, totalAmount, totalPaid, totalOutstanding };
   }, [response?.summary, transactions]);
@@ -152,17 +252,26 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
   const loadCustomerCredit = useCallback(async () => {
     setLoading(true);
     setError(null);
+    if (readOnly && employeeSales) {
+      setResponse(creditResponseFromEmployeeSales(customerId, employeeSales));
+      setLoading(false);
+      return;
+    }
     try {
       const loader = canUseFinancialCredit ? creditSalesService.customerCredit : creditSalesService.posCustomerCredit;
       const data = await loader(customerId, { limit: 200 });
-      setResponse(data);
-      setSelectedCredit((current) => data.data.find((item) => item.id === current?.id) ?? current);
+      const employeeTransactions = employeeUserId
+        ? data.data.filter((item) => item.sale.salesperson.id === employeeUserId)
+        : data.data;
+      const scopedResponse = employeeUserId ? { ...data, data: employeeTransactions } : data;
+      setResponse(scopedResponse);
+      setSelectedCredit((current) => scopedResponse.data.find((item) => item.id === current?.id) ?? current);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load customer credit history.");
     } finally {
       setLoading(false);
     }
-  }, [canUseFinancialCredit, customerId]);
+  }, [canUseFinancialCredit, customerId, employeeSales, employeeUserId, readOnly]);
 
   useFocusEffect(
     useCallback(() => {
@@ -256,9 +365,14 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
   const openInvoice = async (creditSale: ApiCreditSale) => {
     console.log("CREDIT_CUSTOMER_PRINT_INVOICE_PRESSED", creditSale.id, creditSale.sale.saleNumber);
     try {
-      const printableCreditSale = creditSale.sale.items.length > 0
-        ? creditSale
-        : await creditSalesService.detail(creditSale.id);
+      // The read-only employee view starts from its offline-safe sales snapshot.
+      // When connected, reload the authoritative credit invoice immediately before
+      // printing so later customer payments are reflected on the document.
+      const printableCreditSale = readOnly
+        ? await creditSalesService.detail(creditSale.id).catch(() => creditSale)
+        : creditSale.sale.items.length > 0
+          ? creditSale
+          : await creditSalesService.detail(creditSale.id);
       setSelectedCredit((current) => current?.id === printableCreditSale.id ? printableCreditSale : current);
       setActiveReceipt(buildCreditInvoiceReceipt(printableCreditSale, customerName));
       setReceiptVisible(true);
@@ -328,7 +442,7 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
         paymentMethod: toApiPaymentMethod(method),
         paymentDate,
         referenceNumber: reference.trim() || undefined
-      });
+      }, selectedCredit.customer.id);
       setSelectedCredit(updated);
       setPaymentVisible(false);
       setActiveReceipt({ ...buildCreditInvoiceReceipt(updated, customerName), createdAt: paymentDate });
@@ -400,6 +514,7 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
             <Phone size={14} color={colors.textMuted} />
             <Text style={styles.meta}>{response.customer.phone || "No phone number"}</Text>
           </View>
+          {readOnly ? <Text style={styles.readOnlyNote}>Read-only credit history{employeeName ? ` for ${employeeName}` : ""}</Text> : null}
         </Card>
 
         <Text style={styles.sectionTitle}>Financial Summary</Text>
@@ -442,8 +557,8 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
               </Pressable>
               <View style={styles.actions}>
                 <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void openInvoice(creditSale)} />
-                <Button label="Return Product" variant="ghost" icon={<RotateCcw size={16} color={colors.primary} />} onPress={() => void openReturnForCreditSale(creditSale)} />
-                {totals.balance > 0 ? <Button label="Record Payment" variant="success" onPress={() => openPayment(creditSale)} /> : null}
+                {!readOnly ? <Button label="Return Product" variant="ghost" icon={<RotateCcw size={16} color={colors.primary} />} onPress={() => void openReturnForCreditSale(creditSale)} /> : null}
+                {!readOnly && totals.balance > 0 ? <Button label="Record Payment" variant="success" onPress={() => openPayment(creditSale)} /> : null}
               </View>
             </View>
           );
@@ -495,14 +610,14 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
                           </View>
                           <View style={styles.productReturnActions}>
                             <Text style={styles.amount}>{formatCurrency(lineTotal(item))}</Text>
-                            <Pressable
+                            {!readOnly ? <Pressable
                               onPress={() => openReturnForm(item)}
                               style={styles.iconButton}
                               accessibilityRole="button"
                               accessibilityLabel={`Return ${item.productName}`}
                             >
                               <RotateCcw size={14} color={colors.primary} />
-                            </Pressable>
+                            </Pressable> : null}
                           </View>
                         </Card>
                       ))}
@@ -537,7 +652,7 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
 
                       <View style={styles.actions}>
                         <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void openInvoice(selectedCredit)} />
-                        {totals.balance > 0 ? <Button label="Record Payment" variant="success" onPress={() => openPayment(selectedCredit)} /> : null}
+                        {!readOnly && totals.balance > 0 ? <Button label="Record Payment" variant="success" onPress={() => openPayment(selectedCredit)} /> : null}
                       </View>
                     </>
                   );
@@ -656,8 +771,8 @@ export function CreditCustomerDetailsScreen({ route, navigation }: { route: any;
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>Invoice Preview</Text>
               <View style={styles.receiptActions}>
-                <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void saveInvoicePdf()} style={styles.printButton} />
-                <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void shareInvoiceWhatsApp()} style={styles.printButton} />
+                {!readOnly ? <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void saveInvoicePdf()} style={styles.printButton} /> : null}
+                {!readOnly ? <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void shareInvoiceWhatsApp()} style={styles.printButton} /> : null}
                 <Button label="Print" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printInvoice()} style={styles.printButton} />
               </View>
             </View>
@@ -683,6 +798,7 @@ const styles = StyleSheet.create({
   customerCard: { gap: 8 },
   customerName: { color: colors.foreground, fontSize: 18, fontWeight: "900" },
   contactRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  readOnlyNote: { color: colors.primary, fontSize: 12, fontWeight: "800" },
   sectionTitle: { color: colors.textSecondary, fontSize: 14, fontWeight: "900" },
   stats: { flexDirection: "row", gap: 8 },
   stat: { flex: 1, alignItems: "center", padding: 10 },
