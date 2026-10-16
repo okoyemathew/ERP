@@ -104,6 +104,14 @@ export class BusinessController {
     return this.businessService.remove(id, user);
   }
 
+  @Delete('account/me')
+  @Roles(SYSTEM_ROLES.OWNER)
+  @ApiOperation({ summary: 'Delete the owner account and its business' })
+  @ApiResponse({ status: 200, description: 'Owner account and business deleted' })
+  deleteMyAccount(@CurrentUser() user: AuthenticatedUser) {
+    return this.businessService.deleteOwnerAccount(user);
+  }
+
   @Get(':id/profile')
   @ApiOperation({ summary: 'Retrieve a business profile with settings' })
   profile(

@@ -200,6 +200,10 @@ export class EmployeeService {
     dto: UpdateEmployeeDto,
     actor?: AuthenticatedUser,
   ) {
+    if (dto.password && actor?.roleName?.trim().toLowerCase() !== 'owner') {
+      throw new ForbiddenException('Only the business owner can set an employee password');
+    }
+
     const current = await this.prisma.employee.findFirst({
       where: { id, businessId, deletedAt: null },
       include: { user: true },

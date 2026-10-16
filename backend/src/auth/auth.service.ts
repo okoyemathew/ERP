@@ -1212,6 +1212,18 @@ export class AuthService {
     dto: ChangePasswordDto,
     request: Request,
   ): Promise<{ success: true }> {
+    const roleName =
+      user.roleName ??
+      (user.roleId
+        ? (await this.prisma.role.findUnique({
+            where: { id: user.roleId },
+            select: { name: true },
+          }))?.name
+        : null);
+    if (roleName?.trim().toLowerCase() !== 'owner') {
+      throw new ForbiddenException('Only the business owner can change a password');
+    }
+
     if (dto.currentPassword === dto.newPassword) {
       throw new BadRequestException('New password must be different');
     }

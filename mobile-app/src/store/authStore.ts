@@ -29,6 +29,7 @@ interface AuthStore {
   revokeSession: (sessionId: string) => Promise<void>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
+  deleteMyAccount: () => Promise<void>;
   clearAuth: () => Promise<void>;
   can: (permission: string) => boolean;
   canAny: (permissions: string[]) => boolean;
@@ -193,6 +194,18 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ isLoading: true, error: null });
     await authService.logoutAll();
     set(emptyAuthState("Login"));
+  },
+
+  deleteMyAccount: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      await authService.deleteMyAccount();
+      set(emptyAuthState("Login"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to delete account.";
+      set({ isLoading: false, error: message });
+      throw error;
+    }
   },
 
   clearAuth: async () => {

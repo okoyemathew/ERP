@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
-import { Lock, Mail, MapPin, Phone, User } from "lucide-react-native";
+import { Lock, Mail, MapPin, Phone, Trash2, User } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar, Button, Input, ScreenHeader } from "@/components/common";
 import { useAuthStore } from "@/store/authStore";
@@ -12,6 +12,7 @@ export function ProfileScreen() {
   const user = useAuthStore((state) => state.user);
   const business = useAuthStore((state) => state.business);
   const logout = useAuthStore((state) => state.logout);
+  const deleteMyAccount = useAuthStore((state) => state.deleteMyAccount);
   const refreshProfile = useAuthStore((state) => state.refreshProfile);
   const changePassword = useAuthStore((state) => state.changePassword);
   const loading = useAuthStore((state) => state.isLoading);
@@ -24,6 +25,8 @@ export function ProfileScreen() {
   const email = user?.email ?? "";
   const phone = user?.phone ?? "";
   const location = business?.address ?? business?.name ?? "";
+  const roleName = user?.roleName?.trim().toLowerCase();
+  const isOwner = roleName ? roleName === "owner" : user?.role === "owner";
 
   useEffect(() => {
     void refreshProfile();
@@ -57,6 +60,25 @@ export function ProfileScreen() {
     }
   };
 
+  const confirmDeleteAccount = () => {
+    Alert.alert(
+      "Delete owner account?",
+      "This permanently deletes your owner account, the business, all employee accounts, and the business data. This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete account",
+          style: "destructive",
+          onPress: () => {
+            void deleteMyAccount().catch((error) => {
+              Alert.alert("Deletion failed", error instanceof Error ? error.message : "Unable to delete account. Please try again.");
+            });
+          }
+        }
+      ]
+    );
+  };
+
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Profile" />
@@ -76,15 +98,24 @@ export function ProfileScreen() {
         <Input label="Phone" value={phone} editable={false} icon={<Phone size={15} color={colors.textPlaceholder} />} />
         <Input label="Location" value={location} editable={false} icon={<MapPin size={15} color={colors.textPlaceholder} />} />
         <Button label="Save" onPress={loading ? undefined : refreshProfile} loading={loading} />
-        <View style={styles.passwordBlock}>
-          <Text style={styles.sectionTitle}>Change Password</Text>
-          <Input label="Current Password" value={currentPassword} onChangeText={setCurrentPassword} secureTextEntry icon={<Lock size={15} color={colors.textPlaceholder} />} />
-          <Input label="New Password" value={newPassword} onChangeText={setNewPassword} secureTextEntry icon={<Lock size={15} color={colors.textPlaceholder} />} />
-          <Input label="Confirm New Password" value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry icon={<Lock size={15} color={colors.textPlaceholder} />} />
-          {(passwordError || apiError) && <Text style={styles.error}>{passwordError ?? apiError}</Text>}
-          <Button label="Change Password" onPress={loading ? undefined : handleChangePassword} loading={loading} />
-        </View>
+        {isOwner ? (
+          <View style={styles.passwordBlock}>
+            <Text style={styles.sectionTitle}>Change Password</Text>
+            <Input label="Current Password" value={currentPassword} onChangeText={setCurrentPassword} secureTextEntry icon={<Lock size={15} color={colors.textPlaceholder} />} />
+            <Input label="New Password" value={newPassword} onChangeText={setNewPassword} secureTextEntry icon={<Lock size={15} color={colors.textPlaceholder} />} />
+            <Input label="Confirm New Password" value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry icon={<Lock size={15} color={colors.textPlaceholder} />} />
+            {(passwordError || apiError) && <Text style={styles.error}>{passwordError ?? apiError}</Text>}
+            <Button label="Change Password" onPress={loading ? undefined : handleChangePassword} loading={loading} />
+          </View>
+        ) : null}
         <Button label="Logout" variant="danger" onPress={logout} />
+        {isOwner ? (
+          <View style={styles.deleteBlock}>
+            <Text style={styles.deleteTitle}>Permanently delete account</Text>
+            <Text style={styles.deleteDescription}>Your business and every employee account will be deleted.</Text>
+            <Button label="Delete Owner Account" variant="danger" onPress={loading ? undefined : confirmDeleteAccount} loading={loading} icon={<Trash2 size={16} color="#FFFFFF" />} />
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -98,5 +129,8 @@ const styles = StyleSheet.create({
   role: { color: colors.primary, backgroundColor: colors.secondaryBg, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99, overflow: "hidden", marginTop: 6, textTransform: "capitalize" },
   passwordBlock: { gap: 12, paddingTop: 6 },
   sectionTitle: { color: colors.foreground, fontSize: 16, fontWeight: "800" },
-  error: { color: colors.error, fontSize: 12, fontWeight: "700" }
+  error: { color: colors.error, fontSize: 12, fontWeight: "700" },
+  deleteBlock: { gap: 8, marginTop: 10, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.error, backgroundColor: "#FFF7F7" },
+  deleteTitle: { color: colors.error, fontSize: 14, fontWeight: "800" },
+  deleteDescription: { color: colors.foreground, fontSize: 12, lineHeight: 18 }
 });

@@ -49,6 +49,7 @@ export function EmployeeFormScreen({ route, navigation }: { route: any; navigati
   const title = employeeId ? "Edit Employee" : "Create Employee";
   const selectedRole = useMemo(() => roles.find((role) => role.id === form.roleId), [form.roleId, roles]);
   const canManageCreditSalePermissions = Boolean(currentUser?.roleName === "Owner" || (!currentUser?.roleName && currentUser?.role === "owner"));
+  const isOwner = Boolean(currentUser?.roleName?.trim().toLowerCase() === "owner" || (!currentUser?.roleName && currentUser?.role === "owner"));
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -177,8 +178,14 @@ export function EmployeeFormScreen({ route, navigation }: { route: any; navigati
       <SectionTitle title="Login" />
       <Card style={styles.form}>
         <Input label="Username" value={form.username} onChangeText={(value) => setField("username", value)} autoCapitalize="none" editable={canManage} />
-        <Input label={employeeId ? "New Password" : "Initial Password"} value={form.password ?? ""} onChangeText={(value) => setField("password", value)} secureTextEntry editable={canManage} />
-        <Input label="Confirm Password" value={form.confirmPassword ?? ""} onChangeText={(value) => setField("confirmPassword", value)} secureTextEntry editable={canManage} />
+        {isOwner ? (
+          <>
+            <Input label={employeeId ? "Set New Password" : "Initial Password"} value={form.password ?? ""} onChangeText={(value) => setField("password", value)} secureTextEntry editable={canManage} placeholder={employeeId ? "Leave blank to keep current password" : undefined} />
+            <Input label="Confirm Password" value={form.confirmPassword ?? ""} onChangeText={(value) => setField("confirmPassword", value)} secureTextEntry editable={canManage} />
+          </>
+        ) : employeeId ? (
+          <Text style={styles.note}>Employee passwords are private. Only the owner can set a new password.</Text>
+        ) : null}
       </Card>
 
       <SectionTitle title="Role" />

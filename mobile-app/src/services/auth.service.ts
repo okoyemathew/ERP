@@ -61,6 +61,16 @@ function withTokens(session: StoredAuthSession, tokens: RefreshTokenResponse): S
 }
 
 export const authService = {
+  async deleteMyAccount(): Promise<void> {
+    try {
+      await api.delete(endpoints.businesses.deleteMyAccount);
+    } catch (error) {
+      throw normalizeApiError(error);
+    } finally {
+      await clearLocalSensitiveData();
+    }
+  },
+
   async registerOwner(payload: RegisterOwnerRequest): Promise<RegisterOwnerResponse> {
     try {
       const { data } = await api.post<RegisterOwnerResponse>(endpoints.auth.registerOwner, payload);

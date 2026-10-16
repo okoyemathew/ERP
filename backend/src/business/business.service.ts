@@ -140,6 +140,27 @@ export class BusinessService {
     return deleted;
   }
 
+  async deleteOwnerAccount(user: AuthenticatedUser) {
+    const roleName =
+      user.roleName ??
+      (user.roleId
+        ? (await this.prisma.role.findUnique({
+            where: { id: user.roleId },
+            select: { name: true },
+          }))?.name
+        : null);
+    if (roleName?.trim().toLowerCase() !== 'owner') {
+      throw new ForbiddenException('Only the business owner can delete this account');
+    }
+
+    await this.ensureExists(user.businessId);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.business.delete({ where: { id: user.businessId } });
+    });
+
+    return { success: true };
+  }
+
   async profile(id: string, user?: AuthenticatedUser) {
     if (user) {
       await this.ensureBusinessAccess(id, user);

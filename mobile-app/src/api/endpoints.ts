@@ -14,6 +14,7 @@ export const endpoints = {
     revokeSession: (sessionId: string) => `/auth/sessions/${sessionId}/revoke`
   },
   businesses: {
+    deleteMyAccount: "/businesses/account/me",
     detail: (businessId: string) => `/businesses/${businessId}`,
     update: (businessId: string) => `/businesses/${businessId}`,
     profile: (businessId: string) => `/businesses/${businessId}/profile`,

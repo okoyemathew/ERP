@@ -429,11 +429,58 @@ export class CustomerService {
     const limit = query.limit ?? 20;
     await this.ensureCustomerExists(businessId, id, viewer);
 
+    const settledSaleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
     const where: Prisma.SaleWhereInput = {
       businessId,
       customerId: id,
       deletedAt: null,
       ...this.userActivityScope(viewer),
+      OR: [
+        { paymentStatus: { not: PaymentStatus.PAID } },
+        {
+          paymentStatus: PaymentStatus.PAID,
+          AND: [
+            { creditSale: null },
+            {
+              OR: [
+                {
+                  payments: {
+                    some: { paymentDate: { gt: settledSaleCutoff } },
+                  },
+                },
+                {
+                  payments: { none: {} },
+                  saleDate: { gt: settledSaleCutoff },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          paymentStatus: PaymentStatus.PAID,
+          AND: [
+            {
+              creditSale: {
+                is: {
+                  status: CreditSaleStatus.PAID,
+                  OR: [
+                    {
+                      payments: {
+                        some: { paymentDate: { gt: settledSaleCutoff } },
+                      },
+                    },
+                    {
+                      payments: { none: {} },
+                      sale: { saleDate: { gt: settledSaleCutoff } },
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      ],
     };
     const [total, items] = await Promise.all([
       this.prisma.sale.count({ where }),
@@ -558,6 +605,31 @@ export class CustomerService {
     const where: Prisma.CreditSaleWhereInput = {
       customerId: id,
       sale: { businessId, ...this.userActivityScope(viewer) },
+      OR: [
+        { status: { not: CreditSaleStatus.PAID } },
+        {
+          status: CreditSaleStatus.PAID,
+          OR: [
+            {
+              payments: {
+                some: {
+                  paymentDate: {
+                    gt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                  },
+                },
+              },
+            },
+            {
+              payments: { none: {} },
+              sale: {
+                saleDate: {
+                  gt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+                },
+              },
+            },
+          ],
+        },
+      ],
     };
     const [total, items] = await Promise.all([
       this.prisma.creditSale.count({ where }),
