@@ -3,7 +3,7 @@
     "name": "EST JP MOTORS CAMEROON",
     "slug": "nexpos-mobile",
     "version": "2.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
     "assetBundlePatterns": [
