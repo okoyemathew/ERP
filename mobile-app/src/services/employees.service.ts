@@ -4,6 +4,7 @@ import { endpoints } from "@/api/endpoints";
 import { AppApiError } from "@/api/errors";
 import { getRequiredAuthContext, getRequiredBusinessId } from "@/api/session";
 import { offlineDbService } from "@/services/offline-db.service";
+import { apiCacheKey, offlineApiCacheService } from "@/services/offline-api-cache.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import { useAuthStore } from "@/store/authStore";
 import type {
@@ -54,6 +55,15 @@ function moneyValue(value: string | number | null | undefined) {
 
 function isOfflineError(error: unknown) {
   return error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT");
+}
+
+async function persistEmployeeGet(url: string, payload: unknown, params?: unknown) {
+  const { businessId, userId } = await getRequiredAuthContext();
+  const cacheKey = apiCacheKey("GET", url, {
+    scope: { businessId, userId },
+    params: params ?? null
+  });
+  await offlineApiCacheService.set(cacheKey, payload);
 }
 
 function saleCustomerName(sale: ApiSale) {
@@ -354,7 +364,9 @@ export const employeesService = {
   },
 
   async profile(id: string): Promise<EmployeeProfileResponse> {
-    const { data } = await api.get<EmployeeProfileResponse>(endpoints.employees.profile(id));
+    const url = endpoints.employees.profile(id);
+    const { data } = await api.get<EmployeeProfileResponse>(url);
+    await persistEmployeeGet(url, data);
     const currentUserId = useAuthStore.getState().user?.id;
     return data.employee.userId === currentUserId ? augmentSelfProfile(data) : data;
   },
@@ -370,7 +382,9 @@ export const employeesService = {
   },
 
   async sales(id: string, params: EmployeeSalesParams = {}): Promise<EmployeeSalesResponse> {
-    const { data } = await api.get<EmployeeSalesResponse>(endpoints.employees.sales(id), { params });
+    const url = endpoints.employees.sales(id);
+    const { data } = await api.get<EmployeeSalesResponse>(url, { params });
+    await persistEmployeeGet(url, data, params);
     const currentUserId = useAuthStore.getState().user?.id;
     if (data.employee.userId !== currentUserId) return data;
     return augmentEmployeeSalesResponse(data, await queuedEmployeeSales(params), params);

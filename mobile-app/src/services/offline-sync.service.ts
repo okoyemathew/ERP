@@ -4,6 +4,7 @@ import { endpoints } from "@/api/endpoints";
 import { AppApiError } from "@/api/errors";
 import { getRequiredAuthContext } from "@/api/session";
 import { deviceService } from "@/services/device.service";
+import { offlineApiCacheService } from "@/services/offline-api-cache.service";
 import { dashboardEvents } from "@/utils/dashboardEvents";
 import type { CreateExpensePayload } from "@/types/expense";
 import type { CreateSalePayload } from "@/types/sales";
@@ -114,6 +115,13 @@ export const offlineSyncService = {
   async performSyncPending(): Promise<SyncSummary> {
     if (!(await this.isOnline())) return { synced: 0, failed: 0 };
     const { businessId, userId } = await getRequiredAuthContext();
+    try {
+      const { data: anonymizedCustomerIds } = await api.get<string[]>(endpoints.customers.anonymizedIds(businessId));
+      await Promise.all(anonymizedCustomerIds.map((customerId) => offlineDbService.removeCachedCustomer(businessId, userId, customerId)));
+      if (anonymizedCustomerIds.length) await offlineApiCacheService.invalidateSettledCustomerViews(businessId);
+    } catch {
+      // Syncing sales should continue if privacy-cache cleanup is temporarily unavailable.
+    }
     const operations = await offlineDbService.pendingOperations(businessId, userId);
     if (operations.length === 0) return { synced: 0, failed: 0 };
 
@@ -151,6 +159,11 @@ export const offlineSyncService = {
     let activityChanged = false;
     for (const result of data.results) {
       if (result.status === "SYNCED" || result.status === "DUPLICATE_CONFIRMED") {
+        const saleOperation = serverSyncOperations.find((operation) => operation.id === result.operationId);
+        if (result.customerAnonymized && saleOperation?.type === "SALE_CREATE") {
+          const customerId = (saleOperation.payload as CreateSalePayload).customerId;
+          if (customerId) await offlineDbService.removeCachedCustomer(businessId, userId, customerId);
+        }
         await offlineDbService.markSynced(result.operationId);
         if (result.type === "SALE_CREATE" || result.type === "EXPENSE_CREATE") {
           activityChanged = true;

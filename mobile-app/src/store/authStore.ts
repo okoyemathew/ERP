@@ -93,14 +93,25 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
   restore: async () => {
     set({ isLoading: true, error: null });
-    const session = await authService.restoreSession();
+    try {
+      const session = await authService.restoreSession();
 
-    if (!session) {
-      set(emptyAuthState((await hasCompletedOnboarding()) ? "Login" : "Splash"));
-      return;
+      if (session) {
+        set(toStoreSession(session));
+        return;
+      }
+    } catch {
+      // A failed secure-storage or offline database restore should not leave
+      // the app on its launch screen indefinitely. Continue to the auth flow.
     }
 
-    set(toStoreSession(session));
+    let completedOnboarding = false;
+    try {
+      completedOnboarding = await hasCompletedOnboarding();
+    } catch {
+      // Treat unavailable onboarding storage as a first launch.
+    }
+    set(emptyAuthState(completedOnboarding ? "Login" : "Splash"));
   },
 
   login: async (credentials) => {

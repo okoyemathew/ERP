@@ -45,6 +45,7 @@ export interface ApiCreditSale {
   updatedAt: string;
   customer: {
     id: string;
+    anonymized?: boolean;
     name: string;
     phone: string;
     status: string;

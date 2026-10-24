@@ -100,7 +100,7 @@ export class CustomerService {
       'CREATE',
       'Customer',
       customer.id,
-      `Created customer ${this.displayName(customer)}`,
+      'Created customer record',
       dto.deviceId,
     );
 
@@ -151,6 +151,14 @@ export class CustomerService {
       data,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  async findAnonymizedCustomerIds(businessId: string) {
+    const customers = await this.prisma.customer.findMany({
+      where: { businessId, phone: { startsWith: 'REDACTED-' } },
+      select: { id: true },
+    });
+    return customers.map((customer) => customer.id);
   }
 
   async search(
@@ -273,7 +281,7 @@ export class CustomerService {
       'UPDATE',
       'Customer',
       id,
-      `Updated customer ${this.displayName(updated)}`,
+      'Updated customer record',
       dto.deviceId,
     );
 
@@ -955,7 +963,7 @@ export class CustomerService {
           action: 'UPDATE',
           entity: 'CreditPayment',
           entityId: id,
-          description: `Collected credit payment of ${paymentAmount.toFixed(2)} from customer ${this.displayName(updatedCustomer)}`,
+          description: `Collected credit payment of ${paymentAmount.toFixed(2)}`,
           deviceId: dto.deviceId ?? null,
         },
       });
@@ -1122,7 +1130,7 @@ export class CustomerService {
     status: CustomerStatus,
     user?: AuthenticatedUser,
   ) {
-    const customer = await this.findOne(businessId, id, user);
+    await this.findOne(businessId, id, user);
     const updated = await this.prisma.customer.update({
       where: { id },
       data: { status, isSynced: true, syncVersion: { increment: 1 } },
@@ -1134,7 +1142,7 @@ export class CustomerService {
       'UPDATE',
       'CustomerStatus',
       id,
-      `Changed customer ${this.displayName(customer)} status to ${status}`,
+      `Changed customer status to ${status}`,
     );
 
     return updated;

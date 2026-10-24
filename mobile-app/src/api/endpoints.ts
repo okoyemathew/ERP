@@ -50,6 +50,7 @@ export const endpoints = {
   },
   customers: {
     list: (businessId: string) => `/businesses/${businessId}/customers`,
+    anonymizedIds: (businessId: string) => `/businesses/${businessId}/customers/anonymized-ids`,
     create: (businessId: string) => `/businesses/${businessId}/customers`,
     search: (businessId: string) => `/businesses/${businessId}/customers/search`,
     detail: (businessId: string, customerId: string) => `/businesses/${businessId}/customers/${customerId}`,

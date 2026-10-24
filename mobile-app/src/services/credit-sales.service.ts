@@ -170,6 +170,15 @@ async function updateCachedCustomerBalance(customerId: string | undefined, outst
   });
 }
 
+async function updateOrClearCachedCustomer(customer: ApiCreditSale["customer"]) {
+  if (customer.anonymized || customer.phone.startsWith("REDACTED-")) {
+    const { businessId, userId } = await getRequiredAuthContext();
+    await offlineDbService.removeCachedCustomer(businessId, userId, customer.id);
+    return;
+  }
+  await updateCachedCustomerBalance(customer.id, customer.outstandingBalance);
+}
+
 function mergeQueuedCredits(remote: CreditSaleListResponse, queued: CreditSaleListResponse): CreditSaleListResponse {
   const remoteSaleIds = new Set(remote.data.map((credit) => credit.saleId));
   const newQueued = queued.data.filter((credit) => !remoteSaleIds.has(credit.saleId));
@@ -323,7 +332,7 @@ export const creditSalesService = {
   async collectPayment(id: string, payload: CreditPaymentPayload, customerId?: string): Promise<ApiCreditSale> {
     try {
       const { data } = await api.post<ApiCreditSale>(endpoints.creditSales.payment(id), payload);
-      await updateCachedCustomerBalance(data.customer.id, data.customer.outstandingBalance);
+      await updateOrClearCachedCustomer(data.customer);
       dashboardEvents.notifySaleChanged();
       return data;
     } catch (error) {
@@ -339,7 +348,7 @@ export const creditSalesService = {
   async collectPosPayment(id: string, payload: CreditPaymentPayload, customerId?: string): Promise<ApiCreditSale> {
     try {
       const { data } = await api.post<ApiCreditSale>(`/credit-sales/${id}/pos-payments`, payload);
-      await updateCachedCustomerBalance(data.customer.id, data.customer.outstandingBalance);
+      await updateOrClearCachedCustomer(data.customer);
       dashboardEvents.notifySaleChanged();
       return data;
     } catch (error) {

@@ -11,6 +11,7 @@ import {
   ClipboardList,
   HandCoins,
   LogOut,
+  Medal,
   Receipt,
   RotateCcw,
   Settings,
@@ -34,6 +35,7 @@ type RouteName = keyof AppStackParamList;
 
 const ownerOnly: Array<{ icon: LucideIcon; label: string; route: RouteName; color: string; bg: string }> = [
   { icon: BarChart2, label: "Reports", route: "Reports", color: colors.primary, bg: colors.secondaryBg },
+  { icon: Medal, label: "Product Ranking", route: "ProductRanking", color: colors.purple, bg: colors.purpleBg },
   { icon: Box, label: "Warehouse", route: "Inventory", color: colors.success, bg: colors.successBg },
   { icon: Users, label: "Employees", route: "Employees", color: colors.orange, bg: colors.orangeBg },
   { icon: Banknote, label: "Cash Register", route: "CashRegister", color: colors.purple, bg: colors.purpleBg },

@@ -92,6 +92,18 @@ export class CustomerController {
     return this.customerService.search(businessId, q ?? '', query, user);
   }
 
+  @Get('anonymized-ids')
+  @Permissions('customers.manage')
+  @Roles(...CUSTOMER_READ_ROLES)
+  @ApiOperation({ summary: 'List anonymized customer ids for local cache cleanup' })
+  anonymizedIds(
+    @Param('businessId') businessId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    this.assertBusinessAccess(businessId, user);
+    return this.customerService.findAnonymizedCustomerIds(businessId);
+  }
+
   @Get(':id')
   @Roles(...CUSTOMER_READ_ROLES)
   @ApiOperation({ summary: 'View customer' })

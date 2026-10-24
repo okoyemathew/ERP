@@ -6,7 +6,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Archive, DollarSign, FileDown, Package, PackagePlus, Printer, Search, Send, ShoppingBag, Trash2, Wallet } from "lucide-react-native";
+import { Archive, ChevronRight, DollarSign, FileDown, Package, PackagePlus, Printer, Search, Send, ShoppingBag, Trash2, Wallet } from "lucide-react-native";
 import { AppBottomSheet, Avatar, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar, statusVariant } from "@/components/common";
 import { employeesService } from "@/services/employees.service";
 import { StockReportExportControl } from "@/components/common/StockReportExportControl";
@@ -707,6 +707,24 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
           <Text style={styles.salesHeroValue}>{salesToday}</Text>
           <Text style={styles.productMeta}>transactions recorded today</Text>
         </View>
+        {!isSelfProfile && isOwner ? (
+          <Pressable
+            onPress={() => navigation.navigate("EmployeeProductRanking", { employeeId: employee.id, employeeName: name })}
+            accessibilityRole="button"
+            accessibilityLabel={`View ${name}'s product ranking`}
+          >
+            <Card style={styles.salesCard}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.saleIcon}><Package size={16} color={colors.primary} /></View>
+                <View style={styles.saleBody}>
+                  <Text style={styles.sectionTitle}>Product Ranking</Text>
+                  <Text style={styles.sectionMeta}>View products ranked by this employee's sales</Text>
+                </View>
+                <ChevronRight size={16} color={colors.borderLight} />
+              </View>
+            </Card>
+          </Pressable>
+        ) : null}
         <Card style={styles.activityCard}>
           <InfoLine label="Last Active" value={relativeTime(employee.lastLogin ?? employee.user.lastLogin ?? latestSession?.updatedAt)} />
           <InfoLine label="Role" value={role} />

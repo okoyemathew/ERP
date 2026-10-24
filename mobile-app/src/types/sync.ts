@@ -36,5 +36,6 @@ export interface SyncResult {
   entity?: string;
   entityId?: string;
   syncVersion?: number;
+  customerAnonymized?: boolean;
   error?: string;
 }

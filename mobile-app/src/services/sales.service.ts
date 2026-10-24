@@ -57,6 +57,13 @@ function customerName(sale: ApiSale) {
     : "Walk-in Customer";
 }
 
+async function clearCachedAnonymizedCustomer(sale: ApiSale) {
+  const customer = sale.customer;
+  if (!customer?.phone?.startsWith("REDACTED-")) return;
+  const { businessId, userId } = await getRequiredAuthContext();
+  await offlineDbService.removeCachedCustomer(businessId, userId, customer.id);
+}
+
 function saleMatchesParams(sale: ApiSale, params: Record<string, string | number>) {
   const status = params.status ? String(params.status).toUpperCase() : null;
   const paymentStatus = params.paymentStatus ? String(params.paymentStatus).toUpperCase() : null;
@@ -100,15 +107,15 @@ function mergeSales(remoteSales: ApiSale[], queuedSales: ApiSale[]) {
 }
 
 export const salesService = {
-  async list(params?: Record<string, string | number>): Promise<{ data: ApiSale[] }> {
+  async list(params?: Record<string, string | number>): Promise<{ data: ApiSale[]; meta?: { page: number; limit: number; total: number; totalPages: number } }> {
     const normalizedParams = params ?? {};
     try {
-      const { data } = await api.get<{ data: ApiSale[] }>("/sales", { params: normalizedParams });
+      const { data } = await api.get<{ data: ApiSale[]; meta?: { page: number; limit: number; total: number; totalPages: number } }>("/sales", { params: normalizedParams });
       const queuedSales = await queuedSalesForParams(normalizedParams);
       return { ...data, data: mergeSales(data.data, queuedSales) };
     } catch (error) {
       if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
-        return { data: await queuedSalesForParams(normalizedParams) };
+        return { data: await queuedSalesForParams(normalizedParams), meta: { page: 1, limit: Number(normalizedParams.limit ?? 50), total: 0, totalPages: 1 } };
       }
       throw error;
     }
@@ -121,12 +128,14 @@ export const salesService = {
 
   async create(payload: CreateSalePayload): Promise<ApiSale> {
     const { data } = await api.post<ApiSale>(endpoints.sales.create, payload);
+    await clearCachedAnonymizedCustomer(data);
     return data;
   },
 
   async complete(saleId: string, payments: CreatePaymentPayload[]): Promise<ApiSale> {
     try {
       const { data } = await api.post<ApiSale>(`/sales/${saleId}/complete`, { payments });
+      await clearCachedAnonymizedCustomer(data);
       return data;
     } catch (error) {
       return queueOfflineMutation(error, { method: "POST", url: `/sales/${saleId}/complete`, data: { payments } }, saleFallback({ items: [], payments }, saleId));

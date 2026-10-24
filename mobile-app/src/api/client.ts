@@ -101,6 +101,17 @@ api.interceptors.response.use(
       const session = await getAuthSession();
       if (session?.user.businessId) {
         await offlineApiCacheService.invalidateSaleReports(session.user.businessId).catch(() => undefined);
+        await offlineApiCacheService.invalidateSettledCustomerViews(session.user.businessId).catch(() => undefined);
+      }
+      dashboardEvents.notifySaleChanged();
+    }
+    if (
+      response.config.method?.toUpperCase() === "POST" &&
+      (/^\/sales(?:\/|$)/.test(response.config.url ?? "") || /\/sync\/batch$/.test(response.config.url ?? ""))
+    ) {
+      const session = await getAuthSession();
+      if (session?.user.businessId) {
+        await offlineApiCacheService.invalidateSettledCustomerViews(session.user.businessId).catch(() => undefined);
       }
       dashboardEvents.notifySaleChanged();
     }

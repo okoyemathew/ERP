@@ -4,7 +4,6 @@ import { Printer } from "lucide-react-native";
 import * as Print from "expo-print";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import * as XLSX from "@stackline/xlsx";
 import { colors } from "@/theme";
 
 export interface StockReportLine {
@@ -103,7 +102,7 @@ function buildStockReportHtml({ title, businessName, branchName, subjectLabel, s
   </style></head><body>${pageHtml}</body></html>`;
 }
 
-function buildStockWorkbook({ title, businessName, branchName, subjectLabel, subjectName, items, pageCount }: {
+async function buildStockWorkbook({ title, businessName, branchName, subjectLabel, subjectName, items, pageCount }: {
   title: string;
   businessName: string;
   branchName?: string | null;
@@ -112,6 +111,8 @@ function buildStockWorkbook({ title, businessName, branchName, subjectLabel, sub
   items: StockReportLine[];
   pageCount: number;
 }) {
+  // Defer the large spreadsheet library until a user actually exports Excel.
+  const XLSX = await import("@stackline/xlsx");
   const generatedAt = new Date().toLocaleString();
   const rows: Array<Array<string | number>> = [
     [title],
@@ -155,7 +156,7 @@ function buildStockWorkbook({ title, businessName, branchName, subjectLabel, sub
   }
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "Stock Report");
-  return workbook;
+  return XLSX.write(workbook, { type: "base64", bookType: "xlsx" });
 }
 
 export function StockReportExportControl({ title, businessName, branchName, subjectLabel, subjectName, loadItems, accessibilityLabel }: Props) {
@@ -174,10 +175,7 @@ export function StockReportExportControl({ title, businessName, branchName, subj
 
       const safeName = title.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "stock-report";
       const fileName = `${safeName}-${Date.now()}.xlsx`;
-      const base64 = XLSX.write(
-        buildStockWorkbook({ title, businessName, branchName, subjectLabel, subjectName, items, pageCount }),
-        { type: "base64", bookType: "xlsx" },
-      );
+      const base64 = await buildStockWorkbook({ title, businessName, branchName, subjectLabel, subjectName, items, pageCount });
 
       if (Platform.OS === "android") {
         const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();

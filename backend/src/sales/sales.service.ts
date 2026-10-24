@@ -27,6 +27,7 @@ import {
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { DEFAULT_BUSINESS_CURRENCY, formatMoney } from '../common/currency';
 import { PrismaService } from '../prisma/prisma.service';
+import { anonymizeCustomerIfSettled } from '../customer/customer-privacy';
 import { CompleteSaleDto } from './dto/complete-sale.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { PaymentDto } from './dto/payment.dto';
@@ -658,6 +659,10 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.createReceipt(id, sale.saleNumber, tx);
+
+    if (sale.customerId) {
+      await anonymizeCustomerIfSettled(tx, businessId, sale.customerId);
+    }
 
     const business = await tx.business.findUnique({
       where: { id: businessId },
@@ -1519,10 +1524,13 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       customer: sale.customer
         ? {
             id: sale.customer.id,
-            name:
-              sale.customer.companyName ||
-              `${sale.customer.firstName} ${sale.customer.lastName ?? ''}`.trim(),
-            phone: sale.customer.phone,
+            name: sale.customer.phone.startsWith('REDACTED-')
+              ? 'Former Customer'
+              : sale.customer.companyName ||
+                `${sale.customer.firstName} ${sale.customer.lastName ?? ''}`.trim(),
+            phone: sale.customer.phone.startsWith('REDACTED-')
+              ? null
+              : sale.customer.phone,
           }
         : {
             id: null,

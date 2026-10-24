@@ -38,7 +38,12 @@ export class SyncService {
       if (operation.type === 'SALE_CREATE') {
         const existing = await this.prisma.sale.findFirst({
           where: { businessId, idempotencyKey: operation.operationId },
-          select: { id: true, saleNumber: true, syncVersion: true },
+          select: {
+            id: true,
+            saleNumber: true,
+            syncVersion: true,
+            customer: { select: { phone: true } },
+          },
         });
 
         if (existing) {
@@ -49,6 +54,7 @@ export class SyncService {
             entity: 'Sale',
             entityId: existing.id,
             syncVersion: existing.syncVersion,
+            customerAnonymized: existing.customer?.phone.startsWith('REDACTED-') ?? false,
           };
         }
 
@@ -83,6 +89,7 @@ export class SyncService {
           entity: 'Sale',
           entityId: sale.id,
           syncVersion: sale.syncVersion,
+          customerAnonymized: sale.customer?.phone.startsWith('REDACTED-') ?? false,
         };
       }
 

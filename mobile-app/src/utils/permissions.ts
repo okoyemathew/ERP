@@ -8,6 +8,8 @@ const ownerOnly = new Set([
   "EmployeeCreditSales",
   "PendingPayments",
   "Reports",
+  "ProductRanking",
+  "EmployeeProductRanking",
   "CashRegister",
   "Disbursed",
   "ProductDetail",

@@ -50,6 +50,8 @@ export type AppStackParamList = {
   Disbursed: undefined;
   PendingPayments: undefined;
   Reports: undefined;
+  ProductRanking: undefined;
+  EmployeeProductRanking: { employeeId: string; employeeName: string };
   CashRegister: undefined;
   Settings: undefined;
   BusinessProfile: undefined;

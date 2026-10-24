@@ -233,12 +233,11 @@ export const offlineDbService = {
     await this.cacheCustomers(businessId, userId, [customer]);
   },
 
-  async removeCachedCustomer(businessId: string, userId: string, customerId: string) {
+  async removeCachedCustomer(businessId: string, _userId: string, customerId: string) {
     const db = await getDb();
     await db.runAsync(
-      "DELETE FROM customer_cache WHERE businessId = ? AND (userId = ? OR userId IS NULL) AND id = ?",
+      "DELETE FROM customer_cache WHERE businessId = ? AND id = ?",
       businessId,
-      userId,
       customerId
     );
   },

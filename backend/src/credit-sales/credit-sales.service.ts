@@ -26,6 +26,7 @@ import {
   SYSTEM_ROLES,
 } from '../auth/constants/roles.constant';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+import { anonymizeCustomerIfSettled } from '../customer/customer-privacy';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCreditPaymentDto } from './dto/create-credit-payment.dto';
 import { CreateCreditSaleDto } from './dto/create-credit-sale.dto';
@@ -186,7 +187,7 @@ export class CreditSalesService {
         action: AuditAction.SALE,
         entity: 'CreditSale',
         entityId: creditSale.id,
-        description: `Created credit sale ${saleNumber} for ${this.customerName(customer)}`,
+        description: `Created credit sale ${saleNumber}`,
         deviceId: dto.deviceId,
       });
 
@@ -1293,6 +1294,8 @@ export class CreditSalesService {
         deviceId: dto.deviceId,
       });
 
+      await anonymizeCustomerIfSettled(tx, businessId, creditSale.customerId);
+
       const updated = await this.getCreditSaleOrThrow(businessId, id, tx, user);
       return this.formatCreditSale(updated, user);
     });
@@ -2167,8 +2170,13 @@ export class CreditSalesService {
       updatedAt: creditSale.updatedAt,
       customer: {
         id: creditSale.customer.id,
-        name: this.customerName(creditSale.customer),
-        phone: creditSale.customer.phone,
+        anonymized: creditSale.customer.phone.startsWith('REDACTED-'),
+        name: creditSale.customer.phone.startsWith('REDACTED-')
+          ? 'Former Customer'
+          : this.customerName(creditSale.customer),
+        phone: creditSale.customer.phone.startsWith('REDACTED-')
+          ? ''
+          : creditSale.customer.phone,
         status: creditSale.customer.status,
         creditLimit: creditSale.customer.creditLimit,
         outstandingBalance: creditSale.customer.outstandingBalance,

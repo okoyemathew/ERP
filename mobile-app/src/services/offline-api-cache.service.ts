@@ -59,9 +59,24 @@ export const offlineApiCacheService = {
       `DELETE FROM api_response_cache
        WHERE instr(cacheKey, ?) > 0 AND (
          cacheKey LIKE 'GET /sales%' OR cacheKey LIKE 'GET /reports%'
-         OR cacheKey LIKE 'GET /employees%' OR cacheKey LIKE 'GET /credit-sales%'
+         OR cacheKey LIKE 'GET /credit-sales%'
          OR cacheKey LIKE 'GET /businesses/%/customers%'
          OR cacheKey LIKE 'GET /businesses/%/dashboard/%'
+       )`,
+      `"businessId":${JSON.stringify(businessId)}`
+    );
+  },
+
+  async invalidateSettledCustomerViews(businessId: string) {
+    revision += 1;
+    const db = await getDb();
+    await db.runAsync(
+      `DELETE FROM api_response_cache
+       WHERE instr(cacheKey, ?) > 0 AND (
+         cacheKey LIKE 'GET /sales%' OR cacheKey LIKE 'GET /receipts%'
+         OR cacheKey LIKE 'GET /credit-sales%' OR cacheKey LIKE 'GET /reports%'
+         OR cacheKey LIKE 'GET /employees/%/sales%'
+         OR cacheKey LIKE 'GET /businesses/%/customers%'
        )`,
       `"businessId":${JSON.stringify(businessId)}`
     );

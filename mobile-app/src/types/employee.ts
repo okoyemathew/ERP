@@ -71,6 +71,7 @@ export interface EmployeeProfileResponse {
       barcode?: string | null;
       quantityInHand: number;
       quantitySold: number;
+      quantityReturned?: number;
       suppliedQuantity: number;
       unitValue: string | number;
       sellingPrice?: string | number;

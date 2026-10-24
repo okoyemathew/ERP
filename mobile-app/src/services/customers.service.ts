@@ -3,6 +3,7 @@ import { endpoints } from "@/api/endpoints";
 import { AppApiError } from "@/api/errors";
 import { getRequiredAuthContext, getRequiredBusinessId } from "@/api/session";
 import { offlineDbService } from "@/services/offline-db.service";
+import { offlineApiCacheService } from "@/services/offline-api-cache.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import { dashboardEvents } from "@/utils/dashboardEvents";
 import type {
@@ -72,12 +73,23 @@ function customerFallback(businessId: string, payload: UpsertCustomerPayload, id
   };
 }
 
+async function purgeAnonymizedCustomerCache(businessId: string, userId: string) {
+  try {
+    const { data: customerIds } = await api.get<string[]>(endpoints.customers.anonymizedIds(businessId));
+    await Promise.all(customerIds.map((customerId) => offlineDbService.removeCachedCustomer(businessId, userId, customerId)));
+    if (customerIds.length) await offlineApiCacheService.invalidateSettledCustomerViews(businessId);
+  } catch {
+    // Keep the requested customer operation usable if cache cleanup is unavailable.
+  }
+}
+
 export const customersService = {
   async list(params: CustomerQuery = {}): Promise<CustomerListResponse> {
     const { businessId, userId } = await getRequiredAuthContext();
     try {
       const { data } = await api.get<CustomerListResponse>(endpoints.customers.list(businessId), { params });
       await offlineDbService.cacheCustomers(businessId, userId, data.data);
+      await purgeAnonymizedCustomerCache(businessId, userId);
       return data;
     } catch (error) {
       if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
@@ -97,6 +109,7 @@ export const customersService = {
     try {
       const { data } = await api.get<CustomerListResponse>(endpoints.customers.search(businessId), { params: { ...params, q: query } });
       await offlineDbService.cacheCustomers(businessId, userId, data.data);
+      await purgeAnonymizedCustomerCache(businessId, userId);
       return data;
     } catch (error) {
       if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
@@ -113,6 +126,7 @@ export const customersService = {
     try {
       const { data } = await api.get<ApiCustomer>(endpoints.customers.detail(businessId, id));
       await offlineDbService.cacheCustomer(businessId, userId, data);
+      await purgeAnonymizedCustomerCache(businessId, userId);
       return data;
     } catch (error) {
       if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {

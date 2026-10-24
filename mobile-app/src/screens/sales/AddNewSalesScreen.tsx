@@ -267,6 +267,11 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       setProducts(
         stock
           .filter((item) => item.quantityInHand > 0)
+          .sort((left, right) => {
+            const leftSold = Math.max(0, Number(left.quantitySold || 0) - Number(left.quantityReturned || 0));
+            const rightSold = Math.max(0, Number(right.quantitySold || 0) - Number(right.quantityReturned || 0));
+            return rightSold - leftSold || left.productName.localeCompare(right.productName);
+          })
           .map((item) => {
             const unitValue = moneyValue(item.unitValue);
             const name = item.productName || "Product";

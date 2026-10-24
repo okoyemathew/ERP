@@ -20,6 +20,8 @@ import { ProductFormScreen } from "@/screens/inventory/ProductFormScreen";
 import { ProductOptionManagerScreen } from "@/screens/inventory/ProductOptionManagerScreen";
 import { ReturnedProductsScreen } from "@/screens/inventory/ReturnedProductsScreen";
 import { ReportsScreen } from "@/screens/reports/ReportsScreen";
+import { ProductRankingScreen } from "@/screens/reports/ProductRankingScreen";
+import { EmployeeProductRankingScreen } from "@/screens/employees/EmployeeProductRankingScreen";
 import { CreditCustomerDetailsScreen } from "@/screens/sales/CreditCustomerDetailsScreen";
 import { CreditSalesScreen } from "@/screens/sales/CreditSalesScreen";
 import { NotificationsScreen } from "@/screens/settings/NotificationsScreen";
@@ -67,6 +69,8 @@ const appScreens: Array<{
   { name: "Disbursed", component: DisbursedScreen },
   { name: "PendingPayments", component: PendingPaymentsScreen },
   { name: "Reports", component: ReportsScreen },
+  { name: "ProductRanking", component: ProductRankingScreen },
+  { name: "EmployeeProductRanking", component: EmployeeProductRankingScreen },
   { name: "CashRegister", component: CashRegisterScreen },
   { name: "Settings", component: SettingsScreen },
   { name: "BusinessProfile", component: BusinessProfileScreen },
