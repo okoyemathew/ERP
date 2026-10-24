@@ -7,6 +7,8 @@ import { offlineDbService } from "@/services/offline-db.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import type { ApiSale, CreatePaymentPayload, CreateSalePayload, PrintReadyReceipt } from "@/types/sales";
 
+const COMPLETED_SALE_LIST_RETENTION_MS = 28 * 60 * 60 * 1000;
+
 function saleFallback(payload: CreateSalePayload, id = `sale-${Date.now().toString(36)}`): ApiSale {
   const now = new Date().toISOString();
   const subtotal = payload.items.reduce((sum, item) => sum + item.quantity * Number(item.unitPrice ?? 0), 0);
@@ -106,16 +108,25 @@ function mergeSales(remoteSales: ApiSale[], queuedSales: ApiSale[]) {
   return Array.from(salesById.values()).sort((left, right) => new Date(right.collectionDate ?? right.saleDate).getTime() - new Date(left.collectionDate ?? left.saleDate).getTime());
 }
 
+function isVisibleInSalesList(sale: ApiSale, params: Record<string, string | number>) {
+  if (sale.status !== "COMPLETED" && sale.status !== "REFUNDED") return true;
+  const timestamp = Date.parse(sale.completedAt ?? sale.updatedAt ?? sale.saleDate);
+  if (!Number.isFinite(timestamp) || Date.now() - timestamp < COMPLETED_SALE_LIST_RETENTION_MS) return true;
+  const search = String(params.search ?? "").trim().toLowerCase();
+  return Boolean(search && sale.receipt?.receiptNumber.toLowerCase().includes(search));
+}
+
 export const salesService = {
   async list(params?: Record<string, string | number>): Promise<{ data: ApiSale[]; meta?: { page: number; limit: number; total: number; totalPages: number } }> {
     const normalizedParams = params ?? {};
     try {
       const { data } = await api.get<{ data: ApiSale[]; meta?: { page: number; limit: number; total: number; totalPages: number } }>("/sales", { params: normalizedParams });
       const queuedSales = await queuedSalesForParams(normalizedParams);
-      return { ...data, data: mergeSales(data.data, queuedSales) };
+      return { ...data, data: mergeSales(data.data, queuedSales).filter((sale) => isVisibleInSalesList(sale, normalizedParams)) };
     } catch (error) {
       if (error instanceof AppApiError && (error.code === "NETWORK" || error.code === "TIMEOUT")) {
-        return { data: await queuedSalesForParams(normalizedParams), meta: { page: 1, limit: Number(normalizedParams.limit ?? 50), total: 0, totalPages: 1 } };
+        const queuedSales = await queuedSalesForParams(normalizedParams);
+        return { data: queuedSales.filter((sale) => isVisibleInSalesList(sale, normalizedParams)), meta: { page: 1, limit: Number(normalizedParams.limit ?? 50), total: 0, totalPages: 1 } };
       }
       throw error;
     }

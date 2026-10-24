@@ -50,6 +50,8 @@ export interface ApiSale {
   paymentStatus: string;
   status: string;
   saleDate: string;
+  completedAt?: string | null;
+  updatedAt?: string;
   customer?: {
     id: string;
     firstName: string;

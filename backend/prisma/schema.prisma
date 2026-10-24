@@ -1081,6 +1081,7 @@ model Sale {
   idempotencyKey String?
 
   saleDate DateTime @default(now())
+  completedAt DateTime?
 
   isSynced    Boolean   @default(true)
   syncVersion Int       @default(1)
@@ -1104,6 +1105,7 @@ model Sale {
   @@index([customerId])
   @@index([userId])
   @@index([saleDate])
+  @@index([businessId, completedAt])
 }
 
 //////////////////////////////////////////////////////

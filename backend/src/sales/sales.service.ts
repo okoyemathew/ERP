@@ -642,6 +642,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
         balanceDue,
         paymentStatus,
         status: SaleStatus.COMPLETED,
+        completedAt,
         saleDate: completedAt,
         remarks: dto.remarks?.trim() || sale.remarks,
         deviceId: dto.deviceId ?? undefined,
@@ -1949,6 +1950,7 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
       ? query.userId
       : user?.id;
     const filters: Prisma.SaleWhereInput[] = [];
+    const completedSalesVisibleAfter = new Date(Date.now() - 28 * 60 * 60 * 1000);
 
     if (query.status === SaleStatus.REFUNDED) {
       filters.push({
@@ -2004,9 +2006,40 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
               },
             },
           },
+          {
+            receipt: {
+              is: {
+                receiptNumber: {
+                  contains: search,
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+            },
+          },
         ],
       });
     }
+
+    filters.push({
+      OR: [
+        { status: { notIn: [SaleStatus.COMPLETED, SaleStatus.REFUNDED] } },
+        { completedAt: { gt: completedSalesVisibleAfter } },
+        ...(search
+          ? [
+              {
+                receipt: {
+                  is: {
+                    receiptNumber: {
+                      contains: search,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                },
+              },
+            ]
+          : []),
+      ],
+    });
 
     return {
       businessId,
