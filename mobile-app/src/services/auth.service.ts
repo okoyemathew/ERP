@@ -64,10 +64,9 @@ export const authService = {
   async deleteMyAccount(): Promise<void> {
     try {
       await api.delete(endpoints.businesses.deleteMyAccount);
+      await clearLocalSensitiveData();
     } catch (error) {
       throw normalizeApiError(error);
-    } finally {
-      await clearLocalSensitiveData();
     }
   },
 

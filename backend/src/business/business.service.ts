@@ -155,6 +155,21 @@ export class BusinessService {
 
     await this.ensureExists(user.businessId);
     await this.prisma.$transaction(async (tx) => {
+      // Remove rows whose required user relations use RESTRICT/NO ACTION before
+      // the business cascade tries to delete their users.
+      await tx.productReturnRequest.deleteMany({
+        where: { businessId: user.businessId },
+      });
+      await tx.creditSaleActionRequest.deleteMany({
+        where: { businessId: user.businessId },
+      });
+      await tx.payment.deleteMany({ where: { businessId: user.businessId } });
+      await tx.expense.deleteMany({ where: { businessId: user.businessId } });
+      await tx.cashRegister.deleteMany({
+        where: { businessId: user.businessId },
+      });
+      await tx.sale.deleteMany({ where: { businessId: user.businessId } });
+      await tx.user.deleteMany({ where: { businessId: user.businessId } });
       await tx.business.delete({ where: { id: user.businessId } });
     });
 
