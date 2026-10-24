@@ -28,8 +28,23 @@
       "expo-secure-store",
       "expo-asset",
       "expo-sqlite",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ]
     ],
-    "owner": "eruditecoder99"
+    "owner": "eruditecoder99",
+    "ios": {
+      "bundleIdentifier": "y",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
   }
 }
