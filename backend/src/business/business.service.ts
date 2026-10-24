@@ -155,8 +155,7 @@ export class BusinessService {
 
     await this.ensureExists(user.businessId);
     await this.prisma.$transaction(async (tx) => {
-      // Remove rows whose required user relations use RESTRICT/NO ACTION before
-      // the business cascade tries to delete their users.
+      // Remove children with restrictive foreign keys before their parents.
       await tx.productReturnRequest.deleteMany({
         where: { businessId: user.businessId },
       });
@@ -169,6 +168,31 @@ export class BusinessService {
         where: { businessId: user.businessId },
       });
       await tx.sale.deleteMany({ where: { businessId: user.businessId } });
+
+      await tx.purchaseOrderItem.deleteMany({
+        where: { purchaseOrder: { businessId: user.businessId } },
+      });
+      await tx.goodsSuppliedItem.deleteMany({
+        where: { goodsSupplied: { businessId: user.businessId } },
+      });
+      await tx.goodsDisbursementItem.deleteMany({
+        where: { goodsDisbursement: { businessId: user.businessId } },
+      });
+      await tx.purchaseOrder.deleteMany({
+        where: { businessId: user.businessId },
+      });
+      await tx.goodsSupplied.deleteMany({
+        where: { businessId: user.businessId },
+      });
+      await tx.goodsDisbursement.deleteMany({
+        where: { businessId: user.businessId },
+      });
+      await tx.product.deleteMany({ where: { businessId: user.businessId } });
+      await tx.customer.deleteMany({ where: { businessId: user.businessId } });
+      await tx.supplier.deleteMany({ where: { businessId: user.businessId } });
+      await tx.category.deleteMany({ where: { businessId: user.businessId } });
+      await tx.brand.deleteMany({ where: { businessId: user.businessId } });
+      await tx.unit.deleteMany({ where: { businessId: user.businessId } });
       await tx.user.deleteMany({ where: { businessId: user.businessId } });
       await tx.business.delete({ where: { id: user.businessId } });
     });
