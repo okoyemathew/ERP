@@ -328,10 +328,15 @@ export class ProductService {
       await this.ensureSupplierExists(businessId, dto.supplierId);
     }
     if (
-      dto.name !== undefined &&
-      dto.name.trim().toLowerCase() !== current.name.trim().toLowerCase()
+      (dto.name !== undefined &&
+        dto.name.trim().toLowerCase() !== current.name.trim().toLowerCase()) ||
+      (dto.isActive === true && !current.isActive)
     ) {
-      await this.validateUniqueProductName(businessId, dto.name, id);
+      await this.validateUniqueProductName(
+        businessId,
+        dto.name ?? current.name,
+        id,
+      );
     }
     this.validatePricesAndStock({
       purchasePrice: dto.purchasePrice ?? Number(current.purchasePrice),
@@ -1115,6 +1120,7 @@ export class ProductService {
     const existing = await this.prisma.product.findFirst({
       where: {
         businessId,
+        isActive: true,
         name: { equals: normalizedName, mode: 'insensitive' },
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },

@@ -78,7 +78,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
           wholesalePrice: product.wholesalePrice ? String(product.wholesalePrice) : "",
           minimumStock: String(product.minimumStock),
           maximumStock: product.maximumStock === null || product.maximumStock === undefined ? "" : String(product.maximumStock),
-          actualNewStock: "",
+          actualNewStock: stockMode ? "" : String(product.inventory?.quantityAvailable ?? 0),
           initialStock: String(product.initialStockQuantity ?? 0),
           imageUrl: product.imageUrl ?? "",
           isActive: product.isActive
@@ -89,7 +89,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
     } finally {
       setLoading(false);
     }
-  }, [productId]);
+  }, [productId, stockMode]);
 
   useEffect(() => {
     void load();
@@ -227,8 +227,8 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
       };
       if (productId) {
         await productsService.update(productId, payload);
-        if (actualNewStock && actualNewStock > 0) {
-          await productsService.stockIn(productId, actualNewStock, purchasePrice);
+        if (actualNewStock !== undefined && actualNewStock !== existingStock) {
+          await productsService.adjustQuantity(productId, actualNewStock - existingStock, purchasePrice);
         }
       } else {
         await productsService.create(payload);

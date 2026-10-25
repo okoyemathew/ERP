@@ -235,6 +235,43 @@ export const productsService = {
     }
   },
 
+  async adjustQuantity(productId: string, quantityChange: number, unitCost?: number): Promise<void> {
+    if (quantityChange === 0) return;
+    const businessId = await getRequiredBusinessId();
+    const payload = {
+      productId,
+      quantity: quantityChange,
+      transactionType: quantityChange > 0 ? "STOCK_IN" : "STOCK_OUT",
+      unitCost,
+      reason: "Inventory quantity correction"
+    };
+
+    try {
+      const { data: inventory } = await api.post<ApiProduct["inventory"]>(endpoints.inventory.adjust(businessId), payload);
+      const current = await offlineDbService.getCachedProduct(businessId, productId);
+      if (current && inventory) {
+        await offlineDbService.cacheProduct(businessId, { ...current, inventory });
+      }
+    } catch (error) {
+      if (!(error instanceof AppApiError) || (error.code !== "NETWORK" && error.code !== "TIMEOUT")) {
+        throw error;
+      }
+      const current = await offlineDbService.getCachedProduct(businessId, productId);
+      if (current?.inventory) {
+        await offlineDbService.cacheProduct(businessId, {
+          ...current,
+          inventory: {
+            ...current.inventory,
+            quantityOnHand: current.inventory.quantityOnHand + quantityChange,
+            quantityAvailable: current.inventory.quantityAvailable + quantityChange,
+            averageCost: unitCost ?? current.inventory.averageCost
+          }
+        });
+      }
+      await queueOfflineMutation(error, { method: "POST", url: endpoints.inventory.adjust(businessId), data: payload }, undefined);
+    }
+  },
+
   async stockInHistory(params: { search?: string; limit?: number; page?: number } = {}): Promise<StockInHistoryResponse> {
     const businessId = await getRequiredBusinessId();
     const { data } = await api.get<StockInHistoryResponse>(endpoints.inventory.stockInHistory(businessId), { params });
