@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, TextInput, View } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Archive, FileDown, Printer, Search, Send } from "lucide-react-native";
@@ -10,76 +10,13 @@ import { goodsDisbursementService } from "@/services/goods-disbursement.service"
 import { printingService } from "@/services/printing.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
-import type { ApiGoodsDisbursement, ApiGoodsDisbursementItem } from "@/types/goodsDisbursement";
+import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
 import { formatCurrency } from "@/utils/format";
-
-const invoiceLineWidth = 36;
-const invoiceDivider = "-".repeat(invoiceLineWidth);
-
-const invoiceCenter = (text: string) => {
-  const trimmed = text.slice(0, invoiceLineWidth);
-  const pad = Math.max(0, Math.floor((invoiceLineWidth - trimmed.length) / 2));
-  return `${" ".repeat(pad)}${trimmed}`;
-};
-
-const invoiceRow = (left: string, right: string) => {
-  const cleanLeft = left.slice(0, invoiceLineWidth - 1);
-  const cleanRight = right.slice(0, invoiceLineWidth - 1);
-  const spaces = Math.max(1, invoiceLineWidth - cleanLeft.length - cleanRight.length);
-  return `${cleanLeft}${" ".repeat(spaces)}${cleanRight}`;
-};
-
-function disbursementEmployeeName(disbursement: ApiGoodsDisbursement) {
-  const employee = disbursement.employee;
-  if (!employee) return undefined;
-  return `${employee.firstName} ${employee.lastName}`.trim() || employee.user?.username || employee.employeeCode;
-}
-
-function itemUnitPrice(item: ApiGoodsDisbursementItem) {
-  return Number(item.product?.purchasePrice ?? 0);
-}
-
-function visibleQuantity(item: ApiGoodsDisbursementItem, quantities: Record<string, string>) {
-  const quantity = Number.parseInt(quantities[item.id] ?? String(item.quantity), 10);
-  return Number.isFinite(quantity) ? quantity : 0;
-}
-
-function buildDisbursementInvoiceText(disbursement: ApiGoodsDisbursement, quantities: Record<string, string>, businessName?: string | null) {
-  const employeeName = disbursementEmployeeName(disbursement);
-  const rows = disbursement.items.map((item) => {
-    const quantity = visibleQuantity(item, quantities);
-    const unitPrice = itemUnitPrice(item);
-    return {
-      name: item.product?.name ?? "Product",
-      code: item.product?.sku ?? item.product?.barcode ?? item.productId.slice(0, 8),
-      quantity,
-      unitPrice,
-      total: quantity * unitPrice
-    };
-  });
-  const totalQuantity = rows.reduce((sum, item) => sum + item.quantity, 0);
-  const totalValue = rows.reduce((sum, item) => sum + item.total, 0);
-
-  return [
-    invoiceCenter(businessName ?? "Business"),
-    invoiceCenter("Disbursement Invoice"),
-    invoiceDivider,
-    invoiceRow("Invoice", disbursement.disbursementNumber),
-    invoiceRow("Date", new Date(disbursement.disbursementDate).toLocaleDateString()),
-    invoiceRow("Destination", disbursement.destination ?? employeeName ?? "No destination"),
-    ...(employeeName ? [invoiceRow("Employee", employeeName)] : []),
-    invoiceDivider,
-    ...rows.flatMap((item) => [
-      item.name,
-      item.code,
-      invoiceRow(`${item.quantity} x ${formatCurrency(item.unitPrice)}`, formatCurrency(item.total))
-    ]),
-    invoiceDivider,
-    invoiceRow("Total Qty", String(totalQuantity)),
-    invoiceRow("Total Value", formatCurrency(totalValue)),
-    ...(disbursement.remarks ? [invoiceDivider, disbursement.remarks] : [])
-  ].join("\n");
-}
+import {
+  buildDisbursementInvoiceText,
+  disbursementEmployeeName,
+  itemUnitPrice,
+} from "@/utils/disbursementInvoice";
 
 function matchesSearch(disbursement: ApiGoodsDisbursement, query: string) {
   const normalized = query.trim().toLowerCase();
@@ -113,8 +50,6 @@ export function DisbursedScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [selected, setSelected] = useState<ApiGoodsDisbursement | null>(null);
-  const [quantities, setQuantities] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -139,53 +74,12 @@ export function DisbursedScreen() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  const openEdit = (item: ApiGoodsDisbursement) => {
+  const openDetails = (item: ApiGoodsDisbursement) => {
     setSelected(item);
-    setQuantities(Object.fromEntries(item.items.map((row) => [row.id, String(row.quantity)])));
   };
 
-  const closeEdit = () => {
-    if (saving) return;
+  const closeDetails = () => {
     setSelected(null);
-    setQuantities({});
-  };
-
-  const saveEdit = async () => {
-    if (!selected || saving) return;
-
-    const nextItems = selected.items.map((item) => {
-      const quantity = Number.parseInt(quantities[item.id] ?? String(item.quantity), 10);
-      return { source: item, quantity };
-    });
-
-    if (nextItems.some((item) => !Number.isFinite(item.quantity) || item.quantity < 1)) {
-      Alert.alert("Invalid quantity", "Each supplied product quantity must be at least 1.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const updated = await goodsDisbursementService.update(selected.id, {
-        employeeId: selected.employeeId ?? undefined,
-        disbursementDate: selected.disbursementDate,
-        destination: selected.destination ?? undefined,
-        remarks: selected.remarks ?? undefined,
-        items: nextItems.map(({ source, quantity }) => ({
-          productId: source.productId,
-          quantity,
-          remarks: source.remarks ?? undefined
-        }))
-      });
-      setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
-      setSelected(null);
-      setQuantities({});
-      Alert.alert("Disbursement updated", "Supplied products were updated.");
-    } catch (saveError) {
-      const message = saveError instanceof Error ? saveError.message : "Unable to update disbursement.";
-      Alert.alert("Update failed", message);
-    } finally {
-      setSaving(false);
-    }
   };
 
   const selectedInvoice = () => {
@@ -193,7 +87,7 @@ export function DisbursedScreen() {
     const title = `Disbursement ${selected.disbursementNumber}`;
     return {
       title,
-      text: buildDisbursementInvoiceText(selected, quantities, business?.name)
+      text: buildDisbursementInvoiceText(selected, {}, business?.name)
     };
   };
 
@@ -258,15 +152,15 @@ export function DisbursedScreen() {
             subtitle={`${item.destination ?? "No destination"} | ${new Date(item.disbursementDate).toLocaleDateString()}`}
             amount={`${item.items.reduce((sum, row) => sum + row.quantity, 0)} items`}
             icon={<Archive size={17} color={colors.primary} />}
-            onPress={() => openEdit(item)}
+            onPress={() => openDetails(item)}
           />
         )}
       />
 
       {selected ? (
-        <AppBottomSheet snapPoints={["84%"]} initialIndex={0} onClose={closeEdit}>
+        <AppBottomSheet snapPoints={["84%"]} initialIndex={0} onClose={closeDetails}>
           <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Edit Disbursement</Text>
+            <Text style={styles.sheetTitle}>Disbursement Details</Text>
             <BottomSheetScrollView
               style={styles.sheetScroller}
               contentContainerStyle={styles.sheetScroll}
@@ -276,7 +170,7 @@ export function DisbursedScreen() {
               nestedScrollEnabled
             >
               {selected.items.map((item) => {
-                const quantity = visibleQuantity(item, quantities);
+                const quantity = item.quantity;
                 const unitPrice = itemUnitPrice(item);
                 const totalValue = quantity * unitPrice;
                 return (
@@ -291,19 +185,6 @@ export function DisbursedScreen() {
                         <Text style={styles.itemMeta}>Qty {quantity} x {formatCurrency(unitPrice)} = {formatCurrency(totalValue)}</Text>
                       </View>
                     </View>
-                    <TextInput
-                      value={quantities[item.id] ?? String(item.quantity)}
-                      onChangeText={(value) => {
-                        if (value && !/^\d+$/.test(value)) {
-                          Alert.alert("Quantity", "Enter a valid quantity.");
-                          return;
-                        }
-                        setQuantities((current) => ({ ...current, [item.id]: value }));
-                      }}
-                      keyboardType="number-pad"
-                      style={styles.quantityInput}
-                      accessibilityLabel={`Quantity for ${item.product?.name ?? "product"}`}
-                    />
                   </Card>
                 );
               })}
@@ -314,7 +195,6 @@ export function DisbursedScreen() {
                 <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void saveInvoicePdf()} style={styles.invoiceButton} />
                 <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void shareInvoiceWhatsApp()} style={styles.invoiceButton} />
               </View>
-              <Button label="Save Changes" loading={saving} onPress={() => void saveEdit()} />
             </View>
           </View>
         </AppBottomSheet>
@@ -337,13 +217,4 @@ const styles = StyleSheet.create({
   itemBody: { flex: 1 },
   itemTitle: { color: colors.textSecondary, fontSize: 13, fontWeight: "900" },
   itemMeta: { color: colors.textPlaceholder, fontSize: 10, marginTop: 3 },
-  quantityInput: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    color: colors.foreground,
-    backgroundColor: colors.inputBg
-  }
 });

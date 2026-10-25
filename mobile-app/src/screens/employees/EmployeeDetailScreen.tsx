@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type GorhomBottomSheet from "@gorhom/bottom-sheet";
 import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
-import { Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { Alert, Dimensions, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
@@ -21,6 +21,7 @@ import type { ApiProduct } from "@/types/product";
 import type { ApiSale } from "@/types/sales";
 import { mapReceiptToDocument } from "@/types/sales";
 import { dashboardEvents } from "@/utils/dashboardEvents";
+import { buildDisbursementInvoiceText } from "@/utils/disbursementInvoice";
 import { formatCurrency } from "@/utils/format";
 
 type ProfileTab = "stock" | "supplies" | "sales";
@@ -140,9 +141,10 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [supplyProductSearch, setSupplyProductSearch] = useState("");
   const [selectedSupplyProductId, setSelectedSupplyProductId] = useState<string | null>(null);
   const [expandedSupplyRunId, setExpandedSupplyRunId] = useState<string | null>(null);
-  const [supplyQuantity, setSupplyQuantity] = useState("1");
+  const [supplyQuantity, setSupplyQuantity] = useState("");
   const [supplyReview, setSupplyReview] = useState(false);
   const [supplyKeyboardHeight, setSupplyKeyboardHeight] = useState(0);
+  const windowHeightBeforeKeyboard = useRef(Dimensions.get("window").height);
   const supplyScrollRef = useRef<ScrollView>(null);
   useEffect(() => {
     const show = Keyboard.addListener("keyboardDidShow", (event) => setSupplyKeyboardHeight(event.endCoordinates.height));
@@ -153,7 +155,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const supplySubmitting = useRef(false);
   useEffect(() => {
     setSupplyCart([]);
-    setSupplyQuantity("1");
+    setSupplyQuantity("");
     setSupplyRemarks("");
     setSupplySheetVisible(false);
   }, [employeeId]);
@@ -361,7 +363,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     Keyboard.dismiss();
     setSupplying(true);
     try {
-      await goodsDisbursementService.create({
+      const disbursement = await goodsDisbursementService.create({
         employeeId: profile.employee.id,
         destination: targetName,
         remarks: supplyRemarks.trim() || `Supplied to ${targetName} (${profile.employee.employeeCode})`,
@@ -371,12 +373,27 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
       setSelectedSupplyProductId(null);
       setSupplyProducts([]);
       setSupplyProductSearch("");
-      setSupplyQuantity("1");
+      setSupplyQuantity("");
       setSupplyRemarks("");
       setSupplyCart([]);
       setActiveTab("stock");
+
+      const invoiceText = buildDisbursementInvoiceText(disbursement, {}, business?.name);
+      const invoiceTitle = `Disbursement ${disbursement.disbursementNumber}`;
       await load();
-      Alert.alert("Supply recorded", `${items.map(({ product, quantity }) => `${product.name} ? ${quantity}`).join(", ")} supplied to ${targetName}.`);
+      const confirmation = `${items.map(({ product, quantity }) => `${product.name} × ${quantity}`).join(", ")} supplied to ${targetName}.`;
+      Alert.alert("Supply recorded", confirmation, [
+        { text: "Not now", style: "cancel" },
+        {
+          text: "Print Invoice",
+          onPress: () => {
+            void printingService.printText(invoiceText, invoiceTitle).catch((printError) => {
+              const message = printError instanceof Error ? printError.message : "The invoice could not be opened for printing.";
+              Alert.alert("Unable to print", message);
+            });
+          },
+        },
+      ]);
     } catch (supplyError) {
       const message = supplyError instanceof Error ? supplyError.message : "Unable to supply product.";
       Alert.alert("Supply failed", message);
@@ -552,7 +569,12 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const supplyCartCount = supplyCart.reduce((sum, item) => sum + item.quantity, 0);
   const supplyCartTotal = supplyCart.reduce((sum, item) => sum + item.quantity * Number(item.product.purchasePrice ?? 0), 0);
   const supplyReviewActionPadding = supplyReview ? 112 : 0;
-  const supplyScrollPadding = Math.max(insets.bottom, 24) + 120 + supplyKeyboardHeight + supplyReviewActionPadding;
+  const supplyWindowHeight = Dimensions.get("window").height;
+  const supplyKeyboardOffset = Math.max(
+    0,
+    supplyKeyboardHeight - Math.max(0, windowHeightBeforeKeyboard.current - supplyWindowHeight),
+  );
+  const supplyScrollPadding = Math.max(insets.bottom, 24) + 180 + supplyKeyboardHeight + supplyReviewActionPadding;
 
   const renderTabContent = () => {
     if (activeTab === "stock") {
@@ -1034,7 +1056,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                               style={[styles.productOption, selected && styles.productOptionSelected]}
                               onPress={() => {
                                 setSelectedSupplyProductId(product.id);
-                                setSupplyQuantity(String(supplyCart.find((item) => item.product.id === product.id)?.quantity ?? 1));
+                                setSupplyQuantity(String(supplyCart.find((item) => item.product.id === product.id)?.quantity ?? ""));
                               }}
                               accessibilityRole="button"
                               accessibilityLabel={`Select ${product.name}`}
@@ -1051,26 +1073,6 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                     ) : (
                       <EmptyState icon={<Package size={28} color={colors.textPlaceholder} />} title={supplyProductSearch.trim() ? "No products found" : "No available products"} />
                     )}
-                    <View style={styles.formGroup}>
-                      <Text style={styles.infoLabel}>Quantity</Text>
-                      <TextInput
-                        editable={!supplying}
-                        value={supplyQuantity}
-                        onChangeText={setSupplyQuantity}
-                        keyboardType="number-pad"
-                        style={styles.textInput}
-                        placeholder="1"
-                        placeholderTextColor={colors.textPlaceholder}
-                        accessibilityLabel="Supply quantity"
-                        onFocus={() => setTimeout(() => supplyScrollRef.current?.scrollToEnd({ animated: true }), 250)}
-                      />
-                    </View>
-                    <Button
-                      label={supplyCart.some((item) => item.product.id === selectedSupplyProductId) ? "Update cart" : "Add to cart"}
-                      variant="ghost"
-                      disabled={supplying || supplyProductsLoading || !selectedSupplyProductId}
-                      onPress={addToSupplyCart}
-                    />
                   </>
                 ) : (
                   <>
@@ -1130,7 +1132,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
               </ScrollView>
               {!supplyReview && supplyCart.length > 0 ? (
                 <Pressable
-                  style={[styles.supplyCartFab, { bottom: Math.max(insets.bottom, 16) }]}
+                  style={[styles.supplyCartFab, { bottom: Math.max(insets.bottom, 16) + 170 }]}
                   accessibilityRole="button"
                   accessibilityLabel="Open supply cart"
                   onPress={() => {
@@ -1145,6 +1147,31 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                     <Text style={styles.supplyCartTextTotal}>{formatCurrency(supplyCartTotal)}</Text>
                   </LinearGradient>
                 </Pressable>
+              ) : null}
+              {!supplyReview ? (
+                <View style={[styles.supplyStickyActions, { bottom: supplyKeyboardOffset, paddingBottom: supplyKeyboardOffset ? 8 : Math.max(insets.bottom, 16) }]}>
+                  <View style={styles.supplyActionContent}>
+                    <View style={styles.formGroup}>
+                      <Text style={styles.infoLabel}>Quantity</Text>
+                      <TextInput
+                        editable={!supplying}
+                        value={supplyQuantity}
+                        onChangeText={setSupplyQuantity}
+                        keyboardType="number-pad"
+                        style={styles.textInput}
+                        placeholder="0"
+                        placeholderTextColor={colors.textPlaceholder}
+                        accessibilityLabel="Supply quantity"
+                      />
+                    </View>
+                    <Button
+                      label={supplyCart.some((item) => item.product.id === selectedSupplyProductId) ? "Update cart" : "Add to cart"}
+                      variant="ghost"
+                      disabled={supplying || supplyProductsLoading || !selectedSupplyProductId}
+                      onPress={addToSupplyCart}
+                    />
+                  </View>
+                </View>
               ) : null}
               {supplyReview ? (
                 <View style={[styles.supplyStickyActions, { paddingBottom: Math.max(insets.bottom, 16) }]}>
@@ -1208,7 +1235,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.borderLighter,
   },
-  supplyCartFab: { position: "absolute", left: 16, right: 16, borderRadius: 18, overflow: "hidden", elevation: 30 },
+  supplyActionContent: { gap: 8 },
+  supplyCartFab: { position: "absolute", right: 16, width: 280, maxWidth: "85%", borderRadius: 18, overflow: "hidden", elevation: 30 },
   supplyCartGradient: { height: 56, borderRadius: 18, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, gap: 10 },
   supplyCartText: { color: colors.surface, fontSize: 14, fontWeight: "800", flex: 1 },
   supplyCartTextTotal: { color: colors.surface, fontSize: 14, fontWeight: "800" },
