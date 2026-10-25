@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, StyleSheet, Switch, View } from "react-native";
+import { Alert, Linking, StyleSheet, Switch, View } from "react-native";
 import { Text } from "@/i18n";
 import { Button, Card, ErrorState, Input, LoadingState } from "@/components/common";
 import { ScrollScreen, SectionTitle } from "@/screens/shared/ScreenKit";
 import { businessService } from "@/services/business.service";
+import { deviceNotificationsService } from "@/services/device-notifications.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, typography } from "@/theme";
 import type { BusinessConfig } from "@/types/business";
@@ -27,6 +28,11 @@ export function NotificationSettingsScreen({ navigation }: { navigation: any }) 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
+  const [devicePermission, setDevicePermission] = useState<{ available: boolean; granted: boolean; canAskAgain: boolean }>({ available: true, granted: false, canAskAgain: true });
+
+  const refreshDevicePermission = useCallback(async () => {
+    setDevicePermission(await deviceNotificationsService.getPermissionStatus());
+  }, []);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -45,6 +51,36 @@ export function NotificationSettingsScreen({ navigation }: { navigation: any }) 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void refreshDevicePermission();
+  }, [refreshDevicePermission]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener?.("focus", () => void refreshDevicePermission());
+    return unsubscribe;
+  }, [navigation, refreshDevicePermission]);
+
+  const setDeviceNotificationsEnabled = async (enabled: boolean) => {
+    if (enabled) {
+      const result = await deviceNotificationsService.requestPermission();
+      setDevicePermission(result);
+      if (!result.available) {
+        Alert.alert("Notifications unavailable", "Device notifications are not available in this app build.");
+      } else if (!result.granted && !result.canAskAgain) {
+        Alert.alert("Notifications are disabled", "Allow notifications for this app in your phone settings.", [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => void Linking.openSettings() }
+        ]);
+      }
+      return;
+    }
+
+    Alert.alert("Turn off notifications?", "To stop notifications, disable them in your phone settings.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Open Settings", onPress: () => void Linking.openSettings() }
+    ]);
+  };
 
   const save = async () => {
     if (!businessId || saving) return;
@@ -84,6 +120,9 @@ export function NotificationSettingsScreen({ navigation }: { navigation: any }) 
       <SectionTitle title="Channels" />
       <Card style={styles.form}>
         <ToggleRow label="Push Notifications" value={form.pushNotifications} disabled={!canManage} onValueChange={(pushNotifications) => setForm((current) => ({ ...current, pushNotifications }))} />
+        <ToggleRow label="Device Notifications" value={devicePermission.granted} onValueChange={setDeviceNotificationsEnabled} />
+        {!devicePermission.available ? <Text style={styles.note}>Device notifications are unavailable in this app build.</Text> : null}
+        {devicePermission.available && !devicePermission.granted ? <Text style={styles.note}>Allow device notifications to receive app alerts on this phone. This does not read notifications from other apps.</Text> : null}
         <ToggleRow label="Email Notifications" value={form.emailNotifications} disabled={!canManage} onValueChange={(emailNotifications) => setForm((current) => ({ ...current, emailNotifications }))} />
       </Card>
 

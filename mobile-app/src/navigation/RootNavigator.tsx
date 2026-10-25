@@ -1,6 +1,6 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { ActivityIndicator, View } from "react-native";
-import { NavigationContainer } from "@react-navigation/native";
+import { DefaultTheme, NavigationContainer, type Theme } from "@react-navigation/native";
 import { StatusBar } from "expo-status-bar";
 import { AppNavigator } from "./AppNavigator";
 import { AuthStack } from "./AuthStack";
@@ -9,13 +9,30 @@ import { deviceNotificationsService } from "@/services/device-notifications.serv
 import { offlineSyncService } from "@/services/offline-sync.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors } from "@/theme";
+import { useAppTheme } from "@/theme/ThemeProvider";
 
 export function RootNavigator() {
+  useAppTheme();
   const user = useAuthStore((state) => state.user);
   const isLoading = useAuthStore((state) => state.isLoading);
   const hasRestored = useAuthStore((state) => state.hasRestored);
   const authEntryRoute = useAuthStore((state) => state.authEntryRoute);
   const restore = useAuthStore((state) => state.restore);
+  const navigationTheme = useMemo<Theme>(() => {
+    const baseTheme = DefaultTheme;
+    return {
+      ...baseTheme,
+      colors: {
+        ...baseTheme.colors,
+        primary: colors.primary,
+        background: colors.background,
+        card: colors.surface,
+        text: colors.foreground,
+        border: colors.borderLight,
+        notification: colors.error
+      }
+    };
+  }, []);
 
   useEffect(() => {
     void restore();
@@ -48,7 +65,7 @@ export function RootNavigator() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer ref={navigationRef} theme={navigationTheme}>
       <StatusBar style={user ? "dark" : "light"} />
       {user ? (
         <AppNavigator />

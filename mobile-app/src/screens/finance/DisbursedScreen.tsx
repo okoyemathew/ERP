@@ -9,7 +9,7 @@ import { SimpleRow, ListScreen } from "@/screens/shared/ScreenKit";
 import { goodsDisbursementService } from "@/services/goods-disbursement.service";
 import { printingService } from "@/services/printing.service";
 import { useAuthStore } from "@/store/authStore";
-import { colors, spacing } from "@/theme";
+import { colors } from "@/theme";
 import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
 import { formatCurrency } from "@/utils/format";
 import {
@@ -158,45 +158,41 @@ export function DisbursedScreen() {
       />
 
       {selected ? (
-        <AppBottomSheet snapPoints={["84%"]} initialIndex={0} onClose={closeDetails}>
-          <View style={styles.sheet}>
+        <AppBottomSheet snapPoints={["84%"]} initialIndex={0} onClose={closeDetails} useDirectContent>
+          <BottomSheetScrollView
+            style={styles.sheet}
+            contentContainerStyle={[styles.sheetScroll, { paddingBottom: sheetBottomPadding }]}
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
             <Text style={styles.sheetTitle}>Disbursement Details</Text>
-            <BottomSheetScrollView
-              style={styles.sheetScroller}
-              contentContainerStyle={styles.sheetScroll}
-              showsVerticalScrollIndicator
-              persistentScrollbar
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled
-            >
-              {selected.items.map((item) => {
-                const quantity = item.quantity;
-                const unitPrice = itemUnitPrice(item);
-                const totalValue = quantity * unitPrice;
-                return (
-                  <Card key={item.id} style={styles.itemCard}>
-                    <View style={styles.itemHead}>
-                      <View style={styles.icon}>
-                        <Archive size={16} color={colors.primary} />
-                      </View>
-                      <View style={styles.itemBody}>
-                        <Text style={styles.itemTitle}>{item.product?.name ?? "Product"}</Text>
-                        <Text style={styles.itemMeta}>{item.product?.sku ?? item.product?.barcode ?? item.productId.slice(0, 8)}</Text>
-                        <Text style={styles.itemMeta}>Qty {quantity} x {formatCurrency(unitPrice)} = {formatCurrency(totalValue)}</Text>
-                      </View>
+            {selected.items.map((item) => {
+              const quantity = item.quantity;
+              const unitPrice = itemUnitPrice(item);
+              const totalValue = quantity * unitPrice;
+              return (
+                <Card key={item.id} style={styles.itemCard}>
+                  <View style={styles.itemHead}>
+                    <View style={styles.icon}>
+                      <Archive size={16} color={colors.primary} />
                     </View>
-                  </Card>
-                );
-              })}
-            </BottomSheetScrollView>
-            <View style={[styles.sheetFooter, { paddingBottom: sheetBottomPadding }]}>
-              <View style={styles.invoiceActions}>
-                <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printInvoice()} style={styles.invoiceButton} />
-                <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void saveInvoicePdf()} style={styles.invoiceButton} />
-                <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void shareInvoiceWhatsApp()} style={styles.invoiceButton} />
-              </View>
+                    <View style={styles.itemBody}>
+                      <Text style={styles.itemTitle}>{item.product?.name ?? "Product"}</Text>
+                      <Text style={styles.itemMeta}>{item.product?.sku ?? item.product?.barcode ?? item.productId.slice(0, 8)}</Text>
+                      <Text style={styles.itemMeta}>Qty {quantity} x {formatCurrency(unitPrice)} = {formatCurrency(totalValue)}</Text>
+                    </View>
+                  </View>
+                </Card>
+              );
+            })}
+            <View style={styles.invoiceActions}>
+              <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printInvoice()} style={styles.invoiceButton} />
+              <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void saveInvoicePdf()} style={styles.invoiceButton} />
+              <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void shareInvoiceWhatsApp()} style={styles.invoiceButton} />
             </View>
-          </View>
+          </BottomSheetScrollView>
         </AppBottomSheet>
       ) : null}
     </>
@@ -204,11 +200,9 @@ export function DisbursedScreen() {
 }
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
-  sheetScroller: { flex: 1 },
-  sheetFooter: { paddingTop: 2, gap: 10 },
+  sheet: { flex: 1 },
   sheetTitle: { color: colors.foreground, fontSize: 18, fontWeight: "800" },
-  sheetScroll: { gap: 12, paddingBottom: spacing.sectionGap },
+  sheetScroll: { flexGrow: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
   invoiceActions: { flexDirection: "row", gap: 8 },
   invoiceButton: { flex: 1, minHeight: 44 },
   itemCard: { gap: 10 },

@@ -32,7 +32,7 @@ export function SettingsScreen({ navigation }: { navigation: any }) {
     ] : []),
     { label: "Notifications", icon: Bell, route: "NotificationSettings" },
     { label: "Language", icon: Globe, route: "LanguageSettings" },
-    ...(role === "owner" ? [{ label: "Theme", icon: Palette, route: "ThemeSettings" }] : []),
+    { label: "Theme", icon: Palette, route: "ThemeSettings" },
     { label: "Help & Support", icon: HelpCircle, route: "HelpSupport" },
     { label: "About", icon: User, route: "AboutBusiness" },
     { label: "Logout", icon: LogOut, onPress: logout }

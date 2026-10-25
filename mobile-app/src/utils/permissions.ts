@@ -20,8 +20,7 @@ const ownerOnly = new Set([
   "CountryCurrencySettings",
   "ReceiptSettings",
   "TaxSettings",
-  "PrinterSettings",
-  "ThemeSettings"
+  "PrinterSettings"
 ]);
 
 const employeeOnly = new Set(["EmployeeDashboard", "EmployeeSelfProfile"]);
@@ -45,6 +44,7 @@ const employeeAllowed = new Set([
   "Settings",
   "NotificationSettings",
   "LanguageSettings",
+  "ThemeSettings",
   "HelpSupport",
   "AboutBusiness"
 ]);

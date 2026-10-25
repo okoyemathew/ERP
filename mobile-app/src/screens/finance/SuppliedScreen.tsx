@@ -2,15 +2,21 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
-import { RotateCcw, Truck, X } from "lucide-react-native";
+import { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import { Archive, FileDown, Printer, RotateCcw, Send, Truck, X } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
+import { AppBottomSheet, Badge, Button, Card, EmptyState, ErrorState, LoadingState, ScreenHeader, SearchBar } from "@/components/common";
+import { SimpleRow } from "@/screens/shared/ScreenKit";
 import { StockReportExportControl, type StockReportLine } from "@/components/common/StockReportExportControl";
 import { employeesService } from "@/services/employees.service";
+import { goodsDisbursementService } from "@/services/goods-disbursement.service";
 import { productsService } from "@/services/products.service";
+import { printingService } from "@/services/printing.service";
 import { useAuthStore } from "@/store/authStore";
 import { colors, spacing } from "@/theme";
+import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
 import type { ProductAddedBy, StockInHistoryRecord } from "@/types/product";
+import { buildDisbursementInvoiceText, itemUnitPrice } from "@/utils/disbursementInvoice";
 import { formatCurrency } from "@/utils/format";
 
 function money(value: string | number | null | undefined): number {
@@ -28,7 +34,7 @@ type EmployeeSuppliedProduct = {
   sellingPrice?: string | number;
   lastActivityAt: string;
 };
-type SuppliedListItem = EmployeeSuppliedProduct | StockInHistoryRecord;
+type SuppliedListItem = ApiGoodsDisbursement | StockInHistoryRecord;
 
 function userName(user?: ProductAddedBy | null) {
   if (!user) return "Unknown";
@@ -47,6 +53,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const [stockHistory, setStockHistory] = useState<StockInHistoryRecord[]>([]);
   const [employeeProducts, setEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
   const [allEmployeeProducts, setAllEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
+  const [employeeDisbursements, setEmployeeDisbursements] = useState<ApiGoodsDisbursement[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +62,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const [returnRemarks, setReturnRemarks] = useState("");
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
+  const [selectedDisbursement, setSelectedDisbursement] = useState<ApiGoodsDisbursement | null>(null);
 
   const loadSupplied = useCallback(async (search = query, showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -84,6 +92,13 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
               )
             : products
         );
+        const firstPage = await goodsDisbursementService.mine({ search: search.trim() || undefined, limit: 100 });
+        const disbursements = [...firstPage.data];
+        for (let page = 2; page <= firstPage.meta.totalPages; page += 1) {
+          const pageResponse = await goodsDisbursementService.mine({ search: search.trim() || undefined, page, limit: 100 });
+          disbursements.push(...pageResponse.data);
+        }
+        setEmployeeDisbursements(disbursements);
         return;
       }
 
@@ -130,7 +145,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const totalAddedValue = useMemo(() => stockHistory.reduce((sum, item) => sum + money(item.unitCost) * item.quantity, 0), [stockHistory]);
   const totalSupplied = employeeProducts.reduce((sum, product) => sum + product.suppliedQuantity, 0);
   const totalStockValue = employeeProducts.reduce((sum, product) => sum + money(product.unitValue) * product.quantityInHand, 0);
-  const dataIsEmpty = isEmployeeView ? employeeProducts.length === 0 : stockHistory.length === 0;
+  const dataIsEmpty = isEmployeeView ? employeeDisbursements.length === 0 : stockHistory.length === 0;
   const headerTitle = "Supplied Products";
 
   const loadStockForReport = async (): Promise<StockReportLine[]> => {
@@ -215,6 +230,38 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
     }
   };
 
+  const closeSupplyInvoice = () => setSelectedDisbursement(null);
+
+  const printSupplyInvoice = async () => {
+    if (!selectedDisbursement) return;
+    const title = `Disbursement ${selectedDisbursement.disbursementNumber}`;
+    try {
+      await printingService.printText(buildDisbursementInvoiceText(selectedDisbursement, {}, business?.name), title);
+    } catch (printError) {
+      Alert.alert("Print failed", printError instanceof Error ? printError.message : "Unable to print disbursement invoice.");
+    }
+  };
+
+  const saveSupplyInvoicePdf = async () => {
+    if (!selectedDisbursement) return;
+    const title = `Disbursement ${selectedDisbursement.disbursementNumber}`;
+    try {
+      await printingService.saveTextPdf(buildDisbursementInvoiceText(selectedDisbursement, {}, business?.name), title);
+    } catch (pdfError) {
+      Alert.alert("PDF failed", pdfError instanceof Error ? pdfError.message : "Unable to save disbursement invoice PDF.");
+    }
+  };
+
+  const shareSupplyInvoiceWhatsApp = async () => {
+    if (!selectedDisbursement) return;
+    const title = `Disbursement ${selectedDisbursement.disbursementNumber}`;
+    try {
+      await printingService.shareTextPdfToWhatsApp(buildDisbursementInvoiceText(selectedDisbursement, {}, business?.name), title);
+    } catch (shareError) {
+      Alert.alert("Share failed", shareError instanceof Error ? shareError.message : "Unable to share disbursement invoice.");
+    }
+  };
+
   if (loading && dataIsEmpty) {
     return (
       <View style={styles.screen}>
@@ -250,41 +297,29 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
         )}
       />
       <FlatList<SuppliedListItem>
-        data={isEmployeeView ? employeeProducts : stockHistory}
-        keyExtractor={(item) => ("productName" in item ? item.productId : item.id)}
+        data={isEmployeeView ? employeeDisbursements : stockHistory}
+        keyExtractor={(item) => item.id}
         refreshing={refreshing}
         onRefresh={refresh}
         ListHeaderComponent={
           <View style={styles.headerContent}>
             <SearchBar value={query} onChangeText={setQuery} placeholder="Search supplied products" />
             <View style={styles.stats}>
-              <Card style={styles.stat}><Text style={styles.statValue}>{isEmployeeView ? employeeProducts.length : stockHistory.length}</Text><Text style={styles.statLabel}>Total</Text></Card>
+              <Card style={styles.stat}><Text style={styles.statValue}>{isEmployeeView ? employeeDisbursements.length : stockHistory.length}</Text><Text style={styles.statLabel}>{isEmployeeView ? "Transactions" : "Total"}</Text></Card>
               <Card style={styles.stat}><Text style={styles.statValue}>{isEmployeeView ? totalSupplied : totalAdded}</Text><Text style={styles.statLabel}>{isEmployeeView ? "Supplied" : "Units Added"}</Text></Card>
               <Card style={styles.stat}><Text style={styles.statValue}>{formatCurrency(isEmployeeView ? totalStockValue : totalAddedValue)}</Text><Text style={styles.statLabel}>{isEmployeeView ? "Stock value" : "Added value"}</Text></Card>
             </View>
           </View>
         }
         renderItem={({ item }) => (
-          "productName" in item ? (
-            <Card style={styles.row}>
-              <View style={styles.icon}><Truck size={18} color={colors.primary} /></View>
-              <View style={styles.body}>
-                <Text style={styles.title}>{item.productName}</Text>
-                <Text style={styles.meta}>{item.sku ?? item.barcode ?? "No SKU"} | In hand: {item.quantityInHand}</Text>
-              </View>
-              <View style={styles.productActions}>
-                <Badge label={String(item.suppliedQuantity)} variant={item.quantityInHand > 0 ? "success" : "neutral"} />
-                <Pressable
-                  onPress={() => openReturnSheet(item)}
-                  disabled={item.quantityInHand <= 0}
-                  style={[styles.returnButton, item.quantityInHand <= 0 && styles.disabledAction]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Return ${item.productName}`}
-                >
-                  <RotateCcw size={16} color={colors.primary} />
-                </Pressable>
-              </View>
-            </Card>
+          "disbursementNumber" in item ? (
+            <SimpleRow
+              title={item.disbursementNumber}
+              subtitle={`${item.destination ?? "No destination"} | ${new Date(item.disbursementDate).toLocaleDateString()}`}
+              amount={`${item.items.reduce((sum, row) => sum + row.quantity, 0)} items`}
+              icon={<Archive size={17} color={colors.primary} />}
+              onPress={() => setSelectedDisbursement(item)}
+            />
           ) : (
             <Card style={styles.row}>
               <View style={styles.icon}><Truck size={18} color={colors.primary} /></View>
@@ -352,6 +387,52 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      {selectedDisbursement ? (
+        <AppBottomSheet snapPoints={["84%"]} initialIndex={0} onClose={closeSupplyInvoice} useDirectContent>
+          <BottomSheetScrollView
+            style={styles.invoiceSheet}
+            contentContainerStyle={[styles.invoiceSheetContent, { paddingBottom: Math.max(insets.bottom, 24) + 48 }]}
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            <Text style={styles.invoiceTitle}>Disbursement Details</Text>
+            {selectedDisbursement.items.map((item) => {
+              const unitPrice = itemUnitPrice(item);
+              const employeeProduct = allEmployeeProducts.find((product) => product.productId === item.productId);
+              return (
+                <Card key={item.id} style={styles.invoiceItemCard}>
+                  <View style={styles.invoiceItemHead}>
+                    <View style={styles.icon}><Archive size={16} color={colors.primary} /></View>
+                    <View style={styles.body}>
+                      <Text style={styles.title}>{item.product?.name ?? "Product"}</Text>
+                      <Text style={styles.meta}>{item.product?.sku ?? item.product?.barcode ?? item.productId.slice(0, 8)}</Text>
+                      <Text style={styles.meta}>Qty {item.quantity} x {formatCurrency(unitPrice)} = {formatCurrency(item.quantity * unitPrice)}</Text>
+                    </View>
+                    {isEmployeeView && employeeProduct ? (
+                      <Pressable
+                        onPress={() => openReturnSheet(employeeProduct)}
+                        disabled={employeeProduct.quantityInHand <= 0}
+                        style={[styles.returnButton, employeeProduct.quantityInHand <= 0 && styles.disabledAction]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Return ${employeeProduct.productName}`}
+                      >
+                        <RotateCcw size={16} color={colors.primary} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </Card>
+              );
+            })}
+            <View style={styles.invoiceActions}>
+              <Button label="Print Invoice" variant="ghost" icon={<Printer size={16} color={colors.primary} />} onPress={() => void printSupplyInvoice()} style={styles.invoiceButton} />
+              <Button label="PDF" variant="ghost" icon={<FileDown size={16} color={colors.primary} />} onPress={() => void saveSupplyInvoicePdf()} style={styles.invoiceButton} />
+              <Button label="WhatsApp" variant="ghost" icon={<Send size={16} color={colors.primary} />} onPress={() => void shareSupplyInvoiceWhatsApp()} style={styles.invoiceButton} />
+            </View>
+          </BottomSheetScrollView>
+        </AppBottomSheet>
+      ) : null}
     </View>
   );
 }
@@ -372,6 +453,13 @@ const styles = StyleSheet.create({
   productActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   returnButton: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.borderLight, alignItems: "center", justifyContent: "center", backgroundColor: colors.secondaryBg },
   disabledAction: { opacity: 0.5 },
+  invoiceSheet: { flex: 1 },
+  invoiceSheetContent: { flexGrow: 1, paddingTop: 16, paddingHorizontal: 16, gap: 12 },
+  invoiceTitle: { color: colors.foreground, fontSize: 18, fontWeight: "800" },
+  invoiceItemCard: { gap: 10 },
+  invoiceItemHead: { flexDirection: "row", alignItems: "center", gap: 10 },
+  invoiceActions: { flexDirection: "row", gap: 8 },
+  invoiceButton: { flex: 1, minHeight: 44 },
   modal: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.45)" },
   backdrop: { ...StyleSheet.absoluteFillObject },
   sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, gap: 12 },

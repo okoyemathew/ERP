@@ -1,5 +1,4 @@
 import { Platform } from "react-native";
-import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
 import { businessService } from "@/services/business.service";
 import { notificationsService } from "@/services/notifications.service";
@@ -14,14 +13,12 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let polling = false;
 let notificationsModule: Promise<ExpoNotificationsModule | null> | null = null;
 let notificationHandlerConfigured = false;
-
-function isExpoGo() {
-  return Constants.appOwnership === "expo";
-}
+let notificationPermissionStatus = {
+  PermissionStatus: { GRANTED: "granted" },
+  IosAuthorizationStatus: { AUTHORIZED: 2, PROVISIONAL: 3, EPHEMERAL: 4 }
+};
 
 async function getNotificationsModule() {
-  if (isExpoGo()) return null;
-
   if (!notificationsModule) {
     notificationsModule = import("expo-notifications")
       .then((module) => {
@@ -37,6 +34,7 @@ async function getNotificationsModule() {
           });
           notificationHandlerConfigured = true;
         }
+        notificationPermissionStatus = module;
 
         return module;
       })
@@ -50,9 +48,9 @@ function stateKey(businessId: string, userId: string) {
   return `device-notifications:last-seen:${businessId}:${userId}`;
 }
 
-async function ensurePermission() {
+async function configureNotificationChannel() {
   const Notifications = await getNotificationsModule();
-  if (!Notifications) return false;
+  if (!Notifications) return null;
 
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
@@ -63,13 +61,34 @@ async function ensurePermission() {
     });
   }
 
+  return Notifications;
+}
+
+function isGranted(permission: import("expo-notifications").NotificationPermissionsStatus) {
+  const iosStatus = permission.ios?.status;
+  return permission.granted || permission.status === notificationPermissionStatus.PermissionStatus.GRANTED ||
+    iosStatus === notificationPermissionStatus.IosAuthorizationStatus.AUTHORIZED ||
+    iosStatus === notificationPermissionStatus.IosAuthorizationStatus.PROVISIONAL ||
+    iosStatus === notificationPermissionStatus.IosAuthorizationStatus.EPHEMERAL;
+}
+
+async function ensurePermission() {
+  const Notifications = await configureNotificationChannel();
+  if (!Notifications) return false;
+
   const current = await Notifications.getPermissionsAsync();
-  if (current.granted || current.status === Notifications.PermissionStatus.GRANTED) {
-    return true;
-  }
+  return isGranted(current);
+}
+
+async function requestPermission() {
+  const Notifications = await configureNotificationChannel();
+  if (!Notifications) return { available: false, granted: false, canAskAgain: false };
+
+  const current = await Notifications.getPermissionsAsync();
+  if (isGranted(current)) return { available: true, granted: true, canAskAgain: current.canAskAgain };
 
   const requested = await Notifications.requestPermissionsAsync();
-  return requested.granted || requested.status === Notifications.PermissionStatus.GRANTED;
+  return { available: true, granted: isGranted(requested), canAskAgain: requested.canAskAgain };
 }
 
 async function pushEnabled(businessId: string) {
@@ -145,8 +164,14 @@ async function pollForNotifications(businessId: string, userId: string) {
 }
 
 export const deviceNotificationsService = {
+  getPermissionStatus: async () => {
+    const Notifications = await configureNotificationChannel();
+    if (!Notifications) return { available: false, granted: false, canAskAgain: false };
+    const permission = await Notifications.getPermissionsAsync();
+    return { available: true, granted: isGranted(permission), canAskAgain: permission.canAskAgain };
+  },
+  requestPermission,
   start(businessId?: string | null, userId?: string | null) {
-    if (isExpoGo()) return () => undefined;
     if (!businessId || !userId) return () => undefined;
 
     void pollForNotifications(businessId, userId);

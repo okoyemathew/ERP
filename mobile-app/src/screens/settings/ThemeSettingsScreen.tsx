@@ -4,36 +4,29 @@ import { Check } from "lucide-react-native";
 import { Text } from "@/i18n";
 import { Button, Card, LoadingState } from "@/components/common";
 import { ScrollScreen } from "@/screens/shared/ScreenKit";
-import { themePreferenceService, type ThemePreference } from "@/services/theme-preference.service";
+import type { ThemePreference } from "@/services/theme-preference.service";
 import { colors, typography } from "@/theme";
+import { useAppTheme } from "@/theme/ThemeProvider";
 
 const options: Array<{ label: string; value: ThemePreference; subtitle: string }> = [
-  { label: "Light", value: "light", subtitle: "Use the approved NexPOS theme" },
-  { label: "System", value: "system", subtitle: "Follow the device preference when supported" }
+  { label: "Light", value: "light", subtitle: "Always use light appearance" },
+  { label: "Dark", value: "dark", subtitle: "Always use dark appearance" },
+  { label: "System", value: "system", subtitle: "Follow your device appearance setting" }
 ];
 
 export function ThemeSettingsScreen({ navigation }: { navigation: any }) {
-  const [selected, setSelected] = useState<ThemePreference>("light");
-  const [loading, setLoading] = useState(true);
+  const { preference, loading, setPreference } = useAppTheme();
+  const [selected, setSelected] = useState<ThemePreference>(preference);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
-    void themePreferenceService.get().then((theme) => {
-      if (mounted) {
-        setSelected(theme);
-        setLoading(false);
-      }
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    setSelected(preference);
+  }, [preference]);
 
   const save = async () => {
     setSaving(true);
     try {
-      await themePreferenceService.set(selected);
+      await setPreference(selected);
       Alert.alert("Saved", "Theme settings updated.");
       navigation.goBack();
     } catch (error) {

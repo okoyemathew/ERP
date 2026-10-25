@@ -12,6 +12,7 @@ interface AppBottomSheetProps {
   keyboardBehavior?: "extend" | "fillParent" | "interactive";
   keyboardBlurBehavior?: "none" | "restore";
   android_keyboardInputMode?: "adjustPan" | "adjustResize";
+  useDirectContent?: boolean;
 }
 
 export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>(({
@@ -22,7 +23,8 @@ export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>
   enableContentPanningGesture = true,
   keyboardBehavior,
   keyboardBlurBehavior,
-  android_keyboardInputMode
+  android_keyboardInputMode,
+  useDirectContent = false
 }, ref) => {
   const points = useMemo(() => snapPoints, [snapPoints]);
   return (
@@ -42,7 +44,7 @@ export const AppBottomSheet = forwardRef<GorhomBottomSheet, AppBottomSheetProps>
       backgroundStyle={styles.background}
       backdropComponent={(props) => <BottomSheetBackdrop {...props} appearsOnIndex={0} disappearsOnIndex={-1} opacity={0.5} />}
     >
-      <BottomSheetView style={styles.content}>{children}</BottomSheetView>
+      {useDirectContent ? children : <BottomSheetView style={styles.content}>{children}</BottomSheetView>}
     </GorhomBottomSheet>
   );
 });
