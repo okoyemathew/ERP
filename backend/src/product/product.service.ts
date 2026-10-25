@@ -327,7 +327,10 @@ export class ProductService {
     if (dto.supplierId) {
       await this.ensureSupplierExists(businessId, dto.supplierId);
     }
-    if (dto.name !== undefined) {
+    if (
+      dto.name !== undefined &&
+      dto.name.trim().toLowerCase() !== current.name.trim().toLowerCase()
+    ) {
       await this.validateUniqueProductName(businessId, dto.name, id);
     }
     this.validatePricesAndStock({
