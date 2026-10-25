@@ -48,6 +48,7 @@ export class ProductService {
       this.resolveSku(businessId, name, dto.sku),
     ]);
     await Promise.all([
+      this.validateUniqueProductName(businessId, name),
       dto.brandId ? this.ensureBrandExists(businessId, dto.brandId) : Promise.resolve(),
       dto.supplierId ? this.ensureSupplierExists(businessId, dto.supplierId) : Promise.resolve(),
       dto.barcode ? this.validateUniqueBarcode(businessId, dto.barcode, undefined) : Promise.resolve(),
@@ -56,7 +57,9 @@ export class ProductService {
     const initialStock = dto.initialStock ?? dto.minimumStock;
     const baseSellingPrice = dto.baseSellingPrice ?? sellingPrice;
 
-    const createdProduct = await this.prisma.$transaction(async (tx) => {
+    let createdProduct: Awaited<ReturnType<typeof this.prisma.product.findUnique>>;
+    try {
+      createdProduct = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
         data: {
           businessId,
@@ -141,7 +144,11 @@ export class ProductService {
           inventory: true,
         },
       });
-    });
+      });
+    } catch (error) {
+      this.throwProductConflictOnUniqueConstraint(error);
+      throw error;
+    }
 
     const [createdProductWithMetadata] = await this.attachCreationMetadata(
       businessId,
@@ -320,6 +327,9 @@ export class ProductService {
     if (dto.supplierId) {
       await this.ensureSupplierExists(businessId, dto.supplierId);
     }
+    if (dto.name !== undefined) {
+      await this.validateUniqueProductName(businessId, dto.name, id);
+    }
     this.validatePricesAndStock({
       purchasePrice: dto.purchasePrice ?? Number(current.purchasePrice),
       sellingPrice: dto.sellingPrice ?? Number(current.sellingPrice),
@@ -346,7 +356,9 @@ export class ProductService {
       await this.validateUniqueBarcode(businessId, dto.barcode, id);
     }
 
-    const updatedProduct = await this.prisma.$transaction(async (tx) => {
+    let updatedProduct: Awaited<ReturnType<typeof this.prisma.product.update>>;
+    try {
+      updatedProduct = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.update({
         where: { id },
         data: {
@@ -403,7 +415,11 @@ export class ProductService {
       }
 
       return product;
-    });
+      });
+    } catch (error) {
+      this.throwProductConflictOnUniqueConstraint(error);
+      throw error;
+    }
 
     const [updatedProductWithMetadata] = await this.attachCreationMetadata(
       businessId,
@@ -1082,6 +1098,39 @@ export class ProductService {
 
     if (await this.productSkuExists(businessId, normalized, excludeId)) {
       throw new ConflictException('SKU already exists for this business');
+    }
+  }
+
+  private async validateUniqueProductName(
+    businessId: string,
+    name: string,
+    excludeId?: string,
+  ): Promise<void> {
+    const normalizedName = name.trim();
+    if (!normalizedName) return;
+
+    const existing = await this.prisma.product.findFirst({
+      where: {
+        businessId,
+        name: { equals: normalizedName, mode: 'insensitive' },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      throw new ConflictException('A product with this name already exists for this business');
+    }
+  }
+
+  private throwProductConflictOnUniqueConstraint(error: unknown): void {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw new ConflictException(
+        'A product with this name, SKU, or barcode already exists for this business',
+      );
     }
   }
 
