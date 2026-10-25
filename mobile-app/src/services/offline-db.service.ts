@@ -8,6 +8,13 @@ import type { ApiGoodsDisbursement } from "@/types/goodsDisbursement";
 import type { ApiSupplier } from "@/types/supplier";
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let cacheWriteQueue: Promise<void> = Promise.resolve();
+
+function queueCacheWrite<T>(write: () => Promise<T>): Promise<T> {
+  const queuedWrite = cacheWriteQueue.then(write, write);
+  cacheWriteQueue = queuedWrite.then(() => undefined, () => undefined);
+  return queuedWrite;
+}
 
 function normalizePhone(phone?: string | null) {
   return (phone ?? "").replace(/\D/g, "") || (phone ?? "").trim().toLowerCase();
@@ -26,10 +33,9 @@ async function ensureColumn(db: SQLite.SQLiteDatabase, table: string, column: st
 
 async function getDb() {
   if (!dbPromise) {
-    dbPromise = SQLite.openDatabaseAsync("smart-pos-offline.db");
-  }
-  const db = await dbPromise;
-  await db.execAsync(`
+    dbPromise = (async () => {
+      const db = await SQLite.openDatabaseAsync("smart-pos-offline.db");
+      await db.execAsync(`
     CREATE TABLE IF NOT EXISTS product_cache (
       id TEXT PRIMARY KEY NOT NULL,
       businessId TEXT NOT NULL,
@@ -86,23 +92,29 @@ async function getDb() {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
-  `);
-  await ensureColumn(db, "customer_cache", "userId", "TEXT");
-  await ensureColumn(db, "goods_disbursement_cache", "userId", "TEXT");
-  await ensureColumn(db, "sync_queue", "businessId", "TEXT");
-  await ensureColumn(db, "sync_queue", "userId", "TEXT");
-  await db.execAsync(`
+      `);
+      await ensureColumn(db, "customer_cache", "userId", "TEXT");
+      await ensureColumn(db, "goods_disbursement_cache", "userId", "TEXT");
+      await ensureColumn(db, "sync_queue", "businessId", "TEXT");
+      await ensureColumn(db, "sync_queue", "userId", "TEXT");
+      await db.execAsync(`
     CREATE INDEX IF NOT EXISTS idx_sync_queue_scope_status_created ON sync_queue (businessId, userId, status, createdAt);
     CREATE INDEX IF NOT EXISTS idx_customer_cache_scope_updated ON customer_cache (businessId, userId, updatedAt);
     CREATE INDEX IF NOT EXISTS idx_goods_disbursement_cache_scope_updated ON goods_disbursement_cache (businessId, userId, updatedAt);
   `);
-  return db;
+      return db;
+    })().catch((error) => {
+      dbPromise = null;
+      throw error;
+    });
+  }
+  return dbPromise;
 }
 
 export const offlineDbService = {
   async clearCachedRecords() {
     const db = await getDb();
-    await db.withTransactionAsync(async () => {
+    await queueCacheWrite(() => db.withTransactionAsync(async () => {
       await db.execAsync(`
         DELETE FROM product_cache;
         DELETE FROM customer_cache;
@@ -112,21 +124,23 @@ export const offlineDbService = {
         DELETE FROM goods_disbursement_cache;
         DELETE FROM supplier_cache;
       `);
-    });
+    }));
   },
 
   async cacheProducts(businessId: string, products: ApiProduct[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
-    for (const product of products) {
-      await db.runAsync(
-        "INSERT OR REPLACE INTO product_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
-        product.id,
-        businessId,
-        JSON.stringify(product),
-        updatedAt
-      );
-    }
+    await queueCacheWrite(() => db.withTransactionAsync(async () => {
+      for (const product of products) {
+        await db.runAsync(
+          "INSERT OR REPLACE INTO product_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+          product.id,
+          businessId,
+          JSON.stringify(product),
+          updatedAt
+        );
+      }
+    }));
   },
 
   async cacheProduct(businessId: string, product: ApiProduct) {
@@ -145,15 +159,17 @@ export const offlineDbService = {
   async cacheSuppliers(businessId: string, suppliers: ApiSupplier[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
-    for (const supplier of suppliers) {
-      await db.runAsync(
-        "INSERT OR REPLACE INTO supplier_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
-        supplier.id,
-        businessId,
-        JSON.stringify(supplier),
-        updatedAt
-      );
-    }
+    await queueCacheWrite(() => db.withTransactionAsync(async () => {
+      for (const supplier of suppliers) {
+        await db.runAsync(
+          "INSERT OR REPLACE INTO supplier_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+          supplier.id,
+          businessId,
+          JSON.stringify(supplier),
+          updatedAt
+        );
+      }
+    }));
   },
 
   async cacheSupplier(businessId: string, supplier: ApiSupplier) {
@@ -202,16 +218,18 @@ export const offlineDbService = {
   async cacheCustomers(businessId: string, userId: string, customers: ApiCustomer[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
-    for (const customer of customers) {
-      await db.runAsync(
-        "INSERT OR REPLACE INTO customer_cache (id, businessId, userId, payload, updatedAt) VALUES (?, ?, ?, ?, ?)",
-        customer.id,
-        businessId,
-        userId,
-        JSON.stringify(customer),
-        updatedAt
-      );
-    }
+    await queueCacheWrite(() => db.withTransactionAsync(async () => {
+      for (const customer of customers) {
+        await db.runAsync(
+          "INSERT OR REPLACE INTO customer_cache (id, businessId, userId, payload, updatedAt) VALUES (?, ?, ?, ?, ?)",
+          customer.id,
+          businessId,
+          userId,
+          JSON.stringify(customer),
+          updatedAt
+        );
+      }
+    }));
   },
 
   async getCachedCustomers(businessId: string, userId?: string): Promise<ApiCustomer[]> {
@@ -282,15 +300,17 @@ export const offlineDbService = {
   async cacheExpenses(businessId: string, expenses: ApiExpense[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
-    for (const expense of expenses) {
-      await db.runAsync(
-        "INSERT OR REPLACE INTO expense_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
-        expense.id,
-        businessId,
-        JSON.stringify(expense),
-        updatedAt
-      );
-    }
+    await queueCacheWrite(() => db.withTransactionAsync(async () => {
+      for (const expense of expenses) {
+        await db.runAsync(
+          "INSERT OR REPLACE INTO expense_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+          expense.id,
+          businessId,
+          JSON.stringify(expense),
+          updatedAt
+        );
+      }
+    }));
   },
 
   async cacheExpense(businessId: string, expense: ApiExpense) {
@@ -314,15 +334,17 @@ export const offlineDbService = {
   async cacheExpenseCategories(businessId: string, categories: ExpenseCategory[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
-    for (const category of categories) {
-      await db.runAsync(
-        "INSERT OR REPLACE INTO expense_category_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
-        category.id,
-        businessId,
-        JSON.stringify(category),
-        updatedAt
-      );
-    }
+    await queueCacheWrite(() => db.withTransactionAsync(async () => {
+      for (const category of categories) {
+        await db.runAsync(
+          "INSERT OR REPLACE INTO expense_category_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+          category.id,
+          businessId,
+          JSON.stringify(category),
+          updatedAt
+        );
+      }
+    }));
   },
 
   async getCachedExpenseCategories(businessId: string): Promise<ExpenseCategory[]> {
@@ -337,15 +359,17 @@ export const offlineDbService = {
   async cacheProductReturnRequests(businessId: string, requests: ProductReturnRequest[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
-    for (const request of requests) {
-      await db.runAsync(
-        "INSERT OR REPLACE INTO product_return_request_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
-        request.id,
-        businessId,
-        JSON.stringify(request),
-        updatedAt
-      );
-    }
+    await queueCacheWrite(() => db.withTransactionAsync(async () => {
+      for (const request of requests) {
+        await db.runAsync(
+          "INSERT OR REPLACE INTO product_return_request_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
+          request.id,
+          businessId,
+          JSON.stringify(request),
+          updatedAt
+        );
+      }
+    }));
   },
 
   async cacheProductReturnRequest(businessId: string, request: ProductReturnRequest) {
@@ -364,16 +388,18 @@ export const offlineDbService = {
   async cacheGoodsDisbursements(businessId: string, userId: string, disbursements: ApiGoodsDisbursement[]) {
     const db = await getDb();
     const updatedAt = new Date().toISOString();
-    for (const disbursement of disbursements) {
-      await db.runAsync(
-        "INSERT OR REPLACE INTO goods_disbursement_cache (id, businessId, userId, payload, updatedAt) VALUES (?, ?, ?, ?, ?)",
-        disbursement.id,
-        businessId,
-        userId,
-        JSON.stringify(disbursement),
-        updatedAt
-      );
-    }
+    await queueCacheWrite(() => db.withTransactionAsync(async () => {
+      for (const disbursement of disbursements) {
+        await db.runAsync(
+          "INSERT OR REPLACE INTO goods_disbursement_cache (id, businessId, userId, payload, updatedAt) VALUES (?, ?, ?, ?, ?)",
+          disbursement.id,
+          businessId,
+          userId,
+          JSON.stringify(disbursement),
+          updatedAt
+        );
+      }
+    }));
   },
 
   async cacheGoodsDisbursement(businessId: string, userId: string, disbursement: ApiGoodsDisbursement) {

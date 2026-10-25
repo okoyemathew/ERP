@@ -5,17 +5,22 @@ let revision = 0;
 
 async function getDb() {
   if (!dbPromise) {
-    dbPromise = SQLite.openDatabaseAsync("smart-pos-offline.db");
-  }
-  const db = await dbPromise;
-  await db.execAsync(`
+    dbPromise = (async () => {
+      const db = await SQLite.openDatabaseAsync("smart-pos-offline.db");
+      await db.execAsync(`
     CREATE TABLE IF NOT EXISTS api_response_cache (
       cacheKey TEXT PRIMARY KEY NOT NULL,
       payload TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
   `);
-  return db;
+      return db;
+    })().catch((error) => {
+      dbPromise = null;
+      throw error;
+    });
+  }
+  return dbPromise;
 }
 
 function normalizeUrl(url?: string) {

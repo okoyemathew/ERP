@@ -29,18 +29,9 @@ export class ProductService {
     user?: AuthenticatedUser,
   ) {
     const name = dto.name.trim();
-    const categoryId = await this.resolveCategoryId(businessId, dto.categoryId);
-    const unitId = await this.resolveUnitId(businessId, dto.unitId);
-    const sku = await this.resolveSku(businessId, name, dto.sku);
     const purchasePrice = dto.purchasePrice ?? 0;
     const sellingPrice =
       dto.sellingPrice ?? Math.max(dto.baseSellingPrice ?? 0, dto.wholesalePrice ?? 0);
-    if (dto.brandId) {
-      await this.ensureBrandExists(businessId, dto.brandId);
-    }
-    if (dto.supplierId) {
-      await this.ensureSupplierExists(businessId, dto.supplierId);
-    }
     this.validatePricesAndStock({
       purchasePrice,
       sellingPrice,
@@ -49,10 +40,18 @@ export class ProductService {
       minimumStock: dto.minimumStock,
       maximumStock: dto.maximumStock,
     });
-    if (dto.barcode) {
-      await this.validateUniqueBarcode(businessId, dto.barcode, undefined);
-    }
     this.assertCanSetBaseSellingPrice(dto, user);
+
+    const [categoryId, unitId, sku] = await Promise.all([
+      this.resolveCategoryId(businessId, dto.categoryId),
+      this.resolveUnitId(businessId, dto.unitId),
+      this.resolveSku(businessId, name, dto.sku),
+    ]);
+    await Promise.all([
+      dto.brandId ? this.ensureBrandExists(businessId, dto.brandId) : Promise.resolve(),
+      dto.supplierId ? this.ensureSupplierExists(businessId, dto.supplierId) : Promise.resolve(),
+      dto.barcode ? this.validateUniqueBarcode(businessId, dto.barcode, undefined) : Promise.resolve(),
+    ]);
 
     const initialStock = dto.initialStock ?? dto.minimumStock;
     const baseSellingPrice = dto.baseSellingPrice ?? sellingPrice;
@@ -80,7 +79,7 @@ export class ProductService {
         },
       });
 
-      await tx.inventory.create({
+      const inventory = await tx.inventory.create({
         data: {
           businessId,
           productId: product.id,
@@ -94,13 +93,10 @@ export class ProductService {
           isSynced: true,
           syncVersion: 1,
         },
+        select: { id: true },
       });
 
       if (initialStock > 0) {
-        const inventory = await tx.inventory.findUniqueOrThrow({
-          where: { productId: product.id },
-        });
-
         await tx.inventoryTransaction.create({
           data: {
             businessId,

@@ -81,17 +81,22 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
       });
       if (requestId !== latestRequestRef.current) return;
       setProducts(response.data);
-      const allMatchedProducts = [...response.data];
-      for (let page = 2; page <= response.meta.totalPages; page += 1) {
-        const pageResponse = await productsService.list({
-          page,
-          limit: 100,
-          search: searchValue.trim() || undefined,
-          sortBy: "createdAt",
-          sortOrder: "desc"
-        });
-        allMatchedProducts.push(...pageResponse.data);
+      const remainingPages = [];
+      for (let firstPage = 2; firstPage <= response.meta.totalPages; firstPage += 5) {
+        const pages = await Promise.all(Array.from(
+          { length: Math.min(5, response.meta.totalPages - firstPage + 1) },
+          (_, index) => productsService.list({
+            page: firstPage + index,
+            limit: 100,
+            search: searchValue.trim() || undefined,
+            sortBy: "createdAt",
+            sortOrder: "desc"
+          })
+        ));
+        remainingPages.push(...pages);
+        if (requestId !== latestRequestRef.current) return;
       }
+      const allMatchedProducts = [...response.data, ...remainingPages.flatMap((page) => page.data)];
       if (requestId !== latestRequestRef.current) return;
       const matchedById = new Map(allMatchedProducts.map((product) => [product.id, product]));
       setMatchedProducts(Array.from(matchedById.values()));
