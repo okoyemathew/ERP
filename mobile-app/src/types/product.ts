@@ -137,7 +137,7 @@ export interface ApiProduct {
 
 export interface ProductListResponse {
   data: ApiProduct[];
-  meta: { page: number; limit: number; total: number; totalPages: number };
+  meta: { page: number; limit: number; total: number; totalPages: number; hasNextPage?: boolean; nextCursor?: string | null };
 }
 
 export interface StockInHistoryProduct {
@@ -221,6 +221,7 @@ export interface ProductReturnRequestPayload {
 
 export interface ProductQuery {
   page?: number;
+  cursor?: string;
   limit?: number;
   search?: string;
   category?: string;

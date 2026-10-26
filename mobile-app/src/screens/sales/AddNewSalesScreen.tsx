@@ -45,6 +45,7 @@ import { customersService } from "@/services/customers.service";
 import { employeesService } from "@/services/employees.service";
 import { offlineSyncService } from "@/services/offline-sync.service";
 import { printingService } from "@/services/printing.service";
+import { productsService } from "@/services/products.service";
 import { salesService } from "@/services/sales.service";
 import { useAuthStore } from "@/store/authStore";
 import { useEmployeeCartStore } from "@/store/employeeCartStore";
@@ -220,6 +221,12 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const user = useAuthStore((state) => state.user);
   const [grid, setGrid] = useState(true);
   const [query, setQuery] = useState("");
+  const [productSearchResults, setProductSearchResults] = useState<Product[] | null>(null);
+  const productSearchRequestId = useRef(0);
+  const productSearchPage = useRef(1);
+  const productSearchHasMore = useRef(false);
+  const productSearchLoading = useRef(false);
+  const [loadingMoreProducts, setLoadingMoreProducts] = useState(false);
   const [activeCategory, setActiveCategory] = useState("All");
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>(
@@ -243,6 +250,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   );
   const [printText, setPrintText] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  const productsRef = useRef<Product[]>([]);
   const [customers, setCustomers] = useState<ApiCustomer[]>([]);
   const [creditInvoices, setCreditInvoices] = useState<CreditInvoiceView[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
@@ -262,10 +270,22 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   const loadProducts = useCallback(async () => {
     setLoadingProducts(true);
     try {
-      const response = await employeesService.myProfile();
-      const stock = response.profileActivity?.stock ?? [];
-      setProducts(
-        stock
+      const response = await employeesService.myProductStock({ page: 1, limit: 30 });
+      if (Array.isArray(response)) {
+        const mapped = response.filter((item) => item.quantityInHand > 0).map((item) => {
+          const cost = moneyValue(item.unitValue);
+          const name = item.productName || "Product";
+          return { id: item.productId, name, sku: item.sku ?? item.barcode ?? item.productId.slice(0, 8), barcode: item.barcode, category: "Supplied Products", price: 0, cost, stock: item.quantityInHand, floorPrice: 0, iconColor: productIconColor(name) };
+        });
+        productsRef.current = mapped;
+        setProducts(mapped);
+        return;
+      }
+      productSearchRequestId.current += 1;
+      productSearchPage.current = 1;
+      productSearchHasMore.current = response.meta.hasNextPage;
+      setProductSearchResults(null);
+      const mapped = response.data
           .filter((item) => item.quantityInHand > 0)
           .sort((left, right) => {
             const leftSold = Math.max(0, Number(left.quantitySold || 0) - Number(left.quantityReturned || 0));
@@ -287,8 +307,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
               floorPrice: 0,
               iconColor: productIconColor(name),
             };
-          }),
-      );
+          });
+      productsRef.current = mapped;
+      setProducts(mapped);
     } catch (loadError) {
       const message =
         loadError instanceof Error
@@ -332,10 +353,9 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   }, []);
 
   useEffect(() => {
-    void loadProducts();
     void loadCustomers();
     void loadCreditInvoices().catch(() => undefined);
-  }, [loadCreditInvoices, loadCustomers, loadProducts]);
+  }, [loadCreditInvoices, loadCustomers]);
 
   useFocusEffect(
     useCallback(() => {
@@ -356,7 +376,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
   }, [receiptVisible]);
 
   const productTiles: ProductTile[] = useMemo(() => {
-    return products.map((product) => {
+    return (productSearchResults ?? products).map((product) => {
       const stockItem: EmployeeStockItem = {
         productId: product.id,
         name: product.name,
@@ -379,7 +399,7 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
         source: stockItem,
       };
     });
-  }, [products]);
+  }, [products, productSearchResults]);
 
   const categories = useMemo(
     () => [
@@ -401,6 +421,85 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
       return inCategory && matchesQuery;
     });
   }, [activeCategory, productTiles, query]);
+
+  useEffect(() => {
+    const normalized = query.trim();
+    if (!normalized || normalized.length < 2) {
+      productSearchRequestId.current += 1;
+      setProductSearchResults(null);
+      productSearchHasMore.current = false;
+      productSearchPage.current = 1;
+      return;
+    }
+    const requestId = productSearchRequestId.current + 1;
+    productSearchRequestId.current = requestId;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await employeesService.myProductStock({ page: 1, limit: 30, search: normalized });
+        if (requestId !== productSearchRequestId.current) return;
+        if (Array.isArray(response)) {
+          const mapped = response.filter((item) => item.quantityInHand > 0).map((item) => {
+            const cost = moneyValue(item.unitValue);
+            const name = item.productName || "Product";
+            return { id: item.productId, name, sku: item.sku ?? item.barcode ?? item.productId.slice(0, 8), barcode: item.barcode, category: "Supplied Products", price: 0, cost, stock: item.quantityInHand, floorPrice: 0, iconColor: productIconColor(name) };
+          });
+          productsRef.current = mapped;
+          setProducts(mapped);
+          setProductSearchResults(mapped);
+          productSearchHasMore.current = false;
+          return;
+        }
+        productSearchPage.current = 1;
+        productSearchHasMore.current = response.meta.hasNextPage;
+      const mapped = response.data
+          .filter((item) => item.quantityInHand > 0)
+          .map((item) => {
+            const cost = moneyValue(item.unitValue);
+            const name = item.productName || "Product";
+            return { id: item.productId, name, sku: item.sku ?? item.barcode ?? item.productId.slice(0, 8), barcode: item.barcode, category: "Supplied Products", price: 0, cost, stock: item.quantityInHand, floorPrice: 0, iconColor: productIconColor(name) };
+          });
+      setProductSearchResults(mapped);
+      } catch {
+        if (requestId === productSearchRequestId.current) setProductSearchResults([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const loadMorePosProducts = useCallback(async () => {
+    if (productSearchLoading.current || !productSearchHasMore.current) return;
+    const requestId = productSearchRequestId.current;
+    const page = productSearchPage.current + 1;
+    productSearchLoading.current = true;
+    setLoadingMoreProducts(true);
+    try {
+      const search = query.trim() || undefined;
+      const response = await employeesService.myProductStock({ page, limit: 30, ...(search ? { search } : {}) });
+      if (requestId !== productSearchRequestId.current) return;
+      if (Array.isArray(response)) {
+        productSearchHasMore.current = false;
+        return;
+      }
+      const additions = response.data.filter((item) => item.quantityInHand > 0).map((item) => {
+        const cost = moneyValue(item.unitValue);
+        const name = item.productName || "Product";
+        return { id: item.productId, name, sku: item.sku ?? item.barcode ?? item.productId.slice(0, 8), barcode: item.barcode, category: "Supplied Products", price: 0, cost, stock: item.quantityInHand, floorPrice: 0, iconColor: productIconColor(name) };
+      });
+      setProductSearchResults((current) => {
+        const existing = new Set((current ?? productsRef.current).map((item) => item.id));
+        const merged = [...(current ?? productsRef.current), ...additions.filter((item) => !existing.has(item.id))];
+        productsRef.current = merged;
+        return merged;
+      });
+      productSearchPage.current = page;
+      productSearchHasMore.current = response.meta.hasNextPage;
+    } catch {
+      // Keep already loaded POS products visible when another page fails.
+    } finally {
+      productSearchLoading.current = false;
+      setLoadingMoreProducts(false);
+    }
+  }, [products, query]);
 
   const cartCount = employeeCart.items.reduce((sum, item) => sum + item.qty, 0);
   const cartSubtotal = employeeCart.total;
@@ -718,11 +817,35 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
     if (!barcode) return;
     try {
       const normalizedBarcode = barcode.toLowerCase();
-      const matchedProduct = products.find((product) =>
+      let matchedProduct = productsRef.current.find((product) =>
         [product.barcode, product.sku]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase() === normalizedBarcode),
       );
+
+      if (!matchedProduct) {
+        const lookup = await productsService.searchByBarcode(barcode);
+        const found = lookup[0];
+        if (found) {
+          const stockItem = await employeesService.myProductStock({ page: 1, limit: 1, search: found.name });
+          const employeeStock = Array.isArray(stockItem) ? stockItem.find((item) => item.productId === found.id) : stockItem.data.find((item) => item.productId === found.id);
+          if (employeeStock && employeeStock.quantityInHand > 0) {
+            const name = employeeStock.productName || found.name;
+            matchedProduct = {
+              id: found.id,
+              name,
+              sku: employeeStock.sku ?? employeeStock.barcode ?? found.id.slice(0, 8),
+              barcode: employeeStock.barcode,
+              category: "Supplied Products",
+              price: 0,
+              cost: moneyValue(employeeStock.unitValue),
+              stock: employeeStock.quantityInHand,
+              floorPrice: 0,
+              iconColor: productIconColor(name),
+            };
+          }
+        }
+      }
 
       if (!matchedProduct) {
         Alert.alert("Barcode", "No product found for this barcode.");
@@ -1416,8 +1539,11 @@ export function AddNewSalesScreen({ navigation }: { navigation: any }) {
 
       <FlatList
         data={filteredProducts}
+        onEndReached={loadMorePosProducts}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={loadingMoreProducts ? <Text style={styles.emptyText}>Loading products...</Text> : null}
         ListEmptyComponent={
-          loadingProducts ? (
+          loadingProducts || (query.trim().length >= 2 && productSearchResults === null) ? (
             <Text style={styles.emptyText}>Loading products...</Text>
           ) : (
             <Text style={styles.emptyText}>No products found</Text>

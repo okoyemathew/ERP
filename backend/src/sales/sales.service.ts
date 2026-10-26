@@ -224,6 +224,57 @@ export class SalesService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async productRanking(businessId: string, user?: AuthenticatedUser) {
+    const userId = this.canViewAllUserActivity(user) ? null : (user?.id ?? null);
+    const rows = await this.prisma.$queryRaw<Array<{
+      rankingType: 'BEST_SOLD' | 'MOST_PROFITABLE';
+      id: string;
+      name: string;
+      sku: string | null;
+      quantity: number;
+      revenue: Prisma.Decimal;
+      profit: Prisma.Decimal;
+    }>>`
+      WITH returned AS (
+        SELECT "saleItemId", SUM(quantity)::int AS quantity
+        FROM "ProductReturnRequest"
+        WHERE status = 'APPROVED' AND "saleItemId" IS NOT NULL AND "businessId" = ${businessId}::uuid
+        GROUP BY "saleItemId"
+      ), product_totals AS (
+        SELECT
+          p.id,
+          p.name,
+          p.sku,
+          SUM(GREATEST(0, si.quantity - LEAST(si.quantity, COALESCE(r.quantity, 0))))::int AS quantity,
+          SUM(GREATEST(0, si."totalAmount" - CASE WHEN si.quantity > 0 THEN ROUND(si."totalAmount" * LEAST(si.quantity, COALESCE(r.quantity, 0)) / si.quantity, 2) ELSE 0 END)) AS revenue,
+          SUM(
+            GREATEST(0, si."totalAmount" - CASE WHEN si.quantity > 0 THEN ROUND(si."totalAmount" * LEAST(si.quantity, COALESCE(r.quantity, 0)) / si.quantity, 2) ELSE 0 END)
+            - GREATEST(0, si.quantity - LEAST(si.quantity, COALESCE(r.quantity, 0))) * COALESCE(i."averageCost", p."purchasePrice", 0)
+          ) AS profit
+        FROM "SaleItem" si
+        JOIN "Sale" s ON s.id = si."saleId"
+        JOIN "Product" p ON p.id = si."productId" AND p."businessId" = ${businessId}::uuid
+        LEFT JOIN "Inventory" i ON i."productId" = p.id
+        LEFT JOIN returned r ON r."saleItemId" = si.id
+        WHERE s."businessId" = ${businessId}::uuid
+          AND s.status = 'COMPLETED'
+          AND s."deletedAt" IS NULL
+          AND (${userId}::uuid IS NULL OR s."userId" = ${userId}::uuid)
+        GROUP BY p.id, p.name, p.sku
+      ), ranked AS (
+        (SELECT 'BEST_SOLD'::text AS "rankingType", * FROM product_totals ORDER BY quantity DESC, revenue DESC, id ASC LIMIT 10)
+        UNION ALL
+        (SELECT 'MOST_PROFITABLE'::text AS "rankingType", * FROM product_totals ORDER BY profit DESC, revenue DESC, id ASC LIMIT 10)
+      )
+      SELECT "rankingType", id, name, sku, quantity, revenue, profit FROM ranked
+      ORDER BY "rankingType", CASE WHEN "rankingType" = 'BEST_SOLD' THEN quantity::numeric ELSE profit END DESC, revenue DESC, id ASC
+    `;
+    return {
+      bestSold: rows.filter((row) => row.rankingType === 'BEST_SOLD').map(({ rankingType: _type, ...row }) => row),
+      mostProfitable: rows.filter((row) => row.rankingType === 'MOST_PROFITABLE').map(({ rankingType: _type, ...row }) => row),
+    };
+  }
+
   async findOne(businessId: string, id: string, user?: AuthenticatedUser) {
     await this.clearExpiredPendingSales(businessId);
     return this.presentSale(

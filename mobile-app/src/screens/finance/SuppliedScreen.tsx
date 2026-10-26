@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Text } from "@/i18n";
 import { useFocusEffect } from "@react-navigation/native";
@@ -54,6 +54,9 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const [employeeProducts, setEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
   const [allEmployeeProducts, setAllEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
   const [employeeDisbursements, setEmployeeDisbursements] = useState<ApiGoodsDisbursement[]>([]);
+  const [disbursementHasMore, setDisbursementHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [disbursementTotal, setDisbursementTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,14 +66,27 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [returnKeyboardOffset, setReturnKeyboardOffset] = useState(0);
   const [selectedDisbursement, setSelectedDisbursement] = useState<ApiGoodsDisbursement | null>(null);
+  const requestIdRef = useRef(0);
+  const pageRef = useRef(1);
+  const loadingMoreRef = useRef(false);
+  const queryRef = useRef(query);
+  const queryDebounceReadyRef = useRef(false);
 
-  const loadSupplied = useCallback(async (search = query, showSpinner = true) => {
+  useEffect(() => { queryRef.current = query; }, [query]);
+
+  const loadSupplied = useCallback(async (search = "", showSpinner = true) => {
+    const requestId = ++requestIdRef.current;
     if (showSpinner) setLoading(true);
     setError(null);
     try {
       if (isEmployeeView) {
-        const response = await employeesService.myProfile();
-        const products = response.profileActivity?.stock.map((product) => ({
+        const [stockResponse, firstPage] = await Promise.all([
+          employeesService.myProductStock({ page: 1, limit: 100 }),
+          goodsDisbursementService.mine({ search: search.trim() || undefined, page: 1, limit: 30 })
+        ]);
+        if (requestId !== requestIdRef.current) return;
+        const stock = Array.isArray(stockResponse) ? stockResponse : stockResponse.data;
+        const products = stock.map((product) => ({
           productId: product.productId,
           productName: product.productName,
           sku: product.sku,
@@ -92,27 +108,32 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
               )
             : products
         );
-        const firstPage = await goodsDisbursementService.mine({ search: search.trim() || undefined, limit: 100 });
-        const disbursements = [...firstPage.data];
-        for (let page = 2; page <= firstPage.meta.totalPages; page += 1) {
-          const pageResponse = await goodsDisbursementService.mine({ search: search.trim() || undefined, page, limit: 100 });
-          disbursements.push(...pageResponse.data);
-        }
-        setEmployeeDisbursements(disbursements);
+        setEmployeeDisbursements(firstPage.data);
+        setDisbursementTotal(firstPage.meta.total);
+        pageRef.current = 1;
+        setDisbursementHasMore(firstPage.meta.page < firstPage.meta.totalPages);
         return;
       }
 
       const response = await productsService.stockInHistory({ search: search.trim() || undefined, limit: 50 });
+      if (requestId !== requestIdRef.current) return;
       setStockHistory(response.data);
     } catch (loadError) {
+      if (requestId !== requestIdRef.current) return;
       setError(loadError instanceof Error ? loadError.message : "Unable to load supplied products.");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [isEmployeeView, query]);
+  }, [isEmployeeView]);
 
   useEffect(() => {
+    if (!queryDebounceReadyRef.current) {
+      queryDebounceReadyRef.current = true;
+      return undefined;
+    }
     const timer = setTimeout(() => {
       void loadSupplied(query, false);
     }, 350);
@@ -121,9 +142,32 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
 
   useFocusEffect(
     useCallback(() => {
-      void loadSupplied(query);
-    }, [loadSupplied, query])
+      void loadSupplied(queryRef.current);
+    }, [loadSupplied])
   );
+
+  const loadMoreDisbursements = useCallback(async () => {
+    if (!isEmployeeView || !disbursementHasMore || loadingMoreRef.current) return;
+    const requestId = requestIdRef.current;
+    const page = pageRef.current + 1;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const response = await goodsDisbursementService.mine({ search: queryRef.current.trim() || undefined, page, limit: 30 });
+      if (requestId !== requestIdRef.current) return;
+      setEmployeeDisbursements((current) => {
+        const ids = new Set(current.map((row) => row.id));
+        return [...current, ...response.data.filter((row) => !ids.has(row.id))];
+      });
+      pageRef.current = page;
+      setDisbursementHasMore(response.meta.page < response.meta.totalPages);
+    } catch {
+      // Keep loaded disbursements available if another page cannot be fetched.
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [disbursementHasMore, isEmployeeView]);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -301,11 +345,13 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
         keyExtractor={(item) => item.id}
         refreshing={refreshing}
         onRefresh={refresh}
+        onEndReached={loadMoreDisbursements}
+        onEndReachedThreshold={0.45}
         ListHeaderComponent={
           <View style={styles.headerContent}>
             <SearchBar value={query} onChangeText={setQuery} placeholder="Search supplied products" />
             <View style={styles.stats}>
-              <Card style={styles.stat}><Text style={styles.statValue}>{isEmployeeView ? employeeDisbursements.length : stockHistory.length}</Text><Text style={styles.statLabel}>{isEmployeeView ? "Transactions" : "Total"}</Text></Card>
+              <Card style={styles.stat}><Text style={styles.statValue}>{isEmployeeView ? disbursementTotal : stockHistory.length}</Text><Text style={styles.statLabel}>{isEmployeeView ? "Transactions" : "Total"}</Text></Card>
               <Card style={styles.stat}><Text style={styles.statValue}>{isEmployeeView ? totalSupplied : totalAdded}</Text><Text style={styles.statLabel}>{isEmployeeView ? "Supplied" : "Units Added"}</Text></Card>
               <Card style={styles.stat}><Text style={styles.statValue}>{formatCurrency(isEmployeeView ? totalStockValue : totalAddedValue)}</Text><Text style={styles.statLabel}>{isEmployeeView ? "Stock value" : "Added value"}</Text></Card>
             </View>
@@ -334,6 +380,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
           )
         )}
         ListEmptyComponent={<EmptyState icon={<Truck size={28} color={colors.textPlaceholder} />} title="No supplied products yet" />}
+        ListFooterComponent={loadingMore ? <Text style={styles.meta}>Loading more...</Text> : null}
         contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
         showsVerticalScrollIndicator
         persistentScrollbar

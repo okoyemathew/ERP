@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import { Alert, FlatList, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "@/i18n";
 import { Check, Package, Plus, Search, X } from "lucide-react-native";
@@ -46,7 +47,9 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   const canReviewReturns = canReviewProductReturns(user);
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState<ApiProduct[]>([]);
-  const [matchedProducts, setMatchedProducts] = useState<ApiProduct[]>([]);
+  const [summary, setSummary] = useState({ totalProducts: 0, totalValue: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 });
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [returnRequests, setReturnRequests] = useState<ProductReturnRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -56,11 +59,9 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   const hasLoadedRef = useRef(false);
   const queryRef = useRef(query);
   const latestRequestRef = useRef(0);
-  const inventoryProducts = useMemo(() => {
-    const productsById = new Map(matchedProducts.map((product) => [product.id, product]));
-    return Array.from(productsById.values());
-  }, [matchedProducts]);
-
+  const cursorRef = useRef<string | null>(null);
+  const pageRef = useRef(1);
+  const loadingMoreRef = useRef(false);
   useEffect(() => {
     queryRef.current = query;
   }, [query]);
@@ -72,35 +73,29 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     else setSearching(true);
     setError(false);
     try {
-      const response = await productsService.list({
-        page: 1,
-        limit: 100,
-        search: searchValue.trim() || undefined,
-        sortBy: "createdAt",
-        sortOrder: "desc"
-      });
+      const search = searchValue.trim() || undefined;
+      const [response, inventorySummaryResponse] = await Promise.all([
+        productsService.list({ page: 1, limit: 30, search, sortBy: "createdAt", sortOrder: "desc" }),
+        productsService.inventorySummary(search).catch(() => null)
+      ]);
       if (requestId !== latestRequestRef.current) return;
       setProducts(response.data);
-      const remainingPages = [];
-      for (let firstPage = 2; firstPage <= response.meta.totalPages; firstPage += 5) {
-        const pages = await Promise.all(Array.from(
-          { length: Math.min(5, response.meta.totalPages - firstPage + 1) },
-          (_, index) => productsService.list({
-            page: firstPage + index,
-            limit: 100,
-            search: searchValue.trim() || undefined,
-            sortBy: "createdAt",
-            sortOrder: "desc"
-          })
-        ));
-        remainingPages.push(...pages);
-        if (requestId !== latestRequestRef.current) return;
-      }
-      const allMatchedProducts = [...response.data, ...remainingPages.flatMap((page) => page.data)];
-      if (requestId !== latestRequestRef.current) return;
-      const matchedById = new Map(allMatchedProducts.map((product) => [product.id, product]));
-      setMatchedProducts(Array.from(matchedById.values()));
-      if (canReviewReturns) {
+      pageRef.current = 1;
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      const inventorySummary = inventorySummaryResponse ?? response.data.reduce((current, product) => {
+        const stock = product.inventory?.quantityAvailable ?? 0;
+        current.totalProducts += 1;
+        current.totalValue += Number(product.purchasePrice ?? 0) * stock;
+        current.totalUnits += stock;
+        if (stock > 0 && stock <= product.minimumStock) current.lowStock += 1;
+        if (stock === 0) current.outOfStock += 1;
+        return current;
+      }, { totalProducts: 0, totalValue: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 });
+      setSummary(inventorySummary);
+      cursorRef.current = response.meta.nextCursor ?? null;
+      setHasMore(response.meta.hasNextPage ?? response.meta.page < response.meta.totalPages);
+      if (canReviewReturns && !search) {
         try {
           const returns = await productsService.returnRequests({ status: "PENDING", limit: 10 });
           if (requestId === latestRequestRef.current) setReturnRequests(returns.data);
@@ -123,13 +118,34 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     }
   }, [canReviewReturns]);
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", () => {
-      void load(queryRef.current);
-    });
-    void load();
-    return unsubscribe;
-  }, [load, navigation]);
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMoreRef.current || loading || searching) return;
+    const requestId = latestRequestRef.current;
+    const cursor = cursorRef.current;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const page = pageRef.current + 1;
+      const response = await productsService.list({ ...(cursor ? { cursor } : { page }), limit: 30, search: queryRef.current.trim() || undefined, sortBy: "createdAt", sortOrder: "desc" });
+      if (requestId !== latestRequestRef.current) return;
+      setProducts((current) => {
+        const existing = new Set(current.map((product) => product.id));
+        return [...current, ...response.data.filter((product) => !existing.has(product.id))];
+      });
+      cursorRef.current = response.meta.nextCursor ?? null;
+      pageRef.current = response.meta.page;
+      setHasMore(response.meta.hasNextPage ?? response.meta.page < response.meta.totalPages);
+    } catch {
+      // Keep the visible page; refresh or scroll to retry.
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [hasMore, loadingMore, loading, searching]);
+
+  useFocusEffect(useCallback(() => {
+    void load(queryRef.current);
+  }, [load]));
 
   useEffect(() => {
     if (!hasLoadedRef.current) return undefined;
@@ -138,14 +154,6 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     }, 350);
     return () => clearTimeout(timer);
   }, [load, query]);
-
-  const stats = useMemo(() => {
-    const totalValue = inventoryProducts.reduce((sum, product) => sum + Number(product.purchasePrice) * (product.inventory?.quantityAvailable ?? 0), 0);
-    const totalUnits = inventoryProducts.reduce((sum, product) => sum + (product.inventory?.quantityAvailable ?? 0), 0);
-    const lowStock = inventoryProducts.filter((p) => (p.inventory?.quantityAvailable ?? 0) > 0 && (p.inventory?.quantityAvailable ?? 0) <= p.minimumStock).length;
-    const outOfStock = inventoryProducts.filter((p) => (p.inventory?.quantityAvailable ?? 0) === 0).length;
-    return { totalValue, totalUnits, lowStock, outOfStock };
-  }, [inventoryProducts]);
 
   const refresh = () => {
     setRefreshing(true);
@@ -228,6 +236,9 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
         keyExtractor={(item) => item.id}
         refreshing={refreshing}
         onRefresh={refresh}
+        onEndReached={() => void loadMore()}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={loadingMore ? <Text style={styles.searching}>Loading more products...</Text> : null}
         ListHeaderComponent={
           <View style={styles.headerContent}>
             <View style={styles.searchRow}>
@@ -242,13 +253,13 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
             </View>
             <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.banner}>
               <Text style={styles.bannerLabel}>Total Stock Value</Text>
-              <Text style={styles.bannerValue}>{formatCurrency(stats.totalValue)}</Text>
-              <Text style={styles.unitChip}>{stats.totalUnits} units</Text>
+              <Text style={styles.bannerValue}>{formatCurrency(summary.totalValue)}</Text>
+              <Text style={styles.unitChip}>{summary.totalUnits} units</Text>
             </LinearGradient>
             <View style={styles.stats}>
               {["Total SKUs", "Low Stock", "Out of Stock"].map((label, index) => (
                 <Card key={label} style={styles.stat}>
-                  <Text style={styles.statValue}>{index === 0 ? products.length : index === 1 ? stats.lowStock : stats.outOfStock}</Text>
+                  <Text style={styles.statValue}>{index === 0 ? summary.totalProducts : index === 1 ? summary.lowStock : summary.outOfStock}</Text>
                   <Text style={styles.statLabel}>{label}</Text>
                 </Card>
               ))}

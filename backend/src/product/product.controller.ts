@@ -66,6 +66,17 @@ export class ProductController {
     return this.productService.findAll(businessId, query, user);
   }
 
+  @Get('inventory-summary')
+  @ApiOperation({ summary: 'Get inventory totals for the active product catalogue' })
+  inventorySummary(
+    @Param('businessId', ParseUUIDPipe) businessId: string,
+    @Query('search') search: string | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    this.assertBusinessAccess(businessId, user);
+    return this.productService.inventorySummary(businessId, search);
+  }
+
   @Get('search')
   @ApiOperation({
     summary: 'Search products by barcode, SKU, category, brand, or unit',

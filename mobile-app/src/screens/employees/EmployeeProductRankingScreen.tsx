@@ -55,8 +55,8 @@ export function EmployeeProductRankingScreen({ route, navigation }: { route: any
     setLoading(true);
     setError(false);
     try {
-      const profile = await employeesService.profile(employeeId);
-      setProducts(profile.profileActivity?.stock ?? []);
+      const stock = await employeesService.productStock(employeeId);
+      setProducts(stock);
     } catch {
       setError(true);
     } finally {

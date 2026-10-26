@@ -139,6 +139,29 @@ async function returnRequestFallback(businessId: string, payload: ProductReturnR
 }
 
 export const productsService = {
+  async inventorySummary(search?: string) {
+    const businessId = await getRequiredBusinessId();
+    try {
+      const { data } = await api.get<{ totalProducts: number; totalValue: number; totalUnits: number; lowStock: number; outOfStock: number }>(
+        endpoints.products.inventorySummary(businessId),
+        { params: search?.trim() ? { search: search.trim() } : undefined }
+      );
+      return data;
+    } catch (error) {
+      if (!(error instanceof AppApiError) || (error.code !== "NETWORK" && error.code !== "TIMEOUT")) throw error;
+      const cached = filterCachedProducts(await offlineDbService.getCachedProducts(businessId), { search });
+      return cached.reduce((summary, product) => {
+        const stock = product.inventory?.quantityAvailable ?? 0;
+        summary.totalProducts += 1;
+        summary.totalValue += Number(product.purchasePrice ?? 0) * stock;
+        summary.totalUnits += stock;
+        if (stock > 0 && stock <= product.minimumStock) summary.lowStock += 1;
+        if (stock === 0) summary.outOfStock += 1;
+        return summary;
+      }, { totalProducts: 0, totalValue: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 });
+    }
+  },
+
   async list(params: ProductQuery = {}): Promise<ProductListResponse> {
     const businessId = await getRequiredBusinessId();
     try {
@@ -151,7 +174,7 @@ export const productsService = {
         const limit = params.limit ?? cached.length;
         return {
           data: cached.slice(0, limit),
-          meta: { page: 1, limit, total: cached.length, totalPages: cached.length > 0 ? 1 : 0 }
+          meta: { page: 1, limit, total: cached.length, totalPages: cached.length > 0 ? 1 : 0, hasNextPage: false, nextCursor: null }
         };
       }
       throw error;

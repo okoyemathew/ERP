@@ -62,6 +62,12 @@ export class SalesController {
     return this.salesService.findAll(user.businessId, query, user);
   }
 
+  @Get('product-ranking')
+  @ApiOperation({ summary: 'Get top-selling and highest-profit products' })
+  productRanking(@CurrentUser() user: AuthenticatedUser) {
+    return this.salesService.productRanking(user.businessId, user);
+  }
+
   @Get('products/lookup')
   @ApiOperation({
     summary: 'Lookup sellable product by productId, barcode, or SKU',

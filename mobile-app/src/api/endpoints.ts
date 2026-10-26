@@ -32,10 +32,12 @@ export const endpoints = {
     list: "/employees",
     create: "/employees",
     myProfile: "/employees/me/profile",
+    myProductStock: "/employees/me/product-stock",
     mySales: "/employees/me/sales",
     mySalesPrint: "/employees/me/sales/print",
     detail: (employeeId: string) => `/employees/${employeeId}`,
     profile: (employeeId: string) => `/employees/${employeeId}/profile`,
+    productStock: (employeeId: string) => `/employees/${employeeId}/product-stock`,
     sales: (employeeId: string) => `/employees/${employeeId}/sales`,
     salesPrint: (employeeId: string) => `/employees/${employeeId}/sales/print`,
     update: (employeeId: string) => `/employees/${employeeId}`,
@@ -69,6 +71,7 @@ export const endpoints = {
   },
   sales: {
     list: "/sales",
+    productRanking: "/sales/product-ranking",
     create: "/sales",
     receiptPrint: (receiptId: string) => `/receipts/${receiptId}/print`,
     receiptReprint: (receiptId: string) => `/receipts/${receiptId}/reprint`
@@ -119,6 +122,7 @@ export const endpoints = {
   },
   products: {
     list: (businessId: string) => `/businesses/${businessId}/products`,
+    inventorySummary: (businessId: string) => `/businesses/${businessId}/products/inventory-summary`,
     create: (businessId: string) => `/businesses/${businessId}/products`,
     detail: (businessId: string, productId: string) => `/businesses/${businessId}/products/${productId}`,
     search: (businessId: string) => `/businesses/${businessId}/products/search`,

@@ -138,6 +138,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [supplySheetVisible, setSupplySheetVisible] = useState(false);
   const [supplyProducts, setSupplyProducts] = useState<ApiProduct[]>([]);
   const [supplyProductsLoading, setSupplyProductsLoading] = useState(false);
+  const [supplyLoadingMoreProducts, setSupplyLoadingMoreProducts] = useState(false);
   const [supplyProductSearch, setSupplyProductSearch] = useState("");
   const [selectedSupplyProductId, setSelectedSupplyProductId] = useState<string | null>(null);
   const [expandedSupplyRunId, setExpandedSupplyRunId] = useState<string | null>(null);
@@ -172,6 +173,10 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const supplyProductsRequestId = useRef(0);
+  const supplyProductsPage = useRef(1);
+  const supplyProductsCursor = useRef<string | null>(null);
+  const supplyProductsLoadingMore = useRef(false);
+  const supplyHasMoreProducts = useRef(false);
   const salesRequestId = useRef(0);
 
   const load = useCallback(async () => {
@@ -253,30 +258,57 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
     requestAnimationFrame(() => saleSheetRef.current?.snapToIndex(0));
   }, [selectedSale]);
 
-  const loadSupplyProducts = useCallback(async (searchTerm = "") => {
+  const loadSupplyProducts = useCallback(async (searchTerm = "", append = false) => {
+    if (append && (supplyProductsLoadingMore.current || !supplyHasMoreProducts.current)) return;
+    const page = append ? supplyProductsPage.current + 1 : 1;
+    if (append) supplyProductsLoadingMore.current = true;
+    else {
+      supplyProductsPage.current = 1;
+      supplyProductsCursor.current = null;
+      supplyHasMoreProducts.current = false;
+    }
     const requestId = supplyProductsRequestId.current + 1;
     supplyProductsRequestId.current = requestId;
-    setSupplyProductsLoading(true);
+    if (append) setSupplyLoadingMoreProducts(true);
+    else setSupplyProductsLoading(true);
     try {
       const response = await productsService.list({
-        page: 1,
-        limit: 100,
+        ...(append && supplyProductsCursor.current ? { cursor: supplyProductsCursor.current } : { page }),
+        limit: 30,
         search: searchTerm.trim() || undefined,
         available: true,
         sortBy: "name",
         sortOrder: "asc"
       });
       if (requestId !== supplyProductsRequestId.current) return;
-      setSupplyProducts(response.data);
-      setSelectedSupplyProductId((current) => response.data.some((product) => product.id === current) ? current : response.data[0]?.id ?? null);
+      setSupplyProducts((current) => {
+        if (!append) return response.data;
+        const ids = new Set(current.map((product) => product.id));
+        return [...current, ...response.data.filter((product) => !ids.has(product.id))];
+      });
+      supplyProductsPage.current = page;
+      supplyProductsCursor.current = response.meta.nextCursor ?? null;
+      supplyHasMoreProducts.current = response.meta.page < response.meta.totalPages;
+      if (!append) setSelectedSupplyProductId((current) => response.data.some((product) => product.id === current) ? current : response.data[0]?.id ?? null);
     } catch (supplyError) {
       if (requestId !== supplyProductsRequestId.current) return;
       const message = supplyError instanceof Error ? supplyError.message : "Unable to load products for supply.";
       Alert.alert("Unable to load products", message);
     } finally {
-      if (requestId === supplyProductsRequestId.current) setSupplyProductsLoading(false);
+      if (requestId === supplyProductsRequestId.current) {
+        setSupplyProductsLoading(false);
+        setSupplyLoadingMoreProducts(false);
+      }
+      if (append) supplyProductsLoadingMore.current = false;
     }
   }, []);
+
+  const loadMoreSupplyProducts = useCallback((event: { nativeEvent: { contentOffset: { y: number }; layoutMeasurement: { height: number }; contentSize: { height: number } } }) => {
+    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+    if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 180) {
+      void loadSupplyProducts(supplyProductSearch, true);
+    }
+  }, [loadSupplyProducts, supplyProductSearch]);
 
   useEffect(() => {
     if (!supplySheetVisible) return;
@@ -1031,6 +1063,8 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                 scrollEnabled
                 overScrollMode="always"
                 keyboardDismissMode="on-drag"
+                onScroll={loadMoreSupplyProducts}
+                scrollEventThrottle={300}
                 contentContainerStyle={[styles.sheetContent, { paddingBottom: supplyScrollPadding }]}
                 showsVerticalScrollIndicator
                 persistentScrollbar
@@ -1044,7 +1078,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                 {!supplyReview ? (
                   <>
                     <SearchBar value={supplyProductSearch} onChangeText={setSupplyProductSearch} placeholder="Search products" />
-                    {supplyProductsLoading ? (
+                    {supplyProductsLoading && !supplyProducts.length ? (
                       <LoadingState label="Loading products" />
                     ) : supplyProducts.length ? (
                       <View style={styles.productPicker}>
@@ -1069,6 +1103,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
                             </Pressable>
                           );
                         })}
+                        {supplyLoadingMoreProducts ? <LoadingState label="Loading more products" /> : null}
                       </View>
                     ) : (
                       <EmptyState icon={<Package size={28} color={colors.textPlaceholder} />} title={supplyProductSearch.trim() ? "No products found" : "No available products"} />

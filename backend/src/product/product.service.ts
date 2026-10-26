@@ -165,7 +165,7 @@ export class ProductService {
     viewer?: AuthenticatedUser,
   ) {
     const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
+    const limit = query.limit ?? 30;
     const sortBy = query.sortBy ?? 'createdAt';
     const sortOrder = query.sortOrder ?? 'desc';
     const search = query.search?.trim();
@@ -240,6 +240,26 @@ export class ProductService {
         : {}),
     };
 
+    let cursorWhere: Prisma.ProductWhereInput | undefined;
+    if (query.cursor) {
+      if (sortBy !== 'createdAt' && sortBy !== 'name') {
+        throw new BadRequestException('Cursor pagination requires createdAt or name ordering');
+      }
+      try {
+        const cursor = JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8')) as { id?: string; createdAt?: string; name?: string };
+        const createdAt = new Date(cursor.createdAt ?? '');
+        if (!cursor.id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cursor.id) || (sortBy === 'createdAt' && !Number.isFinite(createdAt.getTime())) || (sortBy === 'name' && typeof cursor.name !== 'string')) {
+          throw new Error('invalid cursor');
+        }
+        const comparison = sortOrder === 'desc' ? 'lt' : 'gt';
+        cursorWhere = sortBy === 'createdAt'
+          ? { OR: [{ createdAt: { [comparison]: createdAt } }, { createdAt, id: { [comparison]: cursor.id } }] }
+          : { OR: [{ name: { [comparison]: cursor.name } }, { name: cursor.name, id: { [comparison]: cursor.id } }] };
+      } catch {
+        throw new BadRequestException('Invalid product pagination cursor');
+      }
+    }
+
     const orderBy: Prisma.ProductOrderByWithRelationInput =
       sortBy === 'quantityAvailable'
         ? { inventory: { quantityAvailable: sortOrder } }
@@ -248,23 +268,54 @@ export class ProductService {
     const [total, items] = await Promise.all([
       this.prisma.product.count({ where }),
       this.prisma.product.findMany({
-        where,
-        include: {
-          category: true,
-          brand: true,
-          supplier: true,
-          unit: true,
-          images: true,
-          barcodes: true,
-          inventory: true,
+        where: cursorWhere ? { AND: [where, cursorWhere] } : where,
+        select: {
+          id: true,
+          businessId: true,
+          categoryId: true,
+          brandId: true,
+          supplierId: true,
+          unitId: true,
+          name: true,
+          sku: true,
+          barcode: true,
+          description: true,
+          purchasePrice: true,
+          sellingPrice: true,
+          baseSellingPrice: this.canViewBaseSellingPrice(viewer),
+          wholesalePrice: true,
+          minimumStock: true,
+          maximumStock: true,
+          imageUrl: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          category: { select: { id: true, name: true } },
+          brand: { select: { id: true, name: true } },
+          supplier: { select: { id: true, companyName: true } },
+          unit: { select: { id: true, name: true, symbol: true } },
+          inventory: {
+            select: {
+              id: true,
+              quantityOnHand: true,
+              quantityReserved: true,
+              quantityAvailable: true,
+              reorderLevel: true,
+              reorderQuantity: true,
+              averageCost: true,
+            },
+          },
         },
-        orderBy,
-        skip: (page - 1) * limit,
-        take: limit,
+        orderBy: [{ ...orderBy }, { id: sortOrder }],
+        ...(query.cursor ? {} : { skip: (page - 1) * limit }),
+        take: query.cursor ? limit + 1 : limit,
       }),
     ]);
 
-    const data = await this.attachCreationMetadata(businessId, items, viewer);
+    const hasCursorNextPage = Boolean(query.cursor && items.length > limit);
+    const pageItems = query.cursor ? items.slice(0, limit) : items;
+    const data = await this.attachCreationMetadata(businessId, pageItems, viewer);
+    const lastProduct = pageItems.at(-1);
 
     return {
       data,
@@ -273,7 +324,59 @@ export class ProductService {
         limit,
         total,
         totalPages: Math.ceil(total / limit),
+        hasNextPage: query.cursor ? hasCursorNextPage : page < Math.ceil(total / limit),
+        nextCursor: lastProduct && (query.cursor ? hasCursorNextPage : page < Math.ceil(total / limit))
+          ? Buffer.from(JSON.stringify(sortBy === 'createdAt'
+            ? { id: lastProduct.id, createdAt: lastProduct.createdAt.toISOString() }
+            : { id: lastProduct.id, name: lastProduct.name })).toString('base64url')
+          : null,
       },
+    };
+  }
+
+  async inventorySummary(businessId: string, search?: string) {
+    const term = search?.trim();
+    const searchFilter = term
+      ? Prisma.sql`AND (
+          p.name ILIKE '%' || ${term} || '%'
+          OR p.sku ILIKE '%' || ${term} || '%'
+          OR COALESCE(p.barcode, '') ILIKE '%' || ${term} || '%'
+          OR c.name ILIKE '%' || ${term} || '%'
+          OR COALESCE(b.name, '') ILIKE '%' || ${term} || '%'
+          OR COALESCE(s."companyName", '') ILIKE '%' || ${term} || '%'
+          OR u.name ILIKE '%' || ${term} || '%'
+          OR u.symbol ILIKE '%' || ${term} || '%'
+          OR EXISTS (SELECT 1 FROM "ProductBarcode" pb WHERE pb."productId" = p.id AND pb.barcode ILIKE '%' || ${term} || '%')
+        )`
+      : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<Array<{
+      totalProducts: bigint;
+      totalValue: Prisma.Decimal;
+      totalUnits: bigint;
+      lowStock: bigint;
+      outOfStock: bigint;
+    }>>(Prisma.sql`
+      SELECT
+        COUNT(p.id)::bigint AS "totalProducts",
+        COALESCE(SUM(COALESCE(i."quantityAvailable", 0) * p."purchasePrice"), 0) AS "totalValue",
+        COALESCE(SUM(COALESCE(i."quantityAvailable", 0)), 0)::bigint AS "totalUnits",
+        COUNT(*) FILTER (WHERE COALESCE(i."quantityAvailable", 0) > 0 AND COALESCE(i."quantityAvailable", 0) <= p."minimumStock")::bigint AS "lowStock",
+        COUNT(*) FILTER (WHERE COALESCE(i."quantityAvailable", 0) = 0)::bigint AS "outOfStock"
+      FROM "Product" p
+      LEFT JOIN "Inventory" i ON i."productId" = p.id AND i."businessId" = p."businessId" AND i."deletedAt" IS NULL
+      LEFT JOIN "Category" c ON c.id = p."categoryId"
+      LEFT JOIN "Brand" b ON b.id = p."brandId"
+      LEFT JOIN "Supplier" s ON s.id = p."supplierId"
+      LEFT JOIN "Unit" u ON u.id = p."unitId"
+      WHERE p."businessId" = ${businessId}::uuid AND p."isActive" = true ${searchFilter}
+    `);
+    const row = rows[0];
+    return {
+      totalProducts: Number(row?.totalProducts ?? 0),
+      totalValue: Number(row?.totalValue ?? 0),
+      totalUnits: Number(row?.totalUnits ?? 0),
+      lowStock: Number(row?.lowStock ?? 0),
+      outOfStock: Number(row?.outOfStock ?? 0),
     };
   }
 
@@ -798,15 +901,12 @@ export class ProductService {
           entity: 'Product',
           entityId: { in: productIds },
         },
-        include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              username: true,
-            },
-          },
+        select: {
+          entityId: true,
+          createdAt: true,
+          user: canViewAddedBy
+            ? { select: { id: true, firstName: true, lastName: true, username: true } }
+            : false,
         },
         orderBy: { createdAt: 'asc' },
       }),
@@ -817,6 +917,7 @@ export class ProductService {
           transactionType: InventoryTransactionType.STOCK_IN,
           referenceNumber: { startsWith: 'INITIAL_STOCK:' },
         },
+        select: { productId: true, quantity: true, createdAt: true },
         orderBy: { createdAt: 'asc' },
       }),
     ]);

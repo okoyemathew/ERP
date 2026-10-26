@@ -82,6 +82,22 @@ export class EmployeeController {
     return this.employeeService.getProfile(user.businessId, user.employeeId);
   }
 
+  @Get('me/product-stock')
+  @Permissions()
+  @ApiOperation({ summary: 'Get current employee product stock for POS and supplied stock' })
+  myProductStock(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    if (!user.employeeId) throw new BadRequestException('Employee profile is not available');
+    const query = page !== undefined || limit !== undefined || search !== undefined
+      ? { page: Number(page ?? 1), limit: Number(limit ?? 30), search }
+      : undefined;
+    return this.employeeService.getProductStock(user.businessId, user.employeeId, query);
+  }
+
   @Get('me/sales')
   @Permissions()
   @ApiOperation({ summary: 'View current employee sales' })
@@ -132,6 +148,22 @@ export class EmployeeController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.employeeService.getProfile(user.businessId, id);
+  }
+
+  @Get(':id/product-stock')
+  @Roles(...EMPLOYEE_READ_ROLES)
+  @ApiOperation({ summary: 'Get employee product stock and sales aggregates' })
+  productStock(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    const query = page !== undefined || limit !== undefined || search !== undefined
+      ? { page: Number(page ?? 1), limit: Number(limit ?? 30), search }
+      : undefined;
+    return this.employeeService.getProductStock(user.businessId, id, query);
   }
 
   @Get(':id/sales')

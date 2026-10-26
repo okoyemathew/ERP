@@ -3,6 +3,11 @@ import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ProductQueryDto {
+  @ApiPropertyOptional({ description: 'Opaque product cursor' })
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
   @ApiPropertyOptional({ description: 'Page number', default: 1, minimum: 1 })
   @IsOptional()
   @Type(() => Number)
@@ -12,7 +17,7 @@ export class ProductQueryDto {
 
   @ApiPropertyOptional({
     description: 'Page size',
-    default: 20,
+    default: 30,
     minimum: 1,
     maximum: 100,
   })
@@ -21,7 +26,7 @@ export class ProductQueryDto {
   @IsInt()
   @Min(1)
   @Max(100)
-  limit?: number = 20;
+  limit?: number = 30;
 
   @ApiPropertyOptional({
     description: 'Sort field',

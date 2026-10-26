@@ -777,6 +777,74 @@ export class EmployeeService {
     };
   }
 
+  async getProductStock(
+    businessId: string,
+    id: string,
+    query?: { page?: number; limit?: number; search?: string },
+  ) {
+    const employee = await this.getEmployeeContext(businessId, id);
+    const userId = employee.userId;
+    const requestedPage = Number(query?.page ?? 1);
+    const requestedLimit = Number(query?.limit ?? 30);
+    const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.trunc(requestedPage) : 1;
+    const limit = Math.min(100, Number.isFinite(requestedLimit) && requestedLimit > 0 ? Math.trunc(requestedLimit) : 30);
+    const search = query?.search?.trim() || null;
+    const rows = await this.prisma.$queryRaw<Array<{
+      productId: string; productName: string; sku: string | null; barcode: string | null;
+      quantityInHand: number; quantitySold: number; quantityReturned: number;
+      suppliedQuantity: number; unitValue: Prisma.Decimal;
+      totalSoldValue: Prisma.Decimal; lastActivityAt: Date;
+    }>>(Prisma.sql`
+      WITH inbound AS (
+        SELECT i."productId", SUM(i.quantity)::int AS supplied,
+               MIN(d."disbursementDate") AS first_inbound, MAX(d."disbursementDate") AS last_supply
+        FROM "GoodsDisbursementItem" i
+        JOIN "GoodsDisbursement" d ON d.id = i."goodsDisbursementId"
+        JOIN "Product" p ON p.id = i."productId" AND p."businessId" = d."businessId" AND p."isActive" = true
+        WHERE d."businessId" = ${businessId}::uuid AND d."employeeId" = ${employee.id}::uuid
+        GROUP BY i."productId"
+      ), sold AS (
+        SELECT i."productId", SUM(i.quantity)::int AS sold,
+               SUM(i."totalAmount") AS sold_value, MAX(s."saleDate") AS last_sale
+        FROM "SaleItem" i
+        JOIN "Sale" s ON s.id = i."saleId"
+        JOIN "Product" p ON p.id = i."productId" AND p."businessId" = s."businessId" AND p."isActive" = true
+        JOIN inbound b ON b."productId" = i."productId" AND s."saleDate" >= b.first_inbound
+        WHERE s."businessId" = ${businessId}::uuid AND s."userId" = ${userId}::uuid
+          AND s."deletedAt" IS NULL AND s.status IN ('COMPLETED'::"SaleStatus", 'REFUNDED'::"SaleStatus")
+        GROUP BY i."productId"
+      ), returned AS (
+        SELECT r."productId", SUM(r.quantity)::int AS returned,
+               MAX(COALESCE(r."reviewedAt", r."requestedAt")) AS last_return
+        FROM "ProductReturnRequest" r
+        JOIN "Product" p ON p.id = r."productId" AND p."businessId" = r."businessId" AND p."isActive" = true
+        WHERE r."businessId" = ${businessId}::uuid AND r."originalSellerId" = ${userId}::uuid
+          AND r.status = 'APPROVED'::"ProductReturnRequestStatus"
+        GROUP BY r."productId"
+      )
+      SELECT p.id AS "productId", p.name AS "productName", p.sku, p.barcode,
+             GREATEST(0, COALESCE(b.supplied, 0) - COALESCE(s.sold, 0) + COALESCE(r.returned, 0))::int AS "quantityInHand",
+             COALESCE(s.sold, 0)::int AS "quantitySold", COALESCE(r.returned, 0)::int AS "quantityReturned",
+             COALESCE(b.supplied, 0)::int AS "suppliedQuantity", p."purchasePrice" AS "unitValue",
+             COALESCE(s.sold_value, 0) AS "totalSoldValue",
+             GREATEST(COALESCE(b.last_supply, '-infinity'::timestamp), COALESCE(s.last_sale, '-infinity'::timestamp), COALESCE(r.last_return, '-infinity'::timestamp)) AS "lastActivityAt"
+      FROM "Product" p
+      LEFT JOIN inbound b ON b."productId" = p.id
+      LEFT JOIN sold s ON s."productId" = p.id
+      LEFT JOIN returned r ON r."productId" = p.id
+      WHERE p."businessId" = ${businessId}::uuid AND p."isActive" = true
+        AND (b."productId" IS NOT NULL OR s."productId" IS NOT NULL OR r."productId" IS NOT NULL)
+        AND (${search}::text IS NULL OR p.name ILIKE '%' || ${search} || '%'
+          OR COALESCE(p.sku, '') ILIKE '%' || ${search} || '%'
+          OR COALESCE(p.barcode, '') ILIKE '%' || ${search} || '%')
+      ORDER BY GREATEST(0, COALESCE(s.sold, 0) - COALESCE(r.returned, 0)) DESC, "lastActivityAt" DESC, p.id DESC
+      ${query ? Prisma.sql`LIMIT ${limit + 1} OFFSET ${(page - 1) * limit}` : Prisma.empty}
+    `);
+    if (!query) return rows;
+    const hasNextPage = rows.length > limit;
+    return { data: rows.slice(0, limit), meta: { page, limit, hasNextPage } };
+  }
+
   async getSales(
     businessId: string,
     id: string,

@@ -117,6 +117,14 @@ function isVisibleInSalesList(sale: ApiSale, params: Record<string, string | num
 }
 
 export const salesService = {
+  async productRanking(): Promise<{
+    bestSold: Array<{ id: string; name: string; sku: string | null; quantity: number; revenue: number | string; profit: number | string }>;
+    mostProfitable: Array<{ id: string; name: string; sku: string | null; quantity: number; revenue: number | string; profit: number | string }>;
+  }> {
+    const { data } = await api.get(endpoints.sales.productRanking);
+    return data;
+  },
+
   async list(params?: Record<string, string | number>): Promise<{ data: ApiSale[]; meta?: { page: number; limit: number; total: number; totalPages: number } }> {
     const normalizedParams = params ?? {};
     try {
