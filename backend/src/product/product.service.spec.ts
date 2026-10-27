@@ -159,6 +159,45 @@ describe('ProductService base selling price', () => {
     expect(result).toHaveProperty('baseSellingPrice');
   });
 
+  it('returns the created inventory row without a follow-up product read', async () => {
+    const created = product();
+    const inventory = {
+      id: 'inventory-1',
+      quantityOnHand: 12,
+      quantityReserved: 0,
+      quantityAvailable: 12,
+      reorderLevel: 0,
+      reorderQuantity: 0,
+      averageCost: new Prisma.Decimal(8000),
+    };
+    prisma.product.create.mockResolvedValue(created);
+    prisma.inventory.create.mockResolvedValue(inventory);
+    prisma.auditLog.create.mockResolvedValue({
+      createdAt: created.createdAt,
+      user: { id: owner.id, firstName: 'Owner', lastName: 'User', username: owner.username },
+    });
+
+    const result = await service.create(
+      businessId,
+      {
+        categoryId,
+        unitId,
+        name: 'Cement',
+        sku: 'CEM-001',
+        purchasePrice: 8000,
+        sellingPrice: 10500,
+        minimumStock: 0,
+        initialStock: 12,
+      },
+      owner,
+    );
+
+    expect(prisma.product.findUnique).not.toHaveBeenCalled();
+    expect(result.inventory).toEqual(inventory);
+    expect(result.initialStockQuantity).toBe(12);
+    expect(result.addedBy).toEqual({ id: owner.id, firstName: 'Owner', lastName: 'User', username: owner.username });
+  });
+
   it('defaults base selling price to selling price when omitted', async () => {
     const created = product({ baseSellingPrice: new Prisma.Decimal(10500) });
     prisma.product.create.mockResolvedValue(created);

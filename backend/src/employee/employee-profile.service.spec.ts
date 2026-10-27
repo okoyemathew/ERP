@@ -56,6 +56,7 @@ const employee = {
 function createPrismaMock() {
   const prisma: any = {
     employee: { findFirst: jest.fn() },
+    $queryRaw: jest.fn(),
     sale: { count: jest.fn(), aggregate: jest.fn() },
     creditPayment: { findMany: jest.fn().mockResolvedValue([]) },
     payment: { findMany: jest.fn().mockResolvedValue([]), count: jest.fn() },
@@ -85,6 +86,10 @@ describe('EmployeeService profile stock', () => {
       _sum: { totalAmount: new Prisma.Decimal(0) },
     });
     prisma.productReturnRequest.findMany.mockResolvedValue([]);
+    jest.spyOn(service, 'getProductStock').mockResolvedValue([
+      { productId, productName: 'Salt', sku: 'SALT-6', barcode: null, quantityInHand: 20, quantitySold: 0, quantityReturned: 0, suppliedQuantity: 20, unitValue: new Prisma.Decimal(50), totalSoldValue: new Prisma.Decimal(0), lastActivityAt: new Date('2026-09-09T10:00:00.000Z') },
+    ]);
+    prisma.$queryRaw.mockResolvedValue([{ runs: 1n, quantity: 20n, value: new Prisma.Decimal(1000) }]);
     prisma.goodsDisbursement.findMany.mockResolvedValue([
       {
         id: '55555555-5555-5555-5555-555555555555',
@@ -202,6 +207,10 @@ describe('EmployeeService profile stock', () => {
       _sum: { totalAmount: new Prisma.Decimal(0) },
     });
     prisma.productReturnRequest.findMany.mockResolvedValue([]);
+    jest.spyOn(service, 'getProductStock').mockResolvedValue([
+      { productId, productName: 'Salt', sku: 'SALT-6', barcode: null, quantityInHand: 101, quantitySold: 0, quantityReturned: 0, suppliedQuantity: 101, unitValue: new Prisma.Decimal(50), totalSoldValue: new Prisma.Decimal(0), lastActivityAt: new Date('2026-09-09T10:00:00.000Z') },
+    ]);
+    prisma.$queryRaw.mockResolvedValue([{ runs: 101n, quantity: 101n, value: new Prisma.Decimal(5050) }]);
     prisma.goodsDisbursement.findMany.mockResolvedValue(supplyRuns);
     prisma.saleItem.findMany.mockResolvedValue([]);
 
@@ -256,6 +265,20 @@ describe('EmployeeService profile stock', () => {
       _sum: { totalAmount: new Prisma.Decimal(0) },
     });
     prisma.productReturnRequest.findMany.mockResolvedValue([]);
+    jest.spyOn(service, 'getProductStock').mockResolvedValue(items.map((item) => ({
+      productId: item.productId,
+      productName: item.product.name,
+      sku: item.product.sku,
+      barcode: item.product.barcode,
+      quantityInHand: item.quantity,
+      quantitySold: 0,
+      quantityReturned: 0,
+      suppliedQuantity: item.quantity,
+      unitValue: new Prisma.Decimal(50),
+      totalSoldValue: new Prisma.Decimal(0),
+      lastActivityAt: item.createdAt,
+    })));
+    prisma.$queryRaw.mockResolvedValue([{ runs: 1n, quantity: 2850n, value: new Prisma.Decimal(142500) }]);
     prisma.goodsDisbursement.findMany.mockResolvedValue([
       {
         id: '55555555-5555-5555-5555-555555555555',

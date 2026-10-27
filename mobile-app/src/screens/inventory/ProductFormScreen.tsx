@@ -49,13 +49,20 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
   const [form, setForm] = useState<FormState>(defaults);
   const [product, setProduct] = useState<ApiProduct | null>(null);
   const [initialStockEdited, setInitialStockEdited] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // A new-product form has no remote product to load. Render it immediately;
+  // only edit/stock forms need the product detail request.
+  const [loading, setLoading] = useState(Boolean(productId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
 
   const title = stockMode ? "Add New Product" : productId ? "Edit Product" : "Create Product";
 
   const load = useCallback(async () => {
+    if (!productId) {
+      setLoading(false);
+      setError(false);
+      return;
+    }
     setLoading(true);
     setError(false);
     try {
@@ -205,6 +212,7 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
     }
 
     setSaving(true);
+    const saveStartedAt = Date.now();
     try {
       const payload: UpsertProductPayload = {
         categoryId: form.categoryId || undefined,
@@ -232,6 +240,9 @@ export function ProductFormScreen({ route, navigation }: { route: any; navigatio
         }
       } else {
         await productsService.create(payload);
+      }
+      if (!productId && process.env.EXPO_PUBLIC_PERFORMANCE_LOGGING === "true") {
+        console.info("[nexpos-perf]", JSON.stringify({ kind: "product_save_confirmed_ms", durationMs: Date.now() - saveStartedAt }));
       }
       navigation.goBack();
     } catch (saveError) {

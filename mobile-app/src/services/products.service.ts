@@ -5,6 +5,7 @@ import { getRequiredBusinessId } from "@/api/session";
 import { offlineDbService } from "@/services/offline-db.service";
 import { queueOfflineMutation } from "@/services/offline-mutation.service";
 import { dashboardEvents } from "@/utils/dashboardEvents";
+import { productEvents } from "@/utils/productEvents";
 import { offlineApiCacheService } from "@/services/offline-api-cache.service";
 import type {
   ApiProduct,
@@ -139,6 +140,16 @@ async function returnRequestFallback(businessId: string, payload: ProductReturnR
 }
 
 export const productsService = {
+  async cachedList(params: ProductQuery = {}): Promise<ProductListResponse> {
+    const businessId = await getRequiredBusinessId();
+    const cached = filterCachedProducts(await offlineDbService.getCachedProducts(businessId), params);
+    const limit = params.limit ?? 30;
+    return {
+      data: cached.slice(0, limit),
+      meta: { page: 1, limit, total: cached.length, totalPages: cached.length > 0 ? 1 : 0, hasNextPage: false, nextCursor: null }
+    };
+  },
+
   async inventorySummary(search?: string) {
     const businessId = await getRequiredBusinessId();
     try {
@@ -201,11 +212,14 @@ export const productsService = {
     try {
       const { data } = await api.post<ApiProduct>(endpoints.products.create(businessId), payload);
       await offlineDbService.cacheProduct(businessId, data);
+      productEvents.notifyCreated(data);
       return data;
     } catch (error) {
       const fallback = productFallback(businessId, payload);
       await offlineDbService.cacheProduct(businessId, fallback);
-      return queueOfflineMutation(error, { method: "POST", url: endpoints.products.create(businessId), data: payload }, fallback);
+      const queuedProduct = await queueOfflineMutation(error, { method: "POST", url: endpoints.products.create(businessId), data: payload }, fallback);
+      productEvents.notifyCreated(queuedProduct);
+      return queuedProduct;
     }
   },
 

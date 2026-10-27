@@ -6,6 +6,7 @@ import { json, urlencoded } from 'express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { PerformanceLoggingInterceptor } from './common/interceptors/performance-logging.interceptor';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -65,6 +66,7 @@ async function bootstrap() {
     ],
   });
   app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalInterceptors(new PerformanceLoggingInterceptor());
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

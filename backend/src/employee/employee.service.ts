@@ -759,7 +759,7 @@ export class EmployeeService {
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),
-      this.getEmployeeProfileActivity(businessId, employee),
+      this.getEmployeeProfileActivityFast(businessId, employee),
     ]);
 
     return {
@@ -774,6 +774,97 @@ export class EmployeeService {
       },
       profileActivity,
       recentSessions: sessions,
+    };
+  }
+
+  private async getEmployeeProfileActivityFast(
+    businessId: string,
+    employee: Awaited<ReturnType<EmployeeService['findOne']>>,
+  ) {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date(startOfToday);
+    endOfToday.setDate(endOfToday.getDate() + 1);
+
+    // Aggregate employee stock in PostgreSQL. The previous profile path loaded
+    // every sale item, supply run and return into Node before building the same
+    // per-product totals, causing large responses and substantial JS work.
+    const [stockResult, disbursements, supplyTotals, todayCollections] = await Promise.all([
+      this.getProductStock(businessId, employee.id),
+      this.prisma.goodsDisbursement.findMany({
+        where: { businessId, employeeId: employee.id },
+        include: {
+          items: {
+            where: { product: { businessId, isActive: true } },
+            include: { product: { select: { id: true, name: true, sku: true, barcode: true, purchasePrice: true } } },
+          },
+        },
+        orderBy: { disbursementDate: 'desc' },
+        take: 100,
+      }),
+      this.prisma.$queryRaw<Array<{ runs: bigint; quantity: bigint; value: Prisma.Decimal | null }>>(Prisma.sql`
+        SELECT COUNT(DISTINCT d.id)::bigint AS runs,
+               COALESCE(SUM(i.quantity), 0)::bigint AS quantity,
+               COALESCE(SUM(i.quantity * p."purchasePrice"), 0) AS value
+        FROM "GoodsDisbursement" d
+        JOIN "GoodsDisbursementItem" i ON i."goodsDisbursementId" = d.id
+        JOIN "Product" p ON p.id = i."productId" AND p."businessId" = d."businessId" AND p."isActive" = true
+        WHERE d."businessId" = ${businessId}::uuid AND d."employeeId" = ${employee.id}::uuid
+      `),
+      saleCollections(this.prisma, { businessId, userId: employee.userId }, {
+        startDate: startOfToday,
+        endDate: new Date(endOfToday.getTime() - 1),
+      }),
+    ]);
+
+    const stockRows = Array.isArray(stockResult) ? stockResult : stockResult.data;
+    const stock = [...stockRows].sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime());
+    const supplies = disbursements
+      .map((run) => {
+        const items = run.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product.name,
+          sku: item.product.sku,
+          barcode: item.product.barcode,
+          quantity: item.quantity,
+          value: new Prisma.Decimal(item.product.purchasePrice).mul(item.quantity),
+        }));
+        const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+        const totalValue = items.reduce((sum, item) => sum.add(item.value), new Prisma.Decimal(0));
+        return {
+          id: run.id,
+          employeeId: run.employeeId,
+          disbursementNumber: run.disbursementNumber,
+          disbursementDate: run.disbursementDate,
+          destination: run.destination,
+          remarks: run.remarks,
+          totalQuantity,
+          totalValue,
+          items,
+        };
+      })
+      .filter((run) => run.items.length > 0);
+    const totals = supplyTotals[0];
+    const today = collectionsBySale(todayCollections);
+
+    return {
+      stats: {
+        stockItems: stock.length,
+        stockValue: stock.reduce((sum, item) => sum.add(item.unitValue.mul(Math.max(0, item.quantityInHand))), new Prisma.Decimal(0)),
+        totalSupplied: Number(totals?.quantity ?? 0),
+        salesToday: today.size,
+        salesTodayValue: todayCollections.reduce((sum, row) => sum.add(row.amount), new Prisma.Decimal(0)),
+      },
+      stock,
+      supplies: {
+        summary: {
+          totalSupplyRuns: Number(totals?.runs ?? 0),
+          totalSuppliedQuantity: Number(totals?.quantity ?? 0),
+          totalSuppliedValue: totals?.value ?? new Prisma.Decimal(0),
+        },
+        data: supplies.slice(0, 100),
+      },
     };
   }
 

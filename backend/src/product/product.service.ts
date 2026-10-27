@@ -57,9 +57,8 @@ export class ProductService {
     const initialStock = dto.initialStock ?? dto.minimumStock;
     const baseSellingPrice = dto.baseSellingPrice ?? sellingPrice;
 
-    let createdProduct: Awaited<ReturnType<typeof this.prisma.product.findUnique>>;
     try {
-      createdProduct = await this.prisma.$transaction(async (tx) => {
+      return await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
         data: {
           businessId,
@@ -80,6 +79,12 @@ export class ProductService {
           imageUrl: dto.imageUrl?.trim() || null,
           isActive: dto.isActive ?? true,
         },
+        include: {
+          category: true,
+          brand: true,
+          supplier: true,
+          unit: true,
+        },
       });
 
       const inventory = await tx.inventory.create({
@@ -96,7 +101,6 @@ export class ProductService {
           isSynced: true,
           syncVersion: 1,
         },
-        select: { id: true },
       });
 
       if (initialStock > 0) {
@@ -119,8 +123,7 @@ export class ProductService {
         });
       }
 
-      if (user) {
-        await tx.auditLog.create({
+      const creationLog = user ? await tx.auditLog.create({
           data: {
             businessId,
             userId: user.id,
@@ -129,34 +132,28 @@ export class ProductService {
             entityId: product.id,
             description: `Created product ${product.name}`,
           },
-        });
-      }
+          select: {
+            createdAt: true,
+            user: this.canViewProductCreator(user)
+              ? { select: { id: true, firstName: true, lastName: true, username: true } }
+              : false,
+          },
+        }) : null;
 
-      return tx.product.findUnique({
-        where: { id: product.id },
-        include: {
-          category: true,
-          brand: true,
-          supplier: true,
-          unit: true,
-          images: true,
-          barcodes: true,
-          inventory: true,
-        },
-      });
+      return this.serializeProduct({
+        ...product,
+        inventory,
+        images: [],
+        barcodes: [],
+        addedAt: creationLog?.createdAt ?? product.createdAt,
+        addedBy: this.canViewProductCreator(user) ? creationLog?.user ?? null : null,
+        initialStockQuantity: initialStock,
+      }, user);
       });
     } catch (error) {
       this.throwProductConflictOnUniqueConstraint(error);
       throw error;
     }
-
-    const [createdProductWithMetadata] = await this.attachCreationMetadata(
-      businessId,
-      createdProduct ? [createdProduct] : [],
-      user,
-    );
-
-    return createdProductWithMetadata ?? createdProduct;
   }
 
   async findAll(

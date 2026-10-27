@@ -13,6 +13,7 @@ import { colors, spacing } from "@/theme";
 import type { ApiProduct, ProductReturnRequest } from "@/types/product";
 import { canReviewProductReturns } from "@/utils/permissions";
 import { formatCurrency } from "@/utils/format";
+import { productEvents } from "@/utils/productEvents";
 
 const stockStatus = (stock: number) => {
   if (stock === 0) return "Out";
@@ -48,6 +49,7 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState<ApiProduct[]>([]);
   const [summary, setSummary] = useState({ totalProducts: 0, totalValue: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 });
+  const [summaryLoaded, setSummaryLoaded] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [returnRequests, setReturnRequests] = useState<ProductReturnRequest[]>([]);
@@ -57,8 +59,11 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   const [returnProcessing, setReturnProcessing] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const hasLoadedRef = useRef(false);
+  const productsRef = useRef<ApiProduct[]>([]);
   const queryRef = useRef(query);
   const latestRequestRef = useRef(0);
+  const focusStartedAtRef = useRef<number | null>(null);
+  const firstUsableLoggedRef = useRef(false);
   const cursorRef = useRef<string | null>(null);
   const pageRef = useRef(1);
   const loadingMoreRef = useRef(false);
@@ -72,39 +77,51 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     if (showSpinner) setLoading(true);
     else setSearching(true);
     setError(false);
+    setSummaryLoaded(false);
+    const search = searchValue.trim() || undefined;
+    if (productsRef.current.length === 0) {
+      void productsService.cachedList({ page: 1, limit: 30, search, sortBy: "createdAt", sortOrder: "desc" })
+        .then((cached) => {
+          if (requestId === latestRequestRef.current && productsRef.current.length === 0 && cached.data.length) {
+            productsRef.current = cached.data;
+            setProducts(cached.data);
+            setLoading(false);
+          }
+        })
+        .catch(() => undefined);
+    }
     try {
-      const search = searchValue.trim() || undefined;
-      const [response, inventorySummaryResponse] = await Promise.all([
-        productsService.list({ page: 1, limit: 30, search, sortBy: "createdAt", sortOrder: "desc" }),
-        productsService.inventorySummary(search).catch(() => null)
-      ]);
+      const response = await productsService.list({ page: 1, limit: 30, search, sortBy: "createdAt", sortOrder: "desc" });
       if (requestId !== latestRequestRef.current) return;
+      productsRef.current = response.data;
       setProducts(response.data);
+      if (!firstUsableLoggedRef.current && focusStartedAtRef.current !== null && process.env.EXPO_PUBLIC_PERFORMANCE_LOGGING === "true") {
+        firstUsableLoggedRef.current = true;
+        requestAnimationFrame(() => console.info("[nexpos-perf]", JSON.stringify({
+          kind: "inventory_first_usable_ms",
+          durationMs: Date.now() - (focusStartedAtRef.current ?? Date.now()),
+          products: response.data.length,
+        })));
+      }
       pageRef.current = 1;
       loadingMoreRef.current = false;
       setLoadingMore(false);
-      const inventorySummary = inventorySummaryResponse ?? response.data.reduce((current, product) => {
-        const stock = product.inventory?.quantityAvailable ?? 0;
-        current.totalProducts += 1;
-        current.totalValue += Number(product.purchasePrice ?? 0) * stock;
-        current.totalUnits += stock;
-        if (stock > 0 && stock <= product.minimumStock) current.lowStock += 1;
-        if (stock === 0) current.outOfStock += 1;
-        return current;
-      }, { totalProducts: 0, totalValue: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 });
-      setSummary(inventorySummary);
+      // Never present a first-page calculation as a catalogue-wide total.
       cursorRef.current = response.meta.nextCursor ?? null;
       setHasMore(response.meta.hasNextPage ?? response.meta.page < response.meta.totalPages);
-      if (canReviewReturns && !search) {
-        try {
-          const returns = await productsService.returnRequests({ status: "PENDING", limit: 10 });
-          if (requestId === latestRequestRef.current) setReturnRequests(returns.data);
-        } catch {
-          if (requestId === latestRequestRef.current) setReturnRequests([]);
+      void productsService.inventorySummary(search).then((inventorySummaryResponse) => {
+        if (requestId === latestRequestRef.current) {
+          setSummary(inventorySummaryResponse);
+          setSummaryLoaded(true);
         }
-      } else {
-        setReturnRequests([]);
-      }
+      }).catch(() => undefined);
+      // Return moderation is secondary to showing inventory; do not keep the
+      // product screen in its loading state while that independent request runs.
+      if (canReviewReturns && !search) {
+        void productsService.returnRequests({ status: "PENDING", limit: 10 })
+          .then((returns) => { if (requestId === latestRequestRef.current) setReturnRequests(returns.data); })
+          .catch(() => { if (requestId === latestRequestRef.current) setReturnRequests([]); });
+      } else setReturnRequests([]);
     } catch {
       if (requestId !== latestRequestRef.current) return;
       setError(true);
@@ -130,7 +147,9 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
       if (requestId !== latestRequestRef.current) return;
       setProducts((current) => {
         const existing = new Set(current.map((product) => product.id));
-        return [...current, ...response.data.filter((product) => !existing.has(product.id))];
+        const next = [...current, ...response.data.filter((product) => !existing.has(product.id))];
+        productsRef.current = next;
+        return next;
       });
       cursorRef.current = response.meta.nextCursor ?? null;
       pageRef.current = response.meta.page;
@@ -144,7 +163,9 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
   }, [hasMore, loadingMore, loading, searching]);
 
   useFocusEffect(useCallback(() => {
-    void load(queryRef.current);
+    focusStartedAtRef.current = Date.now();
+    firstUsableLoggedRef.current = false;
+    void load(queryRef.current, !hasLoadedRef.current);
   }, [load]));
 
   useEffect(() => {
@@ -154,6 +175,22 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     }, 350);
     return () => clearTimeout(timer);
   }, [load, query]);
+
+  useEffect(() => productEvents.subscribe((product) => {
+    const search = queryRef.current.trim().toLowerCase();
+    if (search && ![product.name, product.sku, product.barcode].some((value) => String(value ?? "").toLowerCase().includes(search))) return;
+    setProducts((current) => {
+      const next = [product, ...current.filter((item) => item.id !== product.id)];
+      const bounded = next.slice(0, 30);
+      productsRef.current = bounded;
+      return bounded;
+    });
+    setHasMore(true);
+    void productsService.inventorySummary(search || undefined).then((nextSummary) => {
+      setSummary(nextSummary);
+      setSummaryLoaded(true);
+    }).catch(() => undefined);
+  }), []);
 
   const refresh = () => {
     setRefreshing(true);
@@ -211,9 +248,6 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
     );
   };
 
-  if (loading) return <LoadingState label="Loading products" />;
-  if (error) return <ErrorState onRetry={() => void load()} />;
-
   return (
     <View style={styles.screen}>
       <ScreenHeader
@@ -238,7 +272,9 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
         onRefresh={refresh}
         onEndReached={() => void loadMore()}
         onEndReachedThreshold={0.5}
-        ListFooterComponent={loadingMore ? <Text style={styles.searching}>Loading more products...</Text> : null}
+        ListFooterComponent={error && products.length
+          ? <ErrorState onRetry={() => void load(queryRef.current, false)} />
+          : loadingMore ? <Text style={styles.searching}>Loading more products...</Text> : null}
         ListHeaderComponent={
           <View style={styles.headerContent}>
             <View style={styles.searchRow}>
@@ -253,13 +289,13 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
             </View>
             <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.banner}>
               <Text style={styles.bannerLabel}>Total Stock Value</Text>
-              <Text style={styles.bannerValue}>{formatCurrency(summary.totalValue)}</Text>
-              <Text style={styles.unitChip}>{summary.totalUnits} units</Text>
+              <Text style={styles.bannerValue}>{summaryLoaded ? formatCurrency(summary.totalValue) : "—"}</Text>
+              <Text style={styles.unitChip}>{summaryLoaded ? `${summary.totalUnits} units` : "—"}</Text>
             </LinearGradient>
             <View style={styles.stats}>
               {["Total SKUs", "Low Stock", "Out of Stock"].map((label, index) => (
                 <Card key={label} style={styles.stat}>
-                  <Text style={styles.statValue}>{index === 0 ? summary.totalProducts : index === 1 ? summary.lowStock : summary.outOfStock}</Text>
+                <Text style={styles.statValue}>{summaryLoaded ? (index === 0 ? summary.totalProducts : index === 1 ? summary.lowStock : summary.outOfStock) : "—"}</Text>
                   <Text style={styles.statLabel}>{label}</Text>
                 </Card>
               ))}
@@ -329,7 +365,11 @@ export function InventoryScreen({ navigation }: { navigation: any }) {
             </Pressable>
           );
         }}
-        ListEmptyComponent={<EmptyState icon={<Search size={28} color={colors.textPlaceholder} />} title={query.trim() ? "No products found" : "No products yet"} />}
+        ListEmptyComponent={loading
+          ? <LoadingState label="Loading products" />
+          : error
+            ? <ErrorState onRetry={() => void load()} />
+            : <EmptyState icon={<Search size={28} color={colors.textPlaceholder} />} title={query.trim() ? "No products found" : "No products yet"} />}
         contentContainerStyle={[styles.list, { paddingBottom: bottomPadding }]}
         showsVerticalScrollIndicator
         persistentScrollbar

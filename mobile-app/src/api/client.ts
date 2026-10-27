@@ -7,7 +7,7 @@ import { apiCacheKey, offlineApiCacheService } from "@/services/offline-api-cach
 import { dashboardEvents } from "@/utils/dashboardEvents";
 import type { RefreshTokenResponse } from "@/types/auth";
 
-type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean; _cacheRevision?: number };
+type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean; _cacheRevision?: number; _perfStartedAt?: number };
 
 let unauthorizedHandler: (() => void) | undefined;
 let refreshPromise: Promise<string | null> | null = null;
@@ -44,6 +44,23 @@ function isPublicAuthEndpoint(url?: string) {
 }
 
 const isAccountingPrint = (url?: string) => /\/employees\/[^/]+\/sales\/print(?:\?|$)/.test(url ?? "");
+const performanceLogging = process.env.EXPO_PUBLIC_PERFORMANCE_LOGGING === "true";
+
+function logApiTiming(config: InternalAxiosRequestConfig, status: number, headers?: Record<string, unknown>) {
+  if (!performanceLogging) return;
+  const startedAt = (config as RetriableConfig)._perfStartedAt;
+  if (!startedAt) return;
+  const rawPath = (config.url ?? "").split("?")[0];
+  const path = rawPath.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, ":id").replace(/\b\d{2,}\b/g, ":id");
+  console.info("[nexpos-perf]", JSON.stringify({
+    kind: "api",
+    method: config.method?.toUpperCase() ?? "GET",
+    path,
+    durationMs: Math.round(Date.now() - startedAt),
+    status,
+    responseBytes: headers?.["content-length"] ?? headers?.["Content-Length"] ?? null
+  }));
+}
 
 async function scopedApiCacheKey(method?: string, url?: string, params?: unknown) {
   const session = await getAuthSession();
@@ -86,6 +103,7 @@ async function refreshAccessToken() {
 }
 
 api.interceptors.request.use(async (config) => {
+  (config as RetriableConfig)._perfStartedAt = Date.now();
   (config as RetriableConfig)._cacheRevision = offlineApiCacheService.getRevision();
   assertApiConfigured();
   const token = await getAccessToken();
@@ -97,6 +115,7 @@ api.interceptors.request.use(async (config) => {
 
 api.interceptors.response.use(
   async (response) => {
+    logApiTiming(response.config, response.status, response.headers as Record<string, unknown>);
     if (response.config.method?.toUpperCase() === "POST" && /\/(?:credit-sales\/[^/]+\/(?:payments|pos-payments)|customers\/[^/]+\/credit-payments)$/.test(response.config.url ?? "")) {
       const session = await getAuthSession();
       if (session?.user.businessId) {
@@ -123,6 +142,7 @@ api.interceptors.response.use(
   },
   async (error: AxiosError) => {
     const original = error.config as RetriableConfig | undefined;
+    if (original) logApiTiming(original, error.response?.status ?? 0, error.response?.headers as Record<string, unknown> | undefined);
     const publicAuthEndpoint = isPublicAuthEndpoint(original?.url);
 
     if (error.response?.status === 401 && original && !original._retry && !publicAuthEndpoint) {

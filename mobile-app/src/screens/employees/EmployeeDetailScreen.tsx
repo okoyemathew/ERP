@@ -172,6 +172,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const [printEndDate, setPrintEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const hasProfileRef = useRef(false);
   const supplyProductsRequestId = useRef(0);
   const supplyProductsPage = useRef(1);
   const supplyProductsCursor = useRef<string | null>(null);
@@ -180,14 +181,15 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
   const salesRequestId = useRef(0);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!hasProfileRef.current) setLoading(true);
     setError(false);
     try {
       if (!employeeId && !isSelfProfile) throw new Error("Employee profile is not available");
       const response = isSelfProfile ? await employeesService.myProfile() : await employeesService.profile(employeeId);
+      hasProfileRef.current = true;
       setProfile(response);
     } catch {
-      setError(true);
+      if (!hasProfileRef.current) setError(true);
     } finally {
       setLoading(false);
     }
@@ -412,7 +414,7 @@ export function EmployeeDetailScreen({ route, navigation }: { route: any; naviga
 
       const invoiceText = buildDisbursementInvoiceText(disbursement, {}, business?.name);
       const invoiceTitle = `Disbursement ${disbursement.disbursementNumber}`;
-      await load();
+      void load();
       const confirmation = `${items.map(({ product, quantity }) => `${product.name} × ${quantity}`).join(", ")} supplied to ${targetName}.`;
       Alert.alert("Supply recorded", confirmation, [
         { text: "Not now", style: "cancel" },
