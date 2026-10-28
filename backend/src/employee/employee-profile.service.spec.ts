@@ -71,6 +71,39 @@ function createPrismaMock() {
 }
 
 describe('EmployeeService profile stock', () => {
+  it('returns one requested stock page with totals for the full matching result set', async () => {
+    const prisma: any = {
+      employee: { findFirst: jest.fn().mockResolvedValue(employee) },
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          productId,
+          productName: 'Salt',
+          sku: 'SALT-6',
+          barcode: null,
+          quantityInHand: 12,
+          quantitySold: 8,
+          quantityReturned: 0,
+          suppliedQuantity: 20,
+          unitValue: new Prisma.Decimal(50),
+          totalSoldValue: new Prisma.Decimal(640),
+          lastActivityAt: new Date('2026-09-09T10:00:00.000Z'),
+          totalProducts: 42,
+          totalSuppliedQuantity: 980,
+          stockValue: new Prisma.Decimal(12450),
+        },
+      ]),
+    };
+    const service = new EmployeeService(prisma as never, {} as never);
+    const response = await service.getProductStock(businessId, employeeId, { page: 1, limit: 30 });
+
+    expect(response).toMatchObject({
+      data: [{ productId, quantityInHand: 12 }],
+      meta: { page: 1, limit: 30, hasNextPage: false },
+      summary: { totalProducts: 42, totalSuppliedQuantity: 980, stockValue: 12450 },
+    });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
   it('does not let old sales consume newly supplied owner or employee stock', async () => {
     const prisma = createPrismaMock();
     const service = new EmployeeService(prisma as never, {} as never);

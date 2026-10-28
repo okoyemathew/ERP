@@ -53,6 +53,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
   const [stockHistory, setStockHistory] = useState<StockInHistoryRecord[]>([]);
   const [employeeProducts, setEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
   const [allEmployeeProducts, setAllEmployeeProducts] = useState<EmployeeSuppliedProduct[]>([]);
+  const [employeeStockSummary, setEmployeeStockSummary] = useState<{ totalSuppliedQuantity: number; stockValue: number } | null>(null);
   const [employeeDisbursements, setEmployeeDisbursements] = useState<ApiGoodsDisbursement[]>([]);
   const [disbursementHasMore, setDisbursementHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -81,7 +82,7 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
     try {
       if (isEmployeeView) {
         const [stockResponse, firstPage] = await Promise.all([
-          employeesService.myProductStock({ page: 1, limit: 100 }),
+          employeesService.myProductStock({ page: 1, limit: 100, search: search.trim() || undefined }),
           goodsDisbursementService.mine({ search: search.trim() || undefined, page: 1, limit: 30 })
         ]);
         if (requestId !== requestIdRef.current) return;
@@ -98,6 +99,10 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
           lastActivityAt: product.lastActivityAt,
         })) ?? [];
         setAllEmployeeProducts(products);
+        setEmployeeStockSummary(Array.isArray(stockResponse) ? null : {
+          totalSuppliedQuantity: stockResponse.summary.totalSuppliedQuantity,
+          stockValue: stockResponse.summary.stockValue,
+        });
         const normalizedSearch = search.trim().toLowerCase();
         setEmployeeProducts(
           normalizedSearch
@@ -187,15 +192,16 @@ export function SuppliedScreen({ navigation }: { navigation: any }) {
 
   const totalAdded = useMemo(() => stockHistory.reduce((sum, item) => sum + item.quantity, 0), [stockHistory]);
   const totalAddedValue = useMemo(() => stockHistory.reduce((sum, item) => sum + money(item.unitCost) * item.quantity, 0), [stockHistory]);
-  const totalSupplied = employeeProducts.reduce((sum, product) => sum + product.suppliedQuantity, 0);
-  const totalStockValue = employeeProducts.reduce((sum, product) => sum + money(product.unitValue) * product.quantityInHand, 0);
+  const totalSupplied = employeeStockSummary?.totalSuppliedQuantity ?? employeeProducts.reduce((sum, product) => sum + product.suppliedQuantity, 0);
+  const totalStockValue = employeeStockSummary?.stockValue ?? employeeProducts.reduce((sum, product) => sum + money(product.unitValue) * product.quantityInHand, 0);
   const dataIsEmpty = isEmployeeView ? employeeDisbursements.length === 0 : stockHistory.length === 0;
   const headerTitle = "Supplied Products";
 
   const loadStockForReport = async (): Promise<StockReportLine[]> => {
     if (isEmployeeView) {
-      const normalizedSearch = query.trim().toLowerCase();
-      return allEmployeeProducts.filter((product) => !normalizedSearch || [product.productName, product.sku, product.barcode].filter(Boolean).some((value) => String(value).toLowerCase().includes(normalizedSearch))).map((product) => ({
+      const stockResponse = await employeesService.myProductStock();
+      const allStock = Array.isArray(stockResponse) ? stockResponse : stockResponse.data;
+      return allStock.map((product) => ({
         name: product.productName,
         sku: product.sku ?? product.barcode,
         quantity: product.quantityInHand,

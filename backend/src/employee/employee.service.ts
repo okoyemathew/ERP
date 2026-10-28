@@ -885,6 +885,7 @@ export class EmployeeService {
       quantityInHand: number; quantitySold: number; quantityReturned: number;
       suppliedQuantity: number; unitValue: Prisma.Decimal;
       totalSoldValue: Prisma.Decimal; lastActivityAt: Date;
+      totalProducts: number; totalSuppliedQuantity: number; stockValue: Prisma.Decimal;
     }>>(Prisma.sql`
       WITH inbound AS (
         SELECT i."productId", SUM(i.quantity)::int AS supplied,
@@ -912,7 +913,7 @@ export class EmployeeService {
         WHERE r."businessId" = ${businessId}::uuid AND r."originalSellerId" = ${userId}::uuid
           AND r.status = 'APPROVED'::"ProductReturnRequestStatus"
         GROUP BY r."productId"
-      )
+      ), stock_rows AS (
       SELECT p.id AS "productId", p.name AS "productName", p.sku, p.barcode,
              GREATEST(0, COALESCE(b.supplied, 0) - COALESCE(s.sold, 0) + COALESCE(r.returned, 0))::int AS "quantityInHand",
              COALESCE(s.sold, 0)::int AS "quantitySold", COALESCE(r.returned, 0)::int AS "quantityReturned",
@@ -928,12 +929,27 @@ export class EmployeeService {
         AND (${search}::text IS NULL OR p.name ILIKE '%' || ${search} || '%'
           OR COALESCE(p.sku, '') ILIKE '%' || ${search} || '%'
           OR COALESCE(p.barcode, '') ILIKE '%' || ${search} || '%')
-      ORDER BY GREATEST(0, COALESCE(s.sold, 0) - COALESCE(r.returned, 0)) DESC, "lastActivityAt" DESC, p.id DESC
+      )
+      SELECT stock_rows.*,
+             COUNT(*) OVER()::int AS "totalProducts",
+             COALESCE(SUM(stock_rows."suppliedQuantity") OVER(), 0)::int AS "totalSuppliedQuantity",
+             COALESCE(SUM(stock_rows."unitValue" * stock_rows."quantityInHand") OVER(), 0) AS "stockValue"
+      FROM stock_rows
+      ORDER BY GREATEST(0, "quantitySold" - "quantityReturned") DESC, "lastActivityAt" DESC, "productId" DESC
       ${query ? Prisma.sql`LIMIT ${limit + 1} OFFSET ${(page - 1) * limit}` : Prisma.empty}
     `);
-    if (!query) return rows;
+    if (!query) return rows.map(({ totalProducts: _totalProducts, totalSuppliedQuantity: _totalSuppliedQuantity, stockValue: _stockValue, ...row }) => row);
     const hasNextPage = rows.length > limit;
-    return { data: rows.slice(0, limit), meta: { page, limit, hasNextPage } };
+    const summary = rows[0];
+    return {
+      data: rows.slice(0, limit),
+      meta: { page, limit, hasNextPage },
+      summary: {
+        totalProducts: summary?.totalProducts ?? 0,
+        totalSuppliedQuantity: summary?.totalSuppliedQuantity ?? 0,
+        stockValue: Number(summary?.stockValue ?? 0),
+      },
+    };
   }
 
   async getSales(

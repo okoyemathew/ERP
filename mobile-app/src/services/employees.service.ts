@@ -31,7 +31,8 @@ interface EmployeeListParams {
 }
 
 type EmployeeProductStock = NonNullable<EmployeeProfileResponse["profileActivity"]>["stock"][number];
-type EmployeeProductStockPage = { data: EmployeeProductStock[]; meta: { page: number; limit: number; hasNextPage: boolean } };
+type EmployeeProductStockSummary = { totalProducts: number; totalSuppliedQuantity: number; stockValue: number };
+type EmployeeProductStockPage = { data: EmployeeProductStock[]; meta: { page: number; limit: number; hasNextPage: boolean }; summary: EmployeeProductStockSummary };
 type EmployeeProductStockParams = { page: number; limit: number; search?: string };
 
 interface EmployeeSalesParams {
@@ -359,47 +360,34 @@ function employeeFallback(businessId: string, payload: Partial<UpsertEmployeePay
 export const employeesService = {
   myProductStock: async (params?: EmployeeProductStockParams): Promise<NonNullable<EmployeeProfileResponse["profileActivity"]>["stock"] | EmployeeProductStockPage> => {
     try {
-      if (params && params.search !== undefined) {
+      if (params) {
         const { data } = await api.get<EmployeeProductStockPage>(endpoints.employees.myProductStock, { params });
         return data;
-      }
-      if (params) {
-        const all: EmployeeProductStock[] = [];
-        let page = 1;
-        let hasNextPage = true;
-        while (hasNextPage) {
-          const { data } = await api.get<EmployeeProductStockPage>(endpoints.employees.myProductStock, { params: { page, limit: params.limit } });
-          all.push(...data.data);
-          hasNextPage = data.meta.hasNextPage;
-          page += 1;
-        }
-        return all;
       }
       const { data } = await api.get<NonNullable<EmployeeProfileResponse["profileActivity"]>["stock"]>(endpoints.employees.myProductStock);
       return data;
     } catch (error) {
       if (!isOfflineError(error)) throw error;
       const stock = (await buildOfflineSelfProfile()).profileActivity?.stock ?? [];
-      if (!params) return stock;
-      if (!params.search) return stock;
-      const search = params.search?.trim().toLowerCase();
-      const filtered = search ? stock.filter((item) => [item.productName, item.sku, item.barcode].filter(Boolean).some((value) => String(value).toLowerCase().includes(search))) : stock;
-      const start = (params.page - 1) * params.limit;
-      return { data: filtered.slice(start, start + params.limit), meta: { page: params.page, limit: params.limit, hasNextPage: filtered.length > start + params.limit } };
+        if (!params) return stock;
+        const search = params.search?.trim().toLowerCase();
+        const filtered = search ? stock.filter((item) => [item.productName, item.sku, item.barcode].filter(Boolean).some((value) => String(value).toLowerCase().includes(search))) : stock;
+        const start = (params.page - 1) * params.limit;
+        return {
+          data: filtered.slice(start, start + params.limit),
+          meta: { page: params.page, limit: params.limit, hasNextPage: filtered.length > start + params.limit },
+          summary: {
+            totalProducts: filtered.length,
+            totalSuppliedQuantity: filtered.reduce((sum, item) => sum + item.suppliedQuantity, 0),
+            stockValue: filtered.reduce((sum, item) => sum + moneyValue(item.unitValue) * item.quantityInHand, 0)
+          }
+        };
     }
   },
 
   async productStock(id: string): Promise<NonNullable<EmployeeProfileResponse["profileActivity"]>["stock"]> {
-    const all: EmployeeProductStock[] = [];
-    let page = 1;
-    let hasNextPage = true;
-    while (hasNextPage) {
-      const { data } = await api.get<EmployeeProductStockPage>(endpoints.employees.productStock(id), { params: { page, limit: 100 } });
-      all.push(...data.data);
-      hasNextPage = data.meta.hasNextPage;
-      page += 1;
-    }
-    return all;
+    const { data } = await api.get<NonNullable<EmployeeProfileResponse["profileActivity"]>["stock"]>(endpoints.employees.productStock(id));
+    return data;
   },
 
   async list(params: EmployeeListParams = {}): Promise<EmployeeListResponse> {

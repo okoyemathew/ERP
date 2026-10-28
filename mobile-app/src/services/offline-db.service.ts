@@ -128,18 +128,16 @@ export const offlineDbService = {
   },
 
   async cacheProducts(businessId: string, products: ApiProduct[]) {
+    if (products.length === 0) return;
     const db = await getDb();
     const updatedAt = new Date().toISOString();
     await queueCacheWrite(() => db.withTransactionAsync(async () => {
-      for (const product of products) {
-        await db.runAsync(
-          "INSERT OR REPLACE INTO product_cache (id, businessId, payload, updatedAt) VALUES (?, ?, ?, ?)",
-          product.id,
-          businessId,
-          JSON.stringify(product),
-          updatedAt
-        );
-      }
+      const placeholders = products.map(() => "(?, ?, ?, ?)").join(", ");
+      const values = products.flatMap((product) => [product.id, businessId, JSON.stringify(product), updatedAt]);
+      await db.runAsync(
+        `INSERT OR REPLACE INTO product_cache (id, businessId, payload, updatedAt) VALUES ${placeholders}`,
+        ...values
+      );
     }));
   },
 
